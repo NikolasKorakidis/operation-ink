@@ -60,8 +60,8 @@ export class SecuritySystem {
     this.lastLampColor = color
   }
 
-  trigger(state: MissionState, position: THREE.Vector3) {
-    if (state.phase !== 'active' || state.alarm === 'active') return false
+  trigger(state: MissionState, position: THREE.Vector3, running = state.phase === 'active') {
+    if (!running || state.alarm === 'active') return false
     state.alarm = 'active'
     state.alarmElapsed = 0
     state.silencedElapsed = 0
@@ -75,9 +75,11 @@ export class SecuritySystem {
     return true
   }
 
-  update(dt: number, state: MissionState, eye: THREE.Vector3) {
+  /** Co-op passes every player's eye, and keeps the compound running while the host is down or paused. */
+  update(dt: number, state: MissionState, eye: THREE.Vector3 | THREE.Vector3[], running = state.phase === 'active') {
     this.sync(state)
-    if (state.phase !== 'active' || dt <= 0) return
+    if (!running || dt <= 0) return
+    const eyes = Array.isArray(eye) ? eye : [eye]
     dt = Math.min(dt, 0.1)
     if (state.alarm === 'active') {
       state.alarmElapsed += dt
@@ -98,15 +100,17 @@ export class SecuritySystem {
       const spec = RESCUE_LAYOUT.cameras.find(candidate => candidate.id === camera.id)
       if (!spec) continue
       const origin = new THREE.Vector3(...spec.position)
-      const dx = eye.x - origin.x, dz = eye.z - origin.z
-      const distance = Math.hypot(dx, dz)
       const yaw = camera.pivot.rotation.y
-      const inCone = distance > 0.2 && distance <= spec.range && Math.abs(eye.y - origin.y) < 6 &&
-        (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / distance >= Math.cos(28 * Math.PI / 180)
-      const sees = inCone && this.world.visible(origin, eye, camera.pivot)
-      const elapsed = sees ? (this.dwell.get(camera.id) ?? 0) + dt : 0
+      const seen = eyes.find(eye => {
+        const dx = eye.x - origin.x, dz = eye.z - origin.z
+        const distance = Math.hypot(dx, dz)
+        const inCone = distance > 0.2 && distance <= spec.range && Math.abs(eye.y - origin.y) < 6 &&
+          (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / distance >= Math.cos(28 * Math.PI / 180)
+        return inCone && this.world.visible(origin, eye, camera.pivot)
+      })
+      const elapsed = seen ? (this.dwell.get(camera.id) ?? 0) + dt : 0
       this.dwell.set(camera.id, elapsed)
-      if (elapsed >= SECURITY_RULES.detectionDwell) this.trigger(state, eye.clone().add(new THREE.Vector3(0, -1.65, 0)))
+      if (seen && elapsed >= SECURITY_RULES.detectionDwell) this.trigger(state, seen.clone().add(new THREE.Vector3(0, -1.65, 0)), running)
     }
   }
 }

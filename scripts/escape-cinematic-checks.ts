@@ -68,7 +68,7 @@ const player = {
   pause() { this.playing = false },
 }
 Object.assign(m, {
-  teammates: { update: () => {}, count: 0 }, coop: { active: false, send: () => {}, hub: { selfId: 0 } }, 
+  teammates: { update: () => {}, count: 0 }, coop: { active: false, send: () => {}, hub: { selfId: 0 } }, doorHold: new Map(), 
   state: initialMission(), escape: new EscapeCinematic(), escapeDust: new EscapeDust(new THREE.Scene()), playerHits: new PlayerHitReactions(), camera: { perspective: camera },
   player, ready: true, deaths: 0, invincible: false, aiming: false, invalidate: noop,
   world: { rescue: { jeep, gate: new THREE.Group(), cellDoors: [] } },

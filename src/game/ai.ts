@@ -7,7 +7,7 @@ import { EnemyNavigation } from './navigation'
 import { ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as COMBAT, WEAPON_RULES, hitDamage, shotgunDamageMultiplier } from './balance'
 import { rayCapsuleDistance, reactionClipName, type HitReaction, type HitZone } from './hit-reactions'
 import { playerHitTarget, type PlayerBulletHit } from './player-hit-reactions'
-import type { AIContext, EnemySnapshot, EnemySpec, EnemyState, PlayerSense, Shot, SoundEvent, Vec3, WeaponName } from './types'
+import type { AIContext, EnemyPuppet, EnemyReaction, EnemySnapshot, EnemySpec, EnemyState, PlayerSense, Shot, SoundEvent, Vec3, WeaponName } from './types'
 
 const ignore = new THREE.Object3D()
 const direction = new THREE.Vector3()
@@ -113,6 +113,8 @@ export type Enemy = {
   scanCooldown: number
   scanYaw: number
   defensiveTimer: number
+  /** Co-op: the player this guard is engaging; undefined in solo play. */
+  targetId?: number
 }
 
 const tuple = (point: THREE.Vector3): Vec3 => [point.x, point.y, point.z]
@@ -131,6 +133,7 @@ export class EnemyDirector {
   navigationFrameMs = 0
   navigationMaxFrameMs = 0
   private lastPlayer: PlayerSense | null = null
+  private players: PlayerSense[] = []
   private reserveDestination: THREE.Vector3 | null = null
   private elapsed = 0
   readonly bulletTrails: BulletTrails
@@ -241,6 +244,21 @@ export class EnemyDirector {
     }
   }
 
+  private target(enemy: Enemy) {
+    return this.players.find(player => player.id === enemy.targetId) ?? this.players[0]
+  }
+
+  /** The nearest player this guard can actually see. The current target wins close calls, so aim does not flicker. */
+  private sight(enemy: Enemy) {
+    let best: PlayerSense | null = null, bestDistance = Infinity
+    for (const player of this.players) {
+      if (!this.sees(enemy, player)) continue
+      const distance = player.feet.distanceTo(enemy.position) - (player.id === enemy.targetId ? 3 : 0)
+      if (distance < bestDistance) { best = player; bestDistance = distance }
+    }
+    return best
+  }
+
   private sees(enemy: Enemy, player: PlayerSense) {
     if (!player.alive) return false
     const origin = this.eye(enemy)
@@ -337,17 +355,22 @@ export class EnemyDirector {
     this.context.emit({ kind: 'enemy-reload', position: enemy.position.clone(), radius: 5, weapon: enemy.spec.weapon })
   }
 
-  update(dt: number, player: PlayerSense) {
+  /** Solo play passes one player. Co-op passes every player; each guard engages the nearest one it can see. */
+  update(dt: number, sense: PlayerSense | PlayerSense[]) {
     if (!this.loaded || this.disposed || dt <= 0) return
+    const players = Array.isArray(sense) ? sense : [sense]
+    if (!players.length) return
     dt = Math.min(dt, 0.05)
     this.elapsed += dt
-    this.lastPlayer = player
+    this.players = players
+    this.lastPlayer = players[0]
     // Even a difficult radio investigation must not monopolize a rendered frame.
     this.advancePlans()
     this.bulletTrails.update(dt)
     for (const enemy of this.enemies) {
       if (enemy.state === 'reserve') continue
       if (enemy.state === 'dead') { enemy.actor.update(dt, 'dead', false); continue }
+      let player = this.target(enemy)
       if (!player.alive) enemy.canSee = false
       enemy.timer += dt
       enemy.repath -= dt
@@ -371,9 +394,10 @@ export class EnemyDirector {
       enemy.senseTimer -= dt
       if (enemy.senseTimer <= 0) {
         enemy.senseTimer = enemy.state === 'combat' ? COMBAT.senseCombat : COMBAT.senseIdle
-        enemy.canSee = this.sees(enemy, player)
+        const seen = this.sight(enemy)
+        enemy.canSee = !!seen
         // Only an actual sight query supplies a position; cached visibility never tracks a hidden player.
-        if (enemy.canSee) { enemy.lastKnown = player.feet.clone(); enemy.contactMemory = COMBAT.contactMemory }
+        if (seen) { player = seen; enemy.targetId = seen.id; enemy.lastKnown = seen.feet.clone(); enemy.contactMemory = COMBAT.contactMemory }
         else this.noticeBody(enemy)
       }
       if (enemy.canSee) {
@@ -916,6 +940,7 @@ export class EnemyDirector {
     enemy.shots++
     enemy.magazine--
     enemy.actor.shoot()
+    this.context.onFire?.(this.enemies.indexOf(enemy), end)
     // A guard's muzzle report must reach every player it can engage. The local
     // flyby is additional feedback, not a substitute for hearing the firing gun.
     const reportRange = (enemy.spec.role === 'sniper' || enemy.spec.weapon === 'sniper'
@@ -939,7 +964,7 @@ export class EnemyDirector {
     } } : undefined, impact)
     if (hitPlayer) this.context.damagePlayer(weapon.damage, enemy.position.clone(), {
       ...bodyHit, point: end.clone(), direction: direction.clone(), weapon: enemy.spec.weapon,
-    })
+    }, player.id)
     return true
   }
 
@@ -1083,9 +1108,22 @@ export class EnemyDirector {
     return clamp((distance - 0.8 + 1e-8) / 1.73, 0, 1)
   }
 
-  hit(shot: Shot, maxDistance: number) {
+  /** The guard and body part a shot strikes, without applying it. Co-op guests report this to the host. */
+  findHit(shot: Shot, maxDistance: number) {
     const { nearest, best, normalized } = this.nearestHit(shot.origin, shot.direction, Math.min(maxDistance, shot.range))
-    if (!nearest || !best) return false
+    if (!nearest || !best) return null
+    return { index: this.enemies.indexOf(nearest), zone: best.zone, point: best.point, bone: best.bone, distance: best.distance, direction: normalized }
+  }
+
+  hit(shot: Shot, maxDistance: number) {
+    const found = this.findHit(shot, maxDistance)
+    return found ? this.applyHit(shot, found) : false
+  }
+
+  applyHit(shot: Shot, found: NonNullable<ReturnType<EnemyDirector['findHit']>>) {
+    const nearest = this.enemies[found.index]
+    if (!nearest || nearest.health <= 0 || nearest.state === 'reserve' || nearest.state === 'dead') return false
+    const best = found, normalized = found.direction
     const falloff = shot.weapon === 'shotgun' ? shotgunDamageMultiplier(best.distance) : 1
     const damage = hitDamage(shot.weapon, best.zone, shot.damage) * falloff
     nearest.health = Math.max(0, nearest.health - damage)
@@ -1094,13 +1132,16 @@ export class EnemyDirector {
     nearest.senseTimer = 0
     const lethal = nearest.health === 0
     const fromBehind = normalized.x * Math.sin(nearest.yaw) + normalized.z * Math.cos(nearest.yaw) > 0.25
-    const reaction: HitReaction = { zone: best.zone, point: best.point, direction: normalized, lethal, bone: best.bone, weapon: shot.weapon, targetId: nearest.spec.id }
+    const reaction: HitReaction = { zone: best.zone, point: best.point, direction: normalized, lethal, bone: best.bone, weapon: shot.weapon, targetId: nearest.spec.id, by: shot.by }
     nearest.scanTimer = 0
     nearest.actor.root.userData.alertScan = undefined
-    nearest.actor.react(reactionClipName(reaction, fromBehind), lethal, normalized, lethal && shot.weapon === 'shotgun' ? this.shotgunTravel(nearest, normalized) : 1)
+    const clip = reactionClipName(reaction, fromBehind), travel = lethal && shot.weapon === 'shotgun' ? this.shotgunTravel(nearest, normalized) : 1
+    nearest.actor.react(clip, lethal, normalized, travel)
     if (!lethal) { nearest.hitPause = nearest.actor.reactionRemaining || 0.6; nearest.settledFor = 0; nearest.moveSpeed = 0 }
     if (lethal) nearest.deathClip = nearest.actor.deathClip
     this.context.onHit?.(reaction)
+    this.context.onReact?.({ index: found.index, clip, lethal, direction: tuple(normalized), travel, deathClip: nearest.deathClip,
+      hit: { zone: best.zone, point: tuple(best.point), bone: best.bone, weapon: shot.weapon, by: shot.by } })
     this.context.emit({ kind: 'enemy-hit', position: best.point.clone(), radius: 14, zone: best.zone })
     this.context.emit({ kind: 'enemy-pain', position: nearest.position.clone().add(eyeOffset), radius: 38, speaker: nearest.speaker, zone: best.zone })
     if (lethal) {
@@ -1133,7 +1174,9 @@ export class EnemyDirector {
       nearest.suspicion = 1
       nearest.lostFor = 0
       // A hit supplies the disturbance location; confirmation still needs the actual cone and LOS.
-      const seesShooter = this.lastPlayer ? this.sees(nearest, this.lastPlayer) : false
+      const shooter = this.players.find(player => player.id === shot.by) ?? this.lastPlayer
+      const seesShooter = shooter ? this.sees(nearest, shooter) : false
+      if (seesShooter) nearest.targetId = shooter?.id
       this.enter(nearest, seesShooter ? 'combat' : 'investigate')
       if (nearest.state === 'combat') { nearest.shotTimer = Math.max(nearest.shotTimer, COMBAT.aimDelay); nearest.tacticTimer = COMBAT.openingHold }
       else nearest.suppress = 1.4
@@ -1188,6 +1231,71 @@ export class EnemyDirector {
       if (enemy.canSee || enemy.state === 'combat') continue
       this.enter(enemy, 'search')
     }
+  }
+
+  // ---------------------------------------------------------------- co-op replication
+
+  /** What co-op guests need to draw each guard, without its decision state. */
+  puppets(): EnemyPuppet[] {
+    const r = (value: number) => Math.round(value * 1000) / 1000
+    return this.enemies.map(enemy => ({
+      p: [r(enemy.position.x), r(enemy.position.y), r(enemy.position.z)], y: r(enemy.yaw), s: enemy.state, v: r(enemy.moveSpeed),
+      a: enemy.canSee && enemy.lastKnown ? [r(enemy.lastKnown.x), r(enemy.lastKnown.y + 1.65), r(enemy.lastKnown.z)] : null,
+      o: this.posture(enemy), c: typeof enemy.actor.root.userData.alertScan === 'number' ? r(enemy.actor.root.userData.alertScan) : null, d: enemy.deathClip,
+    }))
+  }
+
+  /** Co-op guests follow the host's guards instead of thinking. Positions ease between the host's updates. */
+  follow(dt: number, puppets: EnemyPuppet[] | null) {
+    if (!this.loaded || this.disposed) return
+    this.bulletTrails.update(dt)
+    const blend = 1 - Math.exp(-12 * Math.max(0, dt))
+    this.enemies.forEach((enemy, index) => {
+      const puppet = puppets?.[index]
+      if (puppet) {
+        const target = point.fromArray(puppet.p)
+        if (enemy.position.distanceTo(target) > 4) enemy.position.copy(target)
+        else enemy.position.lerp(target, blend)
+        enemy.yaw += Math.atan2(Math.sin(puppet.y - enemy.yaw), Math.cos(puppet.y - enemy.yaw)) * blend
+        if (puppet.s === 'dead' && enemy.state !== 'dead') { enemy.deathClip = puppet.d; enemy.actor.deathClip = puppet.d }
+        enemy.state = puppet.s
+        enemy.health = puppet.s === 'dead' ? 0 : ENEMY_HEALTH
+        enemy.moveSpeed = puppet.v
+        if (puppet.o !== this.posture(enemy) && !this.transitioning(enemy) && enemy.actor.reactionRemaining <= 0) enemy.actor.setPosture?.(puppet.o)
+        enemy.actor.root.userData.alertScan = puppet.c ?? undefined
+      }
+      enemy.actor.root.visible = enemy.state !== 'reserve'
+      if (enemy.state === 'reserve') return
+      enemy.actor.root.position.copy(enemy.position)
+      enemy.actor.root.rotation.y = enemy.yaw
+      if (enemy.state === 'dead') { enemy.actor.update(dt, 'dead', false); return }
+      enemy.actor.update(dt, enemy.state, enemy.moveSpeed > 0, puppet?.a ? aimPoint.fromArray(puppet.a) : undefined, enemy.moveSpeed)
+    })
+  }
+
+  /** Co-op guests replay the host's hit reaction on the same guard, and get the blood/audio description back. */
+  replayReaction(reaction: EnemyReaction): HitReaction | null {
+    const enemy = this.enemies[reaction.index]
+    if (!enemy) return null
+    const direction = new THREE.Vector3(...reaction.direction)
+    enemy.actor.root.userData.alertScan = undefined
+    enemy.actor.react(reaction.clip, reaction.lethal, direction, reaction.travel)
+    if (reaction.lethal) {
+      enemy.state = 'dead'; enemy.health = 0; enemy.deathClip = reaction.deathClip
+      enemy.actor.update(0, 'dead', false)
+    }
+    return { zone: reaction.hit.zone, point: new THREE.Vector3(...reaction.hit.point), direction, lethal: reaction.lethal,
+      bone: reaction.hit.bone as HitReaction['bone'], weapon: reaction.hit.weapon, targetId: enemy.spec.id, by: reaction.hit.by }
+  }
+
+  /** Co-op guests replay a guard's shot: recoil, muzzle flash and tracer. Returns the muzzle for sound and near-miss checks. */
+  replayFire(index: number, end: THREE.Vector3) {
+    const enemy = this.enemies[index]
+    if (!enemy || enemy.state === 'dead' || enemy.state === 'reserve') return null
+    enemy.actor.shoot()
+    const muzzle = enemy.actor.muzzle()
+    this.bulletTrails.emit(muzzle, end, enemy.spec.weapon)
+    return muzzle
   }
 
   snapshot(): EnemySnapshot[] {

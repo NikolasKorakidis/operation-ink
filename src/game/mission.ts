@@ -85,10 +85,11 @@ export function missionObjective(state: MissionState) {
   return 'Board the jeep and escape'
 }
 
-export function advanceMission(state: MissionState, dt: number) {
-  if (state.phase !== 'active') return false
+/** `running` lets a co-op host keep the compound's clock going while its own player is down. */
+export function advanceMission(state: MissionState, dt: number, running = state.phase === 'active') {
+  if (!running) return false
   state.elapsed += Math.max(0, dt)
-  if (state.health < PLAYER_HEALTH.max && state.elapsed - state.lastDamageAt >= PLAYER_HEALTH.regenDelay)
+  if (state.phase === 'active' && state.health < PLAYER_HEALTH.max && state.elapsed - state.lastDamageAt >= PLAYER_HEALTH.regenDelay)
     state.health = Math.min(PLAYER_HEALTH.max, state.health + PLAYER_HEALTH.regenPerSecond * Math.max(0, dt))
   if (state.camerasDisabledUntil !== null && state.elapsed >= state.camerasDisabledUntil) {
     state.camerasActive = true
@@ -117,4 +118,22 @@ export function shootMission(state: MissionState, amount: number) {
   if (!damageMission(state, amount)) return false
   state.lastBulletAt = state.elapsed
   return true
+}
+
+/** Mission fields the co-op host owns. Health, death, supplies and shot count stay with each player. */
+export const SHARED_MISSION_KEYS = ['camerasActive', 'camerasDisabledUntil', 'alarm', 'alarmElapsed', 'silencedElapsed', 'alarmPosition',
+  'reservesDispatched', 'gateOpen', 'hostages', 'jeep', 'escapeProgress', 'detentionFound', 'cellsReached', 'elapsed', 'distractionUntil',
+  'kills', 'detections'] as const satisfies readonly (keyof MissionState)[]
+export type SharedMission = Pick<MissionState, typeof SHARED_MISSION_KEYS[number]>
+
+export function sharedMission(state: MissionState): SharedMission {
+  return structuredClone(Object.fromEntries(SHARED_MISSION_KEYS.map(key => [key, state[key]]))) as SharedMission
+}
+
+/** A guest adopts the host's compound. Places a guest reached first stay discovered. */
+export function applySharedMission(state: MissionState, shared: SharedMission) {
+  const found = state.detentionFound, reached = state.cellsReached
+  Object.assign(state, structuredClone(shared))
+  state.detentionFound ||= found
+  state.cellsReached ||= reached
 }

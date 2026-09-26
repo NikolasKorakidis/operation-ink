@@ -190,6 +190,29 @@ export class HostageEscort {
     })
   }
 
+  /** Following hostages crouch until the shooting has stopped for a moment. */
+  get cowering() { return this.calmFor < 1.1 }
+
+  /** Co-op guests draw hostages where the host's escort put them, easing between updates. */
+  follow(dt: number, state: EscortMissionState, cowering: boolean) {
+    const elapsed = Math.max(0, Math.min(dt, 0.1))
+    const blend = 1 - Math.exp(-12 * elapsed)
+    state.hostages.forEach((hostage, index) => {
+      const actor = this.actors[index]
+      if (!actor) return
+      actor.advanceRelease(elapsed, hostage.status === 'captive')
+      const target = new THREE.Vector3(...hostage.position), before = actor.root.position.clone()
+      if (before.distanceTo(target) > 4) actor.root.position.copy(target)
+      else actor.root.position.lerp(target, blend)
+      const step = actor.root.position.clone().sub(before).setY(0)
+      const speed = elapsed > 0 ? step.length() / elapsed : 0
+      const moving = hostage.status === 'following' && speed > 0.3
+      if (moving) actor.root.rotation.y = Math.atan2(step.x, step.z)
+      if (hostage.status === 'loaded') actor.root.rotation.set(0, Math.PI / 2, 0)
+      actor.animate(elapsed, moving, hostage.status === 'following' && cowering, hostage.status === 'loaded', hostage.status === 'captive', Math.min(speed, HOSTAGE_RUN_SPEED))
+    })
+  }
+
   dispose() {
     this.disposed = true
     for (const actor of this.actors) actor.dispose()

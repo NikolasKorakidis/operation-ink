@@ -1,40 +1,87 @@
-import type { Vec3, WeaponName } from '../game/types'
+import type { EnemyPuppet, EnemyReaction, StationKind, Vec3, WeaponItem, WeaponName } from '../game/types'
+import type { HitZone } from '../game/hit-reactions'
+import type { PlayerHitRegion } from '../game/player-hit-reactions'
+import type { SharedMission } from '../game/mission'
 
 /** Player 0 hosts; guests take the lowest free id. The id also picks the teammate colour. */
 export const MAX_PLAYERS = 4
 export const TEAM_COLORS = [0x2f9e44, 0xf08c00, 0x7048e8, 0x8d5524] as const
 export const TEAM_COLOR_NAMES = ['Green', 'Orange', 'Violet', 'Brown'] as const
 
-export type PlayerPose = { feet: Vec3; yaw: number; pitch: number; speed: number; weapon: WeaponName | null; aiming: boolean; alive: boolean }
+/** `alive` is false once dead; `active` is false while paused, so guards only engage players who are playing. */
+export type PlayerPose = { feet: Vec3; eye: Vec3; vel: Vec3; yaw: number; pitch: number; speed: number; weapon: WeaponName | null; aiming: boolean; alive: boolean; active: boolean }
+export type NetSound = { kind: string; position?: Vec3; radius?: number; text?: string; voice?: string; speaker?: number; zone?: HitZone; weapon?: WeaponName; intensity?: number }
+export type NetBulletHit = { region: PlayerHitRegion; side: -1 | 0 | 1; point: Vec3; direction: Vec3; weapon?: WeaponName }
+export type NetEnemyHit = { i: number; zone: HitZone; point: Vec3; bone?: string; distance: number; direction: Vec3; origin: Vec3; weapon: WeaponName; damage: number }
+
 export type CoopMessage =
   | { t: 'welcome'; id: number; players: number[] }
   | { t: 'join'; id: number }
   | { t: 'leave'; id: number }
   | { t: 'full' }
+  // Every player, relayed by the host to the others.
   | { t: 'pose'; id: number; pose: PlayerPose }
   | { t: 'shot'; id: number; origin: Vec3; end: Vec3; weapon: WeaponName }
+  // Guest to host: requests the host's compound applies.
+  | { t: 'hit'; id: number; hit: NetEnemyHit }
+  | { t: 'noise'; id: number; kind: string; position: Vec3; radius: number }
+  | { t: 'door'; id: number; i: number; open: boolean }
+  | { t: 'use'; id: number; kind: StationKind; station: string }
+  // Host to guests: the shared compound and what happens in it.
+  | { t: 'world'; mission: SharedMission; enemies: EnemyPuppet[]; doors: string; cower: boolean }
+  | { t: 'efire'; i: number; end: Vec3 }
+  | { t: 'ereact'; r: EnemyReaction }
+  | { t: 'sound'; e: NetSound }
+  | { t: 'drop'; item: WeaponItem }
+  | { t: 'restart' }
+  | { t: 'damage'; to: number; amount: number; source: Vec3; hit: NetBulletHit }
+  | { t: 'notice'; to: number; text: string }
 
 /** One open data channel. The host holds one per guest; a guest holds one to the host. */
 export interface Link { send(message: CoopMessage): void; close(): void }
 
 const WEAPONS = new Set<WeaponName>(['pistol', 'ak', 'smg', 'shotgun', 'sniper'])
+const ZONES = new Set<HitZone>(['head', 'torso', 'arm', 'leg'])
+const STATIONS = new Set<StationKind>(['hostage', 'cameras', 'alarm', 'gate', 'jeep', 'rally', 'distraction'])
 const vec = (value: unknown): value is Vec3 => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite)
 const finite = (...values: unknown[]) => values.every(value => typeof value === 'number' && Number.isFinite(value))
+const text = (value: unknown, max = 64): value is string => typeof value === 'string' && value.length <= max
+const index = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0 && (value as number) < 4096
 
-/** Guests may only report their own pose and shots; anything else is dropped before it reaches the game. */
+/** Only pose and shots are relayed to other guests; requests are for the host alone. */
+export const RELAYED = new Set<CoopMessage['t']>(['pose', 'shot'])
+
+/** Guests may only report their own actions; anything malformed is dropped before it reaches the game. */
 export function guestMessage(id: number, data: unknown): CoopMessage | null {
-  const message = data as { t?: unknown; id?: unknown; pose?: Partial<PlayerPose>; origin?: unknown; end?: unknown; weapon?: WeaponName } | null
+  const message = data as Record<string, any> | null
   if (!message || typeof message !== 'object' || message.id !== id) return null
-  if (message.t === 'pose') {
-    const pose = message.pose
-    if (!pose || !vec(pose.feet) || !finite(pose.yaw, pose.pitch, pose.speed) ||
-      !(pose.weapon === null || WEAPONS.has(pose.weapon!)) || typeof pose.aiming !== 'boolean' || typeof pose.alive !== 'boolean') return null
-    return { t: 'pose', id, pose: pose as PlayerPose }
-  }
-  if (message.t === 'shot') {
-    const { origin, end, weapon } = message
-    if (!vec(origin) || !vec(end) || !WEAPONS.has(weapon!)) return null
-    return { t: 'shot', id, origin, end, weapon: weapon! }
+  switch (message.t) {
+    case 'pose': {
+      const pose = message.pose as Partial<PlayerPose> | undefined
+      if (!pose || !vec(pose.feet) || !vec(pose.eye) || !vec(pose.vel) || !finite(pose.yaw, pose.pitch, pose.speed) ||
+        !(pose.weapon === null || WEAPONS.has(pose.weapon!)) || typeof pose.aiming !== 'boolean' ||
+        typeof pose.alive !== 'boolean' || typeof pose.active !== 'boolean') return null
+      return { t: 'pose', id, pose: pose as PlayerPose }
+    }
+    case 'shot':
+      if (!vec(message.origin) || !vec(message.end) || !WEAPONS.has(message.weapon)) return null
+      return { t: 'shot', id, origin: message.origin, end: message.end, weapon: message.weapon }
+    case 'hit': {
+      const hit = message.hit as Partial<NetEnemyHit> | undefined
+      if (!hit || !index(hit.i) || !ZONES.has(hit.zone!) || !vec(hit.point) || !vec(hit.direction) || !vec(hit.origin) ||
+        !finite(hit.distance, hit.damage) || hit.damage! < 0 || hit.damage! > 1000 || !WEAPONS.has(hit.weapon!) ||
+        !(hit.bone === undefined || text(hit.bone, 32))) return null
+      return { t: 'hit', id, hit: hit as NetEnemyHit }
+    }
+    case 'noise':
+      if (!text(message.kind, 32) || !vec(message.position) || !finite(message.radius) || message.radius < 0 || message.radius > 200) return null
+      return { t: 'noise', id, kind: message.kind, position: message.position, radius: message.radius }
+    case 'door':
+      if (!index(message.i) || typeof message.open !== 'boolean') return null
+      return { t: 'door', id, i: message.i, open: message.open }
+    case 'use':
+      if (!STATIONS.has(message.kind) || !text(message.station)) return null
+      return { t: 'use', id, kind: message.kind, station: message.station }
   }
   return null
 }
@@ -72,7 +119,7 @@ export class CoopHub {
     if (this.role !== 'host' || !this.links.has(id)) return
     const message = guestMessage(id, data)
     if (!message) return
-    this.broadcast(message, id)
+    if (RELAYED.has(message.t)) this.broadcast(message, id)
     this.deliver(message)
   }
 
@@ -110,6 +157,11 @@ export class CoopHub {
   send(message: CoopMessage) {
     if (this.role === 'host') this.broadcast(message)
     else if (this.role === 'guest') this.links.get(0)?.send(message)
+  }
+
+  /** Host: one guest only, such as the player a guard just shot. */
+  sendTo(id: number, message: CoopMessage) {
+    if (this.role === 'host') this.links.get(id)?.send(message)
   }
 
   reset() {

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
-import { BulletTrails } from './bullet-trails'
-import { PLAYER_BULLET_DAMAGE, fallDamage } from './balance'
+import { BulletTrails, bulletNearMiss } from './bullet-trails'
+import { PLAYER_BULLET_DAMAGE, PLAYER_HEALTH, fallDamage } from './balance'
 import type { EnvironmentCamera } from '../camera'
 import type { FirstPersonController } from '../player/controller'
 import type { ActionTarget } from '../player/actions'
@@ -15,7 +15,7 @@ import { PlayerHitReactions, type PlayerBulletHit } from './player-hit-reactions
 import { PlayerDeathSequence } from './player-death'
 import { EscapeCinematic } from './escape-cinematic'
 import { EscapeDust } from './escape-dust'
-import { advanceMission, completeEscape, damageMission, shootMission, initialMission, loadedCount, stationLabel, useStation, type MissionState } from './mission'
+import { advanceMission, applySharedMission, completeEscape, damageMission, sharedMission, shootMission, initialMission, loadedCount, stationLabel, useStation, type MissionState } from './mission'
 import { HostageEscort } from './hostages'
 import { SecuritySystem } from './security'
 import { RESCUE_LAYOUT } from './rescue-layout'
@@ -23,8 +23,8 @@ import { updateRescueJeepDoor } from './rescue-jeep'
 import { Teammates } from './teammates'
 import { CoopPanel } from './coop-panel'
 import { CoopSession } from '../net/session'
-import type { CoopMessage } from '../net/hub'
-import type { EnemySnapshot, MissionWorld, Shot, SoundEvent, Station, Vec3, WeaponSnapshot } from './types'
+import type { CoopMessage, NetSound, PlayerPose } from '../net/hub'
+import type { EnemyPuppet, EnemySnapshot, MissionWorld, PlayerSense, Shot, SoundEvent, Station, StationKind, Vec3, WeaponSnapshot } from './types'
 
 type Checkpoint = { mission: MissionState; weapons: WeaponSnapshot; enemies: EnemySnapshot[]; doors: boolean[]; position: Vec3; quaternion: [number,number,number,number]; blood?: BloodSnapshot }
 
@@ -47,6 +47,16 @@ export class MissionRuntime {
   readonly coop: CoopSession
   private coopPanel: CoopPanel
   private poseTimer = 0
+  private worldTimer = 0
+  /** Host: the latest pose of every other player. */
+  private remote = new Map<number, PlayerPose>()
+  /** Guest: the host's latest guards and hostage mood, and when they arrived. */
+  private hostEnemies: EnemyPuppet[] | null = null
+  private hostCower = false
+  private lastWorldAt = 0
+  private waitingNotice = 0
+  /** Guest: doors this player just used keep their local state until the host has heard about it. */
+  private doorHold = new Map<number, number>()
   ready = false
   readonly initialized: Promise<void>
   deaths = 0
@@ -87,14 +97,23 @@ export class MissionRuntime {
     this.escapeDust = new EscapeDust(scene)
     player.lookSensitivity = () => this.weapons.lookSensitivity
     this.ai = new EnemyDirector({ scene, world: player.world, doors: player.actions.doors, specs: world.enemies,
-      emit: event => this.emit(event, false), damagePlayer: (amount, source, hit) => this.damage(amount, source, hit),
+      emit: event => this.emit(event, false), damagePlayer: (amount, source, hit, playerId) => this.damageFromGuard(amount, source, hit, playerId),
       onSurfaceHit: (point, direction, surface, weapon) => this.impacts.emit(point, direction, surface, weapon),
-      dropWeapon: item => { this.weapons.addPickup(item); this.state.kills++ }, onHit: hit => {
-        this.impactPoint = hit.point.clone(); this.blood.emitHit(hit); this.audio.confirmHit(hit)
-      } })
+      dropWeapon: item => { this.weapons.addPickup(item); this.state.kills++; if (this.role === 'host') this.coop.send({ t: 'drop', item }) }, onHit: hit => {
+        this.impactPoint = hit.point.clone(); this.blood.emitHit(hit)
+        if (hit.by === undefined || hit.by === this.coop.hub.selfId) this.audio.confirmHit(hit)
+      },
+      onReact: reaction => { if (this.role === 'host') this.coop.send({ t: 'ereact', r: reaction }) },
+      onFire: (index, end) => { if (this.role === 'host') this.coop.send({ t: 'efire', i: index, end: end.toArray() as Vec3 }) } })
     this.hud = new MissionHUD(world, {
-      retry: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
-      restart: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
+      retry: () => { if (this.coop.active) this.respawn(); else this.restart(); void this.audio.unlock(); this.player.requestControl() },
+      restart: () => {
+        // In co-op the host restarts everyone; a guest's own restart only returns them to the insertion point.
+        if (this.role !== 'guest') this.restart()
+        else if (this.state.phase === 'complete') this.hud.notify('The host starts the next run.', 4)
+        else this.respawn()
+        void this.audio.unlock(); this.player.requestControl()
+      },
       volume: value => this.audio.setVolume(value), mute: value => this.audio.setMuted(value) })
     player.onPlayingChange = playing => {
       this.hud.setPlaying(playing)
@@ -102,7 +121,11 @@ export class MissionRuntime {
     }
     this.teammates = new Teammates(scene, event => this.audio.play(event), invalidate)
     this.coop = new CoopSession(message => this.coopMessage(message))
-    this.coop.onChange(() => { if (!this.coop.active) this.teammates.clear(); this.invalidate() })
+    this.coop.onChange(() => {
+      if (!this.coop.active) { this.teammates.clear(); this.remote.clear(); this.hostEnemies = null }
+      for (const id of this.remote.keys()) if (!this.coop.hub.players.has(id)) this.remote.delete(id)
+      this.invalidate()
+    })
     this.coopPanel = new CoopPanel(document.querySelector('.coop-slot')!, document.querySelector('#coop-status')!, this.coop)
     this.escort = new HostageEscort(scene, player.world, player.actions.doors)
     this.security = new SecuritySystem(player.world, world, this.ai, event => this.emit(event, false))
@@ -111,6 +134,11 @@ export class MissionRuntime {
     player.actions.onAction = target => {
       this.weapons.cancel(); this.aiming = false; this.interactionTime = 0.25
       if (target.kind === 'door' || target.kind === 'ladder') this.emit({ kind: target.kind, position: target.point, radius: target.kind === 'door' ? 8 : 5 }, true)
+      if (target.kind === 'door' && this.role === 'guest') {
+        const index = this.player.actions.doors.indexOf(target.object as THREE.Group)
+        this.doorHold.set(index, performance.now())
+        this.coop.send({ t: 'door', id: this.coop.hub.selfId, i: index, open: Boolean(target.object.userData.open) })
+      }
     }
     const options = { signal: this.abort.signal }
     document.querySelector('#walk-start')!.addEventListener('click', () => { void this.audio.unlock() }, options)
@@ -238,10 +266,21 @@ export class MissionRuntime {
       this.hud.notify('Wait for the exit gate to finish opening.', 3)
       return false
     }
+    // The host's compound owns shared objectives, so a guest asks for them. Supplies heal only this player.
+    if (this.role === 'guest' && station.kind !== 'supply') {
+      this.coop.send({ t: 'use', id: this.coop.hub.selfId, kind: station.kind, station: station.id })
+      this.weapons.cancel()
+      return true
+    }
     const result = useStation(this.state,station.kind,station.id)
     this.hud.notify(result.message,7)
     if (!result.changed) return false
     this.weapons.cancel()
+    this.stationUsed(station)
+    return true
+  }
+
+  private stationUsed(station: Station) {
     this.emit({ kind: station.kind === 'distraction' ? 'bell' : 'objective',
       position: station.point.clone(), radius: station.kind === 'distraction' ? 27 : 6 }, station.kind === 'distraction')
     if (station.kind === 'rally') this.escort.rally(this.state)
@@ -250,7 +289,6 @@ export class MissionRuntime {
     }
     if (this.state.phase === 'complete') { this.player.pause(); this.cancelInput() }
     this.syncWorld(); this.invalidate()
-    return true
   }
 
   private gateOpening() {
@@ -258,6 +296,8 @@ export class MissionRuntime {
   }
 
   private emit(event: SoundEvent, audible: boolean) {
+    // The host shares its compound's sounds (guards, alarms, impacts). Each player hears their own near misses.
+    if (!audible && this.role === 'host' && event.kind !== 'enemy-bullet-whiz') this.coop.send({ t: 'sound', e: netSound(event) })
     if (this.death.active) return
     if ((event.kind.startsWith('shot-') || event.kind.startsWith('enemy-shot')) && event.position) {
       if (this.state.hostages.some(h => h.status === 'following' && event.position!.distanceTo(new THREE.Vector3(...h.position)) < 15)) this.gunfireUntil = this.state.elapsed + 1.1
@@ -266,7 +306,10 @@ export class MissionRuntime {
     const distance = event.position ? eye.distanceTo(event.position) : 0
     const inRange = !event.position || distance <= (event.radius ?? 38)
     if (inRange) this.audio.play(event)
-    if (audible && event.radius && event.position) this.ai.hear(event)
+    if (audible && event.radius && event.position) {
+      if (this.role === 'guest') this.coop.send({ t: 'noise', id: this.coop.hub.selfId, kind: event.kind, position: event.position.toArray() as Vec3, radius: event.radius })
+      else this.ai.hear(event)
+    }
     if (event.text && inRange && !event.kind.startsWith('shot-') && !event.kind.startsWith('enemy-shot')) {
       const text = event.kind === 'callout' && event.position ? `${this.soundDirection(event.position)} · “${event.text}”` : event.text
       if (text !== this.lastCaption || this.state.elapsed-this.lastCaptionAt>3) {
@@ -282,12 +325,25 @@ export class MissionRuntime {
 
   private shot(shot: Shot) {
     if (!this.isActive()) return
+    if (this.coop.active) shot.by = this.coop.hub.selfId
     if (!shot.pelletIndex) this.state.shots++
     const surface = this.player.world.raySurface(shot.origin, shot.direction, shot.range)
     const distance = surface?.distance ?? shot.range
-    this.ai.nearMiss(shot,distance)
     this.impactPoint = null
-    const hit=this.ai.hit(shot,distance)
+    let hit = false
+    if (this.role === 'guest') {
+      // A guest aims at the guards it sees; the host applies the damage and replies with the reaction.
+      const found = this.ai.findHit(shot, distance)
+      if (found) {
+        hit = true
+        this.impactPoint = found.point.clone()
+        this.coop.send({ t: 'hit', id: this.coop.hub.selfId, hit: { i: found.index, zone: found.zone, point: found.point.toArray() as Vec3, bone: found.bone,
+          distance: found.distance, direction: found.direction.toArray() as Vec3, origin: shot.origin.toArray() as Vec3, weapon: shot.weapon ?? 'ak', damage: shot.damage } })
+      }
+    } else {
+      this.ai.nearMiss(shot,distance)
+      hit=this.ai.hit(shot,distance)
+    }
     if (hit) this.hitFlash = 0.15
     const end=this.impactPoint ?? shot.origin.clone().addScaledVector(shot.direction,distance)
     const impact = !hit && surface ? () => {
@@ -354,6 +410,8 @@ export class MissionRuntime {
     if(!this.initial) return
     this.checkpoint=structuredClone(this.initial); this.deaths=0; this.restore(this.initial)
     this.hud.notify('Mission restarted.',3)
+    this.doorHold.clear()
+    if (this.role === 'host') { this.coop.send({ t: 'restart' }); this.sendWorld() }
   }
 
   private syncWorld(resetEscort = false) {
@@ -380,6 +438,11 @@ export class MissionRuntime {
   }
 
   private beginEscape() {
+    // A co-op extraction takes the whole team, including a player who is down.
+    if (this.coop.active && this.state.phase === 'dead') {
+      this.death.reset(); this.weapons.resetDeath(); this.hud.clearDeath()
+      this.state.phase = 'active'; this.state.health = PLAYER_HEALTH.max
+    }
     this.cancelInput(); this.playerHits.clear()
     this.player.actions.reset(); this.player.movementLocked = true
     this.player.body.velocity.set(0, 0, 0)
@@ -392,6 +455,7 @@ export class MissionRuntime {
     this.player.pause()
     this.hud.setEscape(this.escape)
     this.audio.setAlarm(false)
+    if (this.role === 'host') this.sendWorld()
   }
 
   private updateEscape(dt: number, elapsed: number) {
@@ -420,7 +484,8 @@ export class MissionRuntime {
     if (playing) {
       advanceMission(this.state, step)
       this.player.world.refresh()
-      this.ai.update(step, { feet: this.player.body.position, eye: this.camera.perspective.position,
+      if (this.role === 'guest') this.ai.follow(step, null)
+      else this.ai.update(step, { feet: this.player.body.position, eye: this.camera.perspective.position,
         velocity: this.player.body.velocity, alive: false, radioEnabled: false })
       this.escort.update(step, this.state, this.player.body.position, false)
       if (jeep) updateRescueJeepDoor(jeep, this.state.hostages[0].position, true, step)
@@ -469,8 +534,9 @@ export class MissionRuntime {
     const deathPlaying = deathVisible && !this.death.menuVisible && !document.hidden
     if(active!==this.active) { this.cancelInput(); this.active=active }
     this.audio.setActive(active || deathPlaying)
+    const role = this.role
     if(active) {
-      advanceMission(this.state,dt)
+      if (role === 'solo') advanceMission(this.state,dt)
       const body=this.player.body
       const bounds=this.world.bounds
       if(body.position.y < -12 || body.position.x<bounds.minX || body.position.x>bounds.maxX || body.position.z<bounds.minZ || body.position.z>bounds.maxZ) {
@@ -479,17 +545,17 @@ export class MissionRuntime {
       } else if (!this.player.actions.traversing) this.damage(fallDamage(landingSpeed))
       if (Math.abs(body.position.x - 117) < 10 && body.position.z > -31 && body.position.z < -2) this.state.detentionFound = true
       if (this.state.detentionFound && body.position.y < -2.8) this.state.cellsReached = true
-      this.security.update(dt, this.state, this.camera.perspective.position)
-      this.ai.update(dt,{feet:body.position,eye:this.camera.perspective.position,velocity:body.velocity,alive:this.state.phase==='active',radioEnabled:true,
-        yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y})
-      const danger = this.gunfireUntil > this.state.elapsed
-      this.escort.update(dt, this.state, body.position, danger)
-      if (this.world.rescue) {
-        const hostage = this.state.hostages[0]
-        updateRescueJeepDoor(this.world.rescue.jeep, hostage.position, hostage.status === 'loaded', dt)
+      // In co-op the host steps the compound for everyone below, and guests mirror it.
+      if (role === 'solo') {
+        this.security.update(dt, this.state, this.camera.perspective.position)
+        this.ai.update(dt,{feet:body.position,eye:this.camera.perspective.position,velocity:body.velocity,alive:this.state.phase==='active',radioEnabled:true,
+          yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y})
+        const danger = this.gunfireUntil > this.state.elapsed
+        this.escort.update(dt, this.state, body.position, danger)
+        this.updateJeepDoor(dt)
+        this.blood.update(dt)
+        this.impacts.update(dt)
       }
-      this.blood.update(dt)
-      this.impacts.update(dt)
       const speed=Math.hypot(body.velocity.x,body.velocity.z)
       if(speed>0.5 && body.grounded || this.player.actions.climbing) {
         this.stepTime+=dt
@@ -499,7 +565,7 @@ export class MissionRuntime {
       } else this.stepTime=0
       this.safePosition.copy(body.position); this.safeQuaternion.copy(this.camera.perspective.quaternion)
       this.interactionTime=Math.max(0,this.interactionTime-dt)
-    } else if (deathPlaying) {
+    } else if (deathPlaying && role === 'solo') {
       // Losing player control does not pause the world. Finish blood flight,
       // corpse animations and NPC movement until the actual menu opens.
       this.player.world.refresh()
@@ -509,11 +575,10 @@ export class MissionRuntime {
       this.escort.update(dt, this.state, this.player.body.position, true)
       this.blood.update(dt); this.impacts.update(dt)
       this.security.sync(this.state, this.state.elapsed + this.death.elapsed)
-      if (this.world.rescue) {
-        const hostage = this.state.hostages[0]
-        updateRescueJeepDoor(this.world.rescue.jeep, hostage.position, hostage.status === 'loaded', dt)
-      }
+      this.updateJeepDoor(dt)
     }
+    if (role === 'host') this.hostStep(dt)
+    else if (role === 'guest') this.guestStep(dt)
     const reactionActive = this.isActive() && this.state.jeep !== 'escaping'
     const hitPose = this.playerHits.update(reactionActive ? dt : 0,
       new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y, this.hud.reducedMotion)
@@ -548,10 +613,179 @@ export class MissionRuntime {
     return active || this.death.running || coop
   }
 
+  /** 'solo' until a co-op room is open; then the host runs the compound and guests mirror it. */
+  get role(): 'solo' | 'host' | 'guest' { return this.coop?.active ? this.coop.hub.role : 'solo' }
+
+  private updateJeepDoor(dt: number) {
+    if (!this.world.rescue) return
+    const hostage = this.state.hostages[0]
+    updateRescueJeepDoor(this.world.rescue.jeep, hostage.position, hostage.status === 'loaded', dt)
+  }
+
   private coopMessage(message: CoopMessage) {
-    if (message.t === 'pose') this.teammates.pose(message.id, message.pose)
-    else if (message.t === 'shot') this.teammates.shot(message.id, message.origin, message.end, message.weapon)
-    else if (message.t === 'leave') this.teammates.remove(message.id)
+    const role = this.role, self = this.coop.hub.selfId
+    switch (message.t) {
+      case 'pose': this.teammates.pose(message.id, message.pose); this.remote.set(message.id, message.pose); break
+      case 'shot':
+        this.teammates.shot(message.id, message.origin, message.end, message.weapon)
+        if (role === 'host') this.guestShot(new THREE.Vector3(...message.origin), new THREE.Vector3(...message.end), message.weapon)
+        break
+      case 'leave': this.teammates.remove(message.id); this.remote.delete(message.id); break
+      case 'hit': if (role === 'host') this.guestHit(message.id, message.hit); break
+      case 'noise': if (role === 'host') this.ai.hear({ kind: message.kind, position: new THREE.Vector3(...message.position), radius: message.radius }); break
+      case 'door': {
+        const door = this.player.actions.doors[message.i]
+        if (role === 'host' && door && !door.userData.missionLocked) setDoorOpen(door, message.open)
+        break
+      }
+      case 'use': if (role === 'host') this.guestUse(message.id, message.kind, message.station); break
+      case 'world': if (role === 'guest') this.applyWorld(message); break
+      case 'efire': if (role === 'guest') this.guestFire(message.i, new THREE.Vector3(...message.end)); break
+      case 'ereact': {
+        const reaction = role === 'guest' ? this.ai.replayReaction(message.r) : null
+        if (reaction) { this.blood.emitHit(reaction); if (reaction.by === self) this.audio.confirmHit(reaction) }
+        break
+      }
+      case 'sound': if (role === 'guest') this.emit(soundEvent(message.e), false); break
+      case 'drop': if (role === 'guest') this.weapons.addPickup(message.item); break
+      case 'restart': if (role === 'guest') this.restart(); break
+      case 'damage':
+        if (role === 'guest' && message.to === self) this.damage(message.amount, new THREE.Vector3(...message.source), { region: message.hit.region, side: message.hit.side,
+          point: new THREE.Vector3(...message.hit.point), direction: new THREE.Vector3(...message.hit.direction), weapon: message.hit.weapon })
+        break
+      case 'notice': if (message.to === self) this.hud.notify(message.text, 7); break
+    }
+    this.invalidate()
+  }
+
+  /** A guard's round reaches this player, or is passed to the guest it was fired at. */
+  private damageFromGuard(amount: number, source: THREE.Vector3, hit?: PlayerBulletHit, playerId?: number) {
+    if (playerId === undefined || this.role !== 'host' || playerId === this.coop.hub.selfId) return this.damage(amount, source, hit)
+    if (hit) this.coop.hub.sendTo(playerId, { t: 'damage', to: playerId, amount, source: source.toArray() as Vec3, hit: { region: hit.region, side: hit.side,
+      point: hit.point.toArray() as Vec3, direction: hit.direction.toArray() as Vec3, weapon: hit.weapon } })
+  }
+
+  /** Every player the host's guards and cameras can notice. Paused or fallen players are left alone. */
+  private coopPlayers(): PlayerSense[] {
+    const local: PlayerSense = { id: this.coop.hub.selfId, feet: this.player.body.position, eye: this.camera.perspective.position, velocity: this.player.body.velocity,
+      alive: this.isActive(), radioEnabled: true, yaw: new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion, 'YXZ').y }
+    return [local, ...[...this.remote].map(([id, pose]) => ({ id, feet: new THREE.Vector3(...pose.feet), eye: new THREE.Vector3(...pose.eye),
+      velocity: new THREE.Vector3(...pose.vel), alive: pose.alive && pose.active, radioEnabled: true, yaw: pose.yaw }))]
+  }
+
+  /** Hostages follow whichever player is closest to them. */
+  private escortLeader(players: PlayerSense[]) {
+    const hostage = this.state.hostages.find(candidate => candidate.status === 'following') ?? this.state.hostages[0]
+    const position = new THREE.Vector3(...hostage.position)
+    let leader = this.player.body.position, distance = Infinity
+    for (const player of players) {
+      const candidate = player.feet.distanceTo(position)
+      if (player.alive && candidate < distance) { leader = player.feet; distance = candidate }
+    }
+    return leader
+  }
+
+  /** Host: run the shared compound for every player, even while this player is paused or down. */
+  private hostStep(dt: number) {
+    if (!this.ready || !this.player.enabled || this.player.immersive || this.state.phase === 'complete' || dt <= 0) return
+    advanceMission(this.state, dt, true)
+    const players = this.coopPlayers()
+    if (!this.isActive()) this.player.world.refresh()
+    this.security.update(dt, this.state, players.filter(player => player.alive).map(player => player.eye), true)
+    this.ai.update(dt, players)
+    this.escort.update(dt, this.state, this.escortLeader(players), this.gunfireUntil > this.state.elapsed)
+    this.updateJeepDoor(dt)
+    this.blood.update(dt); this.impacts.update(dt)
+    this.worldTimer -= dt
+    if (this.worldTimer <= 0) this.sendWorld()
+  }
+
+  private sendWorld() {
+    this.worldTimer = 0.1
+    this.coop.send({ t: 'world', mission: sharedMission(this.state), enemies: this.ai.puppets(),
+      doors: this.player.actions.doors.map(door => door.userData.open ? '1' : '0').join(''), cower: this.escort.cowering })
+  }
+
+  /** Guest: draw the host's compound. Guards and hostages ease between the host's updates. */
+  private guestStep(dt: number) {
+    if (!this.ready) return
+    if (this.state.phase === 'active') advanceMission(this.state, dt)
+    this.ai.follow(dt, this.hostEnemies)
+    this.escort.follow(dt, this.state, this.hostCower)
+    this.updateJeepDoor(dt)
+    this.blood.update(dt); this.impacts.update(dt)
+    this.security.sync(this.state)
+    const now = performance.now()
+    if (this.lastWorldAt && now - this.lastWorldAt > 3000 && now - this.waitingNotice > 6000) {
+      this.waitingNotice = now
+      this.hud.notify('Waiting for the host. Their game tab may be hidden.', 4)
+    }
+  }
+
+  /** Guest: adopt the host's compound. Doors this player just used keep their state briefly. */
+  private applyWorld(message: Extract<CoopMessage, { t: 'world' }>) {
+    if (this.escape.active) return
+    const shape = () => JSON.stringify([this.state.gateOpen, this.state.camerasActive, this.state.alarm, this.state.hostages.map(hostage => hostage.status)])
+    const before = shape(), wasEscaping = this.state.jeep === 'escaping'
+    applySharedMission(this.state, message.mission)
+    this.hostEnemies = message.enemies; this.hostCower = message.cower
+    const now = this.lastWorldAt = performance.now()
+    this.player.actions.doors.forEach((door, index) => {
+      const open = message.doors[index] === '1'
+      if (Boolean(door.userData.open) !== open && now - (this.doorHold.get(index) ?? -Infinity) > 1500) setDoorOpen(door, open)
+    })
+    if (shape() !== before) this.syncWorld()
+    if (!wasEscaping && this.state.jeep === 'escaping') this.beginEscape()
+  }
+
+  /** Host: a guest's round passes guards (they react to it) and may frighten a nearby hostage. */
+  private guestShot(origin: THREE.Vector3, end: THREE.Vector3, weapon: Shot['weapon']) {
+    const distance = origin.distanceTo(end)
+    if (distance > 0.01) this.ai.nearMiss({ origin, direction: end.clone().sub(origin).normalize(), range: distance, damage: 0, weapon }, distance)
+    if (this.state.hostages.some(hostage => hostage.status === 'following' && origin.distanceTo(new THREE.Vector3(...hostage.position)) < 15)) this.gunfireUntil = this.state.elapsed + 1.1
+  }
+
+  /** Host: apply a hit a guest saw on its own screen. */
+  private guestHit(id: number, hit: Extract<CoopMessage, { t: 'hit' }>['hit']) {
+    const direction = new THREE.Vector3(...hit.direction).normalize()
+    this.ai.applyHit({ origin: new THREE.Vector3(...hit.origin), direction, range: hit.distance, damage: hit.damage, weapon: hit.weapon, by: id },
+      { index: hit.i, zone: hit.zone, point: new THREE.Vector3(...hit.point), bone: hit.bone as never, distance: hit.distance, direction })
+  }
+
+  /** Host: a guest used a shared objective. It works even while the host's own player is down. */
+  private guestUse(id: number, kind: StationKind, stationId: string) {
+    const station = this.world.stations.find(candidate => candidate.kind === kind && candidate.id === stationId)
+    if (!station || kind === 'supply') return
+    if (kind === 'jeep' && this.gateOpening()) { this.coop.hub.sendTo(id, { t: 'notice', to: id, text: 'Wait for the exit gate to finish opening.' }); return }
+    const phase = this.state.phase
+    if (phase === 'dead') this.state.phase = 'active'
+    const result = useStation(this.state, kind, stationId)
+    if (phase === 'dead') this.state.phase = phase
+    if (result.message) this.coop.hub.sendTo(id, { t: 'notice', to: id, text: result.message })
+    if (result.changed) this.stationUsed(station)
+  }
+
+  /** Guest: replay a guard's shot, with a near-miss crack when it passes close to this player. */
+  private guestFire(index: number, end: THREE.Vector3) {
+    const muzzle = this.ai.replayFire(index, end)
+    if (!muzzle || !this.isActive()) return
+    const eye = this.camera.perspective.position
+    if (end.distanceTo(eye) < 1.8) return
+    const pass = bulletNearMiss(muzzle, end, eye)
+    if (pass && this.player.world.visible(pass.point, eye, this.camera.perspective)) this.emit({ kind: 'enemy-bullet-whiz', position: pass.point, source: muzzle, intensity: pass.intensity, radius: 5 }, false)
+  }
+
+  /** Co-op: a fallen player returns to the insertion point while the shared compound carries on. */
+  private respawn() {
+    if (this.escape.active || this.state.phase === 'complete') return
+    this.death.reset(); this.weapons.resetDeath(); this.playerHits.clear()
+    this.player.pause(); this.cancelInput(); this.audio.reset()
+    this.state.phase = 'active'; this.state.health = PLAYER_HEALTH.max; this.state.lastBulletAt = null
+    this.player.movementLocked = false
+    this.placeAtInsertion()
+    this.hud.reset(); this.syncWorld()
+    this.hud.notify('Back at the insertion point. Your team is still out there.', 4)
+    this.invalidate()
   }
 
   /** Draw teammates, and share this player's pose about 15 times a second. */
@@ -565,7 +799,8 @@ export class MissionRuntime {
       this.coop.send({ t: 'pose', id: this.coop.hub.selfId, pose: {
         feet: body.position.toArray() as Vec3, yaw: Math.atan2(direction.x, direction.z), pitch: Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)),
         speed: Math.hypot(body.velocity.x, body.velocity.z), weapon: this.weapons.current?.name ?? null,
-        aiming: this.aiming, alive: this.state.phase !== 'dead' } })
+        aiming: this.aiming, alive: this.state.phase !== 'dead', active: this.isActive(),
+        eye: this.camera.perspective.position.toArray() as Vec3, vel: body.velocity.toArray() as Vec3 } })
     }
     return true
   }
@@ -573,3 +808,7 @@ export class MissionRuntime {
   finishFrame() { this.playerHits.removeCamera() }
   dispose() { this.coopPanel.dispose();this.coop.dispose();this.teammates.dispose();this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
 }
+
+const netSound = (event: SoundEvent): NetSound => ({ kind: event.kind, position: event.position?.toArray() as Vec3 | undefined, radius: event.radius, text: event.text,
+  voice: event.voice, speaker: event.speaker, zone: event.zone, weapon: event.weapon, intensity: event.intensity })
+const soundEvent = (sound: NetSound): SoundEvent => ({ ...sound, position: sound.position ? new THREE.Vector3(...sound.position) : undefined })

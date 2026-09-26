@@ -6,7 +6,7 @@ import type { Vec3, WeaponName } from './types'
 
 export type HitZone = 'head' | 'torso' | 'arm' | 'leg'
 export type ActorHit = { distance: number; point: THREE.Vector3; zone: HitZone; bone: BoneName }
-export type HitReaction = { zone: HitZone; point: THREE.Vector3; direction: THREE.Vector3; lethal: boolean; bone?: BoneName; weapon?: WeaponName; targetId?: string }
+export type HitReaction = { zone: HitZone; point: THREE.Vector3; direction: THREE.Vector3; lethal: boolean; bone?: BoneName; weapon?: WeaponName; targetId?: string; by?: number }
 export type ActorReactionSnapshot = { clip: string; elapsed: number; zone: HitZone; lethal: boolean }
 export type HitVolume = { a: THREE.Vector3; b: THREE.Vector3; radius: number; zone: HitZone; bone: BoneName }
 

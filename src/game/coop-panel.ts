@@ -36,7 +36,7 @@ export class CoopPanel {
         <button class="menu-quiet" data-coop-leave>Leave room</button>
       </div>
       <p class="coop-message" role="status"></p>
-      <p class="coop-note">Early co-op: you see each other move and shoot, but each player still fights their own guards.</p>`
+      <p class="coop-note">The host's game runs the guards, hostage and alarms for everyone. The host should keep the game tab open and in front.</p>`
     const $ = <T extends HTMLElement>(selector: string) => this.root.querySelector<T>(selector)!
     const options = { signal: this.abort.signal }
     $('[data-coop-host]').addEventListener('click', () => void session.host(), options)
