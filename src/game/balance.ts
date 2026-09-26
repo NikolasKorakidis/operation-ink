@@ -12,6 +12,11 @@ export function fallDamage(landingSpeed: number) {
   return Math.min(100, (landingSpeed * landingSpeed - 100) * 0.3)
 }
 
+/** Call of Duty-style player health: every enemy bullet removes a quarter, so the fourth hit is lethal.
+ * After a short pause without damage, health refills to full. Landings keep energy-based damage. */
+export const PLAYER_HEALTH = { max: 100, bulletHits: 4, regenDelay: 5, regenPerSecond: 40 } as const
+export const PLAYER_BULLET_DAMAGE = PLAYER_HEALTH.max / PLAYER_HEALTH.bulletHits
+
 // No armor or damage immunity: every confirmed hit applies this damage immediately.
 export const ENEMY_HEALTH = 100
 export const HIT_MULTIPLIERS: Record<HitZone, number> = { head: 2.2, torso: 1, arm: 0.6, leg: 0.7 }

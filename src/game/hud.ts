@@ -20,7 +20,6 @@ export class MissionHUD {
   private root = document.createElement('div')
   private abort = new AbortController()
   private health: HTMLElement
-  private healthFill: SVGRectElement
   private scope = document.createElement('div')
   private scopeLabel: HTMLSpanElement
   private ammo: HTMLElement
@@ -57,15 +56,8 @@ export class MissionHUD {
     this.mapDot = document.querySelector('#field-player')!
     this.root.id = 'mission-hud'
     this.root.innerHTML = `
+      <div class="mission-wounds" id="mission-health" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"></div>
       <div id="mission-caption" role="status"></div>
-      <div class="mission-vitals" id="mission-health" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
-        <svg viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
-          <defs><path id="hud-heart" d="M32 56C27 52 7 38 7 23C7 8 24 3 32 17C41 3 57 8 57 23C57 38 37 53 32 56Z"/><clipPath id="hud-heart-clip"><use href="#hud-heart"/></clipPath></defs>
-          <use href="#hud-heart" fill="var(--paper)"/>
-          <rect class="health-fill" x="7" y="8" width="50" height="48" fill="currentColor" clip-path="url(#hud-heart-clip)"/>
-          <use href="#hud-heart" fill="none" stroke="currentColor" stroke-width="2"/>
-        </svg>
-      </div>
       <div class="mission-weapon" id="mission-ammo" role="meter" aria-label="Magazine" aria-valuemin="0" aria-valuemax="30" aria-valuenow="30">
         <span class="magazine-count" aria-hidden="true">4 ×</span>
         <svg class="magazine-icon" viewBox="0 0 64 76" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
@@ -101,7 +93,6 @@ export class MissionHUD {
     this.root.append(this.threat)
     this.clearThreat()
     this.health = $('#mission-health')
-    this.healthFill = this.health.querySelector('.health-fill')!
     this.scope.className = 'mission-scope'
     this.scope.hidden = true
     this.scope.setAttribute('aria-hidden', 'true')
@@ -213,8 +204,9 @@ export class MissionHUD {
     const health = Math.max(0, Math.min(100, state.health))
     this.health.setAttribute('aria-valuenow', String(Math.ceil(health)))
     this.health.setAttribute('aria-valuetext', `${Math.ceil(health)} of 100`)
-    this.healthFill.setAttribute('y', String(56 - 48 * health / 100))
-    this.healthFill.setAttribute('height', String(48 * health / 100))
+    // No health meter: the view darkens with each wound and clears as health refills.
+    const wound = (1 - health / 100).toFixed(3)
+    if (this.health.style.getPropertyValue('--wound') !== wound) this.health.style.setProperty('--wound', wound)
     this.ammo.hidden = !data.weapon
     this.reloadIcon.toggleAttribute('hidden', !data.reloading)
     if (data.weapon) {

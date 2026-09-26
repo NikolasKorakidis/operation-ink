@@ -68,9 +68,11 @@ body[data-mission="true"] #vr-panel .walk-eyebrow { display: none; }
 body[data-mission="true"] #vr-enter { margin-top: 24px; text-align: left; }
 body[data-mission="true"] #vr-panel p { margin-top: 16px; font-size: 13px; }
 #mission-hud { position: fixed; inset: 0; z-index: 2; pointer-events: none; font-size: 12px; color: var(--ink-deep); }
-.mission-vitals { position: absolute; left: 28px; bottom: 26px; width: 56px; height: 56px; }
-.mission-vitals svg, .magazine-icon { display: block; width: 100%; height: 100%; overflow: visible; }
-.mission-vitals, .mission-weapon { color: var(--ink); filter: drop-shadow(0 0 2px var(--paper)); }
+/* Wounds close the view in from the edges and dim it; at three hits only the centre stays readable. */
+.mission-wounds { position: absolute; inset: 0; --wound: 0; opacity: min(1, calc(var(--wound) * 1.4));
+  background: radial-gradient(ellipse at center, transparent calc(62% - 42% * var(--wound)), #000 118%), rgb(0 0 0 / calc(var(--wound) * 0.4)); }
+.magazine-icon { display: block; width: 100%; height: 100%; overflow: visible; }
+.mission-weapon { color: var(--ink); filter: drop-shadow(0 0 2px var(--paper)); }
 .mission-scope { position: fixed; inset: 0; z-index: 1; pointer-events: none; display: grid; place-items: center; overflow: hidden; }
 .mission-scope[hidden] { display: none; }
 .scope-lens { width: min(76vw,76vh); height: min(76vw,76vh); border: 3px solid var(--ink-deep); border-radius: 50%; box-shadow: 0 0 0 100vmax #000000f0, inset 0 0 28px #00000055; position: relative; overflow: hidden; }
@@ -79,7 +81,7 @@ body[data-mission="true"] #vr-panel p { margin-top: 16px; font-size: 13px; }
 .scope-lens span { position: absolute; bottom: 13%; left: 54%; font: 11px monospace; color: var(--ink-deep); }
 .scope-lens small { position: absolute; bottom: 8%; left: 50%; transform: translateX(-50%); font: 11px var(--notes); color: var(--ink-deep); white-space: nowrap; }
 body.mission-scoped .crosshair { visibility: hidden; }
-body.mission-scoped :is(.mission-vitals, .mission-weapon) { color: #fff; --paper: #000; }
+body.mission-scoped .mission-weapon { color: #fff; --paper: #000; }
 .mission-weapon { position: absolute; right: 28px; bottom: 26px; width: 54px; height: 64px; }
 .magazine-count { position: absolute; right: 100%; top: 50%; transform: translateY(-50%); white-space: nowrap; font: 500 23px/1 var(--hand); font-variant-numeric: tabular-nums; }
 .magazine-reload { position: absolute; right: 100%; top: -10px; width: 19px; height: 19px; margin-right: 3px; }
@@ -104,7 +106,7 @@ body.mission-scoped :is(.mission-vitals, .mission-weapon) { color: #fff; --paper
 .mission-threat span { position: absolute; left: 50%; top: 23%; transform: translateX(-50%); padding: 5px 10px; border-top: 2px solid var(--ink); background: #ffffffde; color: var(--ink); font: 600 10px/1.2 var(--font-mono, monospace); letter-spacing: 0.12em; text-transform: uppercase; }
 body[data-reduced-motion="true"] #action-marker,body[data-reduced-motion="true"] #action-prompt kbd { animation: none; }
 @media(max-width:800px) {
-  .mission-vitals,.mission-weapon { bottom: 20px; }.mission-vitals { left: 18px; }.mission-weapon { right: 18px; }
+  .mission-weapon { bottom: 20px; right: 18px; }
 }
 @media(max-width:540px) {
   body[data-mission="true"][data-mode="walk"] #walk-pause { padding: 18px 14px; }

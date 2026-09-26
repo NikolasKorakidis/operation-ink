@@ -1,5 +1,6 @@
 import type { StationKind, Vec3 } from './types'
 import { RESCUE_LAYOUT } from './rescue-layout'
+import { PLAYER_HEALTH } from './balance'
 
 export const CAMERA_SHUTDOWN_SECONDS = 60
 export const SIGNALS_COMPUTER_ID = 'signals-office-computer'
@@ -11,7 +12,7 @@ export type MissionState = {
   silencedElapsed: number; alarmPosition: Vec3 | null; reservesDispatched: number
   gateOpen: boolean; hostages: HostageState[]; jeep: 'waiting' | 'boarding' | 'escaping' | 'escaped'; escapeProgress: number
   detentionFound: boolean; cellsReached: boolean
-  health: number; elapsed: number; supplies: string[]; distractionUntil: number
+  health: number; lastDamageAt: number; elapsed: number; supplies: string[]; distractionUntil: number
   shots: number; kills: number; detections: number
 }
 export const initialMission = (): MissionState => ({
@@ -19,7 +20,7 @@ export const initialMission = (): MissionState => ({
   alarmPosition: null, reservesDispatched: 0, gateOpen: false,
   hostages: RESCUE_LAYOUT.hostageSpawns.map((position, index) => ({ id: `hostage-${index + 1}`, status: 'captive', position: [...position], routeIndex: index < 2 ? 1 : 0 })),
   jeep: 'waiting', escapeProgress: 0, detentionFound: false, cellsReached: false,
-  health: 100, elapsed: 0, supplies: [], distractionUntil: 0, shots: 0, kills: 0, detections: 0,
+  health: 100, lastDamageAt: 0, elapsed: 0, supplies: [], distractionUntil: 0, shots: 0, kills: 0, detections: 0,
 })
 export const loadedCount = (state: MissionState) => state.hostages.filter(h => h.status === 'loaded').length
 export const releasedCount = (state: MissionState) => state.hostages.filter(h => h.status !== 'captive').length
@@ -87,6 +88,8 @@ export function missionObjective(state: MissionState) {
 export function advanceMission(state: MissionState, dt: number) {
   if (state.phase !== 'active') return false
   state.elapsed += Math.max(0, dt)
+  if (state.health < PLAYER_HEALTH.max && state.elapsed - state.lastDamageAt >= PLAYER_HEALTH.regenDelay)
+    state.health = Math.min(PLAYER_HEALTH.max, state.health + PLAYER_HEALTH.regenPerSecond * Math.max(0, dt))
   if (state.camerasDisabledUntil !== null && state.elapsed >= state.camerasDisabledUntil) {
     state.camerasActive = true
     state.camerasDisabledUntil = null
@@ -103,6 +106,7 @@ export function completeEscape(state: MissionState, crossedGate: boolean) {
 export function damageMission(state: MissionState, amount: number) {
   if (state.phase !== 'active' || amount <= 0) return false
   state.health = Math.max(0, state.health - amount)
+  state.lastDamageAt = state.elapsed
   if (!state.health) state.phase = 'dead'
   return true
 }

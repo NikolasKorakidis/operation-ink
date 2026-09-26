@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { BulletTrails } from './bullet-trails'
-import { fallDamage } from './balance'
+import { PLAYER_BULLET_DAMAGE, fallDamage } from './balance'
 import type { EnvironmentCamera } from '../camera'
 import type { FirstPersonController } from '../player/controller'
 import type { ActionTarget } from '../player/actions'
@@ -283,7 +283,9 @@ export class MissionRuntime {
   }
 
   damage(amount: number, source?: THREE.Vector3, hit?: PlayerBulletHit) {
-    if (this.invincible || !this.isActive() || !damageMission(this.state,amount)) return
+    // Bullets are fixed quarter-health hits; the weapon's own amount still scales the flinch and sound.
+    const loss = hit && amount > 0 ? PLAYER_BULLET_DAMAGE : amount
+    if (this.invincible || !this.isActive() || !damageMission(this.state,loss)) return
     if (this.state.phase !== 'dead' && !this.hud.reducedMotion) {
       const point = this.player.body.position.clone().add(new THREE.Vector3(0, 1.17, 0))
       this.playerHits.hit(hit ?? { region: source ? 'torso' : 'leg', side: 0, point,

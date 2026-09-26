@@ -12,10 +12,10 @@
     results,
     async health() {
       assert('Trusted Begin mission click starts audio and two loops', p.playing && m.audio.status === 'running' && m.audio.diagnostics.sources === 2, m.audio.diagnostics);
-      m.damage(31, env.camera.perspective.position.clone().addScalar(3));
+      m.damage(25, env.camera.perspective.position.clone().addScalar(3));
       await frames();
-      assert('Health changes by next presented frame', m.state.health === 69 && document.querySelector('#mission-health').getAttribute('aria-valuenow') === '69', { health: m.state.health });
-      assert('Heart fill and accessible value agree', Math.abs(Number(document.querySelector('.health-fill').getAttribute('height')) - 48 * 0.69) < 1e-6 && document.querySelector('#mission-health').getAttribute('aria-valuetext') === '69 of 100');
+      assert('Health changes by next presented frame', m.state.health === 75 && document.querySelector('#mission-health').getAttribute('aria-valuenow') === '75', { health: m.state.health });
+      assert('Wound darkening and accessible value agree', document.querySelector('#mission-health').style.getPropertyValue('--wound') === '0.250' && document.querySelector('#mission-health').getAttribute('aria-valuetext') === '75 of 100');
       return results;
     },
     async audio() {
