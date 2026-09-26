@@ -3,67 +3,82 @@ import { box, dark, gun, metal, part, tube, wood } from './common'
 
 /** A full-size service pistol. The grip stays at the fist; the slide travels along Z. */
 export function buildPistol() {
-  return gun('pistol', 'pistol', false, [0, 0.084, 0.197], [0.023, 0.089, 0.025], (g, parts) => {
-    const grip = new THREE.Group()
-    grip.rotation.x = THREE.MathUtils.degToRad(-14)
-    grip.add(box(0.034, 0.105, 0.039, [0, 0, 0], dark))
-    for (const side of [-1, 1]) {
-      grip.add(box(0.002, 0.074, 0.03, [side * 0.0178, -0.004, 0], dark))
-      for (let i = 0; i < 3; i++) {
-        grip.add(box(0.002, 0.004, 0.025, [side * 0.019, -0.023 + i * 0.018, 0], metal))
-      }
-    }
-    g.add(grip)
+  return gun('pistol', 'pistol', false, [0, 0.084, 0.197], [0.023, 0.089, 0.025], pistolBody)
+}
 
-    const magazine = new THREE.Group()
-    magazine.rotation.x = grip.rotation.x
-    magazine.add(box(0.027, 0.09, 0.03, [0, -0.009, 0], metal))
-    magazine.add(box(0.04, 0.01, 0.045, [0, -0.057, 0], dark))
-    parts.magazine = magazine
-    magazine.userData.grip = new THREE.Vector3(0, -0.057, 0)
-    g.add(magazine)
-
-    g.add(box(0.038, 0.027, 0.181, [0, 0.045, 0.052], dark))
-    g.add(box(0.034, 0.014, 0.071, [0, 0.051, 0.142], dark))
-    g.add(box(0.039, 0.014, 0.037, [0, 0.045, -0.044], dark))
-
-    // Separate rails leave an actual opening around the trigger.
-    g.add(box(0.017, 0.008, 0.061, [0, -0.014, 0.049], dark))
-    g.add(box(0.017, 0.049, 0.008, [0, 0.0065, 0.0795], dark))
-    g.add(box(0.017, 0.03, 0.008, [0, -0.003, 0.019], dark))
-    g.add(box(0.007, 0.023, 0.008, [0, 0.02, 0.047], metal, [-18, 0, 0]))
-    g.add(box(0.007, 0.012, 0.008, [0, 0.005, 0.044], metal, [22, 0, 0]))
-
-    // The complete upper assembly recoils together, including its sights.
-    const slide = new THREE.Group()
-    slide.add(box(0.009, 0.036, 0.244, [-0.017, 0.082, 0.055]))
-    slide.add(box(0.009, 0.016, 0.244, [0.017, 0.072, 0.055]))
-    slide.add(box(0.009, 0.02, 0.068, [0.017, 0.09, -0.033]))
-    slide.add(box(0.009, 0.02, 0.129, [0.017, 0.09, 0.1125]))
-    slide.add(box(0.043, 0.012, 0.244, [0, 0.103, 0.055]))
-    slide.add(box(0.043, 0.009, 0.018, [0, 0.065, 0.168]))
-    slide.add(box(0.034, 0.029, 0.025, [0, 0.082, -0.0545]))
-    slide.add(box(0.028, 0.007, 0.047, [0, 0.076, 0.0245], dark))
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < 4; i++) {
-        slide.add(box(0.002, 0.027, 0.003, [side * 0.022, 0.083, -0.048 + i * 0.009], dark))
-      }
-    }
-    slide.add(box(0.038, 0.006, 0.014, [0, 0.112, -0.054], dark))
-    slide.add(box(0.007, 0.011, 0.014, [-0.012, 0.118, -0.054], dark))
-    slide.add(box(0.007, 0.011, 0.014, [0.012, 0.118, -0.054], dark))
-    slide.add(box(0.008, 0.014, 0.012, [0, 0.116, 0.153], dark))
-    parts.slide = slide
-    slide.userData.grip = new THREE.Vector3(0.035, 0.142, -0.03)
-    g.add(slide)
-
-    // An open tube, front rim, and recessed bore avoid a solid plugged barrel.
-    g.add(part(new THREE.CylinderGeometry(0.0095, 0.0095, 0.177, 12, 1, true), metal, [0, 0.084, 0.1085], [90, 0, 0]))
-    g.add(part(new THREE.RingGeometry(0.0062, 0.0095, 12), metal, [0, 0.084, 0.197]))
-    g.add(part(new THREE.CircleGeometry(0.0062, 12), dark, [0, 0.084, 0.184]))
-    g.add(tube(0.005, 0.016, [0, 0.063, 0.179], dark))
-    g.add(box(0.005, 0.009, 0.027, [-0.022, 0.048, -0.006], metal))
+/** The same service pistol on a threaded barrel with a long cylindrical suppressor. */
+export function buildSilencedPistol() {
+  return gun('silenced', 'pistol', false, [0, 0.084, 0.352], [0.023, 0.089, 0.025], (g, parts) => {
+    pistolBody(g, parts)
+    g.add(part(new THREE.CylinderGeometry(0.0175, 0.0175, 0.15, 16, 1, true), metal, [0, 0.084, 0.277], [90, 0, 0]))
+    g.add(part(new THREE.RingGeometry(0.0055, 0.0175, 16), metal, [0, 0.084, 0.352]))
+    g.add(part(new THREE.CircleGeometry(0.0055, 12), dark, [0, 0.084, 0.34]))
+    // Rear collar where the can threads onto the barrel, and baffle seams along its length.
+    g.add(tube(0.0145, 0.012, [0, 0.084, 0.201], dark))
+    for (const z of [0.25, 0.3]) g.add(tube(0.0178, 0.003, [0, 0.084, z], dark))
   })
+}
+
+function pistolBody(g: THREE.Group, parts: Record<string, THREE.Object3D>) {
+  const grip = new THREE.Group()
+  grip.rotation.x = THREE.MathUtils.degToRad(-14)
+  grip.add(box(0.034, 0.105, 0.039, [0, 0, 0], dark))
+  for (const side of [-1, 1]) {
+    grip.add(box(0.002, 0.074, 0.03, [side * 0.0178, -0.004, 0], dark))
+    for (let i = 0; i < 3; i++) {
+      grip.add(box(0.002, 0.004, 0.025, [side * 0.019, -0.023 + i * 0.018, 0], metal))
+    }
+  }
+  g.add(grip)
+
+  const magazine = new THREE.Group()
+  magazine.rotation.x = grip.rotation.x
+  magazine.add(box(0.027, 0.09, 0.03, [0, -0.009, 0], metal))
+  magazine.add(box(0.04, 0.01, 0.045, [0, -0.057, 0], dark))
+  parts.magazine = magazine
+  magazine.userData.grip = new THREE.Vector3(0, -0.057, 0)
+  g.add(magazine)
+
+  g.add(box(0.038, 0.027, 0.181, [0, 0.045, 0.052], dark))
+  g.add(box(0.034, 0.014, 0.071, [0, 0.051, 0.142], dark))
+  g.add(box(0.039, 0.014, 0.037, [0, 0.045, -0.044], dark))
+
+  // Separate rails leave an actual opening around the trigger.
+  g.add(box(0.017, 0.008, 0.061, [0, -0.014, 0.049], dark))
+  g.add(box(0.017, 0.049, 0.008, [0, 0.0065, 0.0795], dark))
+  g.add(box(0.017, 0.03, 0.008, [0, -0.003, 0.019], dark))
+  g.add(box(0.007, 0.023, 0.008, [0, 0.02, 0.047], metal, [-18, 0, 0]))
+  g.add(box(0.007, 0.012, 0.008, [0, 0.005, 0.044], metal, [22, 0, 0]))
+
+  // The complete upper assembly recoils together, including its sights.
+  const slide = new THREE.Group()
+  slide.add(box(0.009, 0.036, 0.244, [-0.017, 0.082, 0.055]))
+  slide.add(box(0.009, 0.016, 0.244, [0.017, 0.072, 0.055]))
+  slide.add(box(0.009, 0.02, 0.068, [0.017, 0.09, -0.033]))
+  slide.add(box(0.009, 0.02, 0.129, [0.017, 0.09, 0.1125]))
+  slide.add(box(0.043, 0.012, 0.244, [0, 0.103, 0.055]))
+  slide.add(box(0.043, 0.009, 0.018, [0, 0.065, 0.168]))
+  slide.add(box(0.034, 0.029, 0.025, [0, 0.082, -0.0545]))
+  slide.add(box(0.028, 0.007, 0.047, [0, 0.076, 0.0245], dark))
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 4; i++) {
+      slide.add(box(0.002, 0.027, 0.003, [side * 0.022, 0.083, -0.048 + i * 0.009], dark))
+    }
+  }
+  slide.add(box(0.038, 0.006, 0.014, [0, 0.112, -0.054], dark))
+  slide.add(box(0.007, 0.011, 0.014, [-0.012, 0.118, -0.054], dark))
+  slide.add(box(0.007, 0.011, 0.014, [0.012, 0.118, -0.054], dark))
+  slide.add(box(0.008, 0.014, 0.012, [0, 0.116, 0.153], dark))
+  parts.slide = slide
+  slide.userData.grip = new THREE.Vector3(0.035, 0.142, -0.03)
+  g.add(slide)
+
+  // An open tube, front rim, and recessed bore avoid a solid plugged barrel.
+  g.add(part(new THREE.CylinderGeometry(0.0095, 0.0095, 0.177, 12, 1, true), metal, [0, 0.084, 0.1085], [90, 0, 0]))
+  g.add(part(new THREE.RingGeometry(0.0062, 0.0095, 12), metal, [0, 0.084, 0.197]))
+  g.add(part(new THREE.CircleGeometry(0.0062, 12), dark, [0, 0.084, 0.184]))
+  g.add(tube(0.005, 0.016, [0, 0.063, 0.179], dark))
+  g.add(box(0.005, 0.009, 0.027, [-0.022, 0.048, -0.006], metal))
 }
 
 /** A six-shot revolver with an exposed cylinder and a barrel aligned to its top chamber. */

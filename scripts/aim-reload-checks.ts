@@ -4,7 +4,7 @@ import { CollisionWorld } from '../src/player/collision'
 import { FirstPersonWeapons, WEAPON_RULES } from '../src/game/weapons'
 import type { WeaponFrame, WeaponName } from '../src/game/types'
 
-for (const name of ['pistol', 'shotgun', 'ak', 'smg', 'sniper'] as WeaponName[]) {
+for (const name of ['pistol', 'silenced', 'shotgun', 'ak', 'smg', 'sniper'] as WeaponName[]) {
   for (const fps of [30, 60, 144]) for (const reducedMotion of [false, true]) {
     const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(75, 16 / 9, .06, 100)
     scene.add(camera)
@@ -16,9 +16,9 @@ for (const name of ['pistol', 'shotgun', 'ak', 'smg', 'sniper'] as WeaponName[])
     step(2)
     const mount = scene.getObjectByName('Firing hand grip mount')!
     const gun = scene.getObjectByName(`gun:${name}`)!
-    if (name === 'pistol' || name === 'shotgun') {
+    if (name === 'shotgun') {
       assert(!weapons.canAim)
-      assert(Math.abs(mount.position.x - (name === 'pistol' ? .16 : .17)) < 1e-8, `${name} ignores aim and keeps its hip-fire pose`)
+      assert(Math.abs(mount.position.x - .17) < 1e-8, `${name} ignores aim and keeps its hip-fire pose`)
       assert.equal(mount.rotation.x, 0, `${name} does not gain the aimed barrel tilt`)
     } else if (name !== 'sniper') {
       for (const moving of [0, 4]) {

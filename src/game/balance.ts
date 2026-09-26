@@ -27,7 +27,23 @@ export const WEAPON_RULES = {
   smg: { label: 'SMG', capacity: 24, reload: 2.05, interval: 0.085, range: 100, damage: 24, automatic: true, kick: 0.012, settle: 0.65 },
   shotgun: { label: 'Pump shotgun', capacity: 6, reload: 0.65, interval: 0.9, range: 32, damage: 28, automatic: false, kick: 0.11, settle: 0.84 },
   sniper: { label: 'Sniper rifle', capacity: 5, reload: 2.9, interval: 1.35, range: 220, damage: 65, automatic: false, kick: 0.048, settle: 0.85 },
+  silenced: { label: 'Silenced pistol', capacity: 12, reload: 1.85, interval: 0.25, range: 110, damage: 30, automatic: false, kick: 0.024, settle: 0.55 },
+  // Melee: no magazine, range is arm's reach, and the attack itself is timed by KNIFE below.
+  knife: { label: 'Combat knife', capacity: 0, reload: 0, interval: 0.45, range: 1.7, damage: 40, automatic: false, kick: 0, settle: 0 },
 } as const
+
+/** Left click slashes, right click stabs. Any knife hit from behind is lethal, as in Counter-Strike. */
+export const KNIFE = {
+  range: 1.7,
+  slash: { damage: 40, interval: 0.45, duration: 0.34, hitAt: 0.11 },
+  stab: { damage: 90, interval: 1.0, duration: 0.72, hitAt: 0.23 },
+} as const
+export type KnifeAttack = 'slash' | 'stab'
+
+/** Aiming down the sights magnifies the view; the sniper uses its adjustable scope instead. */
+export const AIM_ZOOM: Partial<Record<WeaponName, number>> = { pistol: 1.25, silenced: 1.25, smg: 1.5, ak: 2 }
+/** A suppressed report only carries a few metres to the guards. */
+export const SILENCED_REPORT_RADIUS = 5
 
 export const ENEMY_WEAPONS = {
   pistol: { magazine: 12, reload: 1.9, damage: 10, burst: 3, gap: 0.2, pause: [0.65, 0.95] },
@@ -77,12 +93,14 @@ export function shotgunDamageMultiplier(distance: number) {
 
 export const WEAPON_SLOTS = 5
 export const SNIPER_ZOOM = { min: 2, max: 8, initial: 4 } as const
-export function startingLoadout(): WeaponItem[] {
+/** Counter-Strike layout: 1 primary (picked up in the field), 2 sidearm, 3 knife, 4–5 extra pickups. */
+export const STARTING_SLOT = 2
+export function startingLoadout(): (WeaponItem | null)[] {
   return [
-    { id: 'player-pistol', name: 'pistol', magazine: 12, reserve: 36 },
-    { id: 'player-shotgun', name: 'shotgun', magazine: 6, reserve: 24 },
-    { id: 'player-ak', name: 'ak', magazine: 30, reserve: 90 },
-    { id: 'player-smg', name: 'smg', magazine: 24, reserve: 72 },
-    { id: 'player-sniper', name: 'sniper', magazine: 5, reserve: 15 },
+    null,
+    { id: 'player-silenced', name: 'silenced', magazine: 12, reserve: 36 },
+    { id: 'player-knife', name: 'knife', magazine: 0, reserve: 0 },
+    null,
+    null,
   ]
 }

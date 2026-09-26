@@ -19,6 +19,7 @@ function setup(initialFov = 75) {
     for (let i = 0; i < Math.ceil(seconds * 60); i++) weapons.update(1 / 60, frame)
   }
   const snapshot = weapons.snapshot()
+  snapshot.slots[0] = { id: 'test-ak', name: 'ak', magazine: 30, reserve: 90 }
   snapshot.slots[1] = { id: 'test-sniper', name: 'sniper', magazine: 5, reserve: 10 }
   snapshot.selected = 1
   weapons.restore(snapshot)
@@ -124,10 +125,11 @@ function setup(initialFov = 75) {
   step(3.2) // Lower out of aim before starting the magazine reload.
   assert(weapons.scoped)
   assert(Math.abs(magnification() - 2) < 1e-10)
-  assert(weapons.switchSlot(2)); step(0.3)
+  assert(weapons.switchSlot(0)); step(0.3)
   assert.equal(weapons.current?.name, 'ak')
-  assert(!weapons.adjustScopeZoom(1), 'Other weapons cannot zoom the camera')
-  assert.equal(camera.fov, 75)
+  assert(!weapons.adjustScopeZoom(1), 'Other weapons cannot adjust the scope')
+  assert(weapons.magnification > 1.9 && weapons.magnification <= 2 && Math.abs(magnification() - weapons.magnification) < 1e-9,
+    'The aimed AK zooms its sights to 2×, independent of the stored scope setting')
   assert(weapons.switchSlot(1)); step(0.3)
   assert.equal(weapons.scopeMagnification, 4, 'Equipping a sniper resets to its default magnification')
   assert(Math.abs(magnification() - 4) < 1e-10)

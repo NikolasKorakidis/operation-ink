@@ -413,6 +413,10 @@ export function createMissionWorld(compound?: THREE.Group): MissionWorld {
     // Occupied rooms reward checking corners. Short interior routes stay off the
     // entry aisles, roof stairs, office furniture and the reserve muster points.
     enemy('mess-kitchen', 'Mess kitchen watch', [[-34.2, 0.28, -56.4], [-32.9, 0.28, -56.4]], 'pistol'),
+    // Two AK lookouts on the mess-hall roof face out over the yard (south, +Z), their backs to the
+    // ladder and the stair door: the opening knife approach. Kept 7 m apart so one body is outside the other's view.
+    { ...enemy('roof-lookout-west', 'Roof lookout (west)', [[-37.5, 6.38, -38.6]]), facing: 0 },
+    { ...enemy('roof-lookout-east', 'Roof lookout (east)', [[-30.5, 6.38, -38.6]]), facing: 0 },
     enemy('mess-east-aisle', 'Mess east-aisle guard', [[-29, 0.28, -42.15], [-29, 0.28, -39.65]], 'smg'),
     enemy('mess-vestibule', 'Vestibule duty guard', [[-22.6, 0.28, -54.95], [-21.4, 0.28, -54.95]], 'pistol'),
     enemy('relay-backroom', 'Detention corridor guard', [[117, -4.2, -26], [117, -4.2, -21]], 'pistol'),

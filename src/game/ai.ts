@@ -1125,13 +1125,14 @@ export class EnemyDirector {
     if (!nearest || nearest.health <= 0 || nearest.state === 'reserve' || nearest.state === 'dead') return false
     const best = found, normalized = found.direction
     const falloff = shot.weapon === 'shotgun' ? shotgunDamageMultiplier(best.distance) : 1
-    const damage = hitDamage(shot.weapon, best.zone, shot.damage) * falloff
+    const fromBehind = normalized.x * Math.sin(nearest.yaw) + normalized.z * Math.cos(nearest.yaw) > 0.25
+    // A blade in the back always kills.
+    const damage = shot.weapon === 'knife' && fromBehind ? ENEMY_HEALTH : hitDamage(shot.weapon, best.zone, shot.damage) * falloff
     nearest.health = Math.max(0, nearest.health - damage)
     nearest.contactMemory = COMBAT.contactMemory
     nearest.canSee = false
     nearest.senseTimer = 0
     const lethal = nearest.health === 0
-    const fromBehind = normalized.x * Math.sin(nearest.yaw) + normalized.z * Math.cos(nearest.yaw) > 0.25
     const reaction: HitReaction = { zone: best.zone, point: best.point, direction: normalized, lethal, bone: best.bone, weapon: shot.weapon, targetId: nearest.spec.id, by: shot.by }
     nearest.scanTimer = 0
     nearest.actor.root.userData.alertScan = undefined
@@ -1157,7 +1158,10 @@ export class EnemyDirector {
       // A witness knows the body location. Only a visible muzzle identifies the shooter.
       for (const ally of this.enemies) {
         if (ally === nearest || ['dead', 'reserve', 'combat'].includes(ally.state) || ally.position.distanceTo(nearest.position) > 18) continue
-        if (!this.context.world.visible(this.eye(ally), nearest.position.clone().add(new THREE.Vector3(0, 0.9, 0)), ignore)) continue
+        const body = nearest.position.clone().add(new THREE.Vector3(0, 0.9, 0))
+        if (!this.context.world.visible(this.eye(ally), body, ignore)) continue
+        // A knife kill makes no report: only a guard actually looking at the body notices it.
+        if (shot.weapon === 'knife' && !insideVisionCone(this.eye(ally), ally.yaw, body, 18)) continue
         const eye = this.eye(ally)
         const sawShooter = insideVisionCone(eye, ally.yaw, shot.origin, ally.spec.role === 'sniper' ? COMBAT.sniperEngagedRange : COMBAT.engagedRange) && this.context.world.visible(eye, shot.origin, ignore)
         ally.lastKnown = sawShooter ? shot.origin.clone().setY(this.lastPlayer?.feet.y ?? ally.position.y) : nearest.position.clone()

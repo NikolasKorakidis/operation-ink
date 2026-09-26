@@ -142,7 +142,8 @@ await check('All ordinary guards complete real patrol loops; the reserve detail 
     updateDoors(doors, 0.05); world.refresh(); director.update(0.05, player)
   }
   console.log(`280 s patrol simulation ${(performance.now() - started).toFixed(0)} ms`, director.enemies.map(enemy => `${enemy.spec.id}:${enemy.visitedWaypoints}/${enemy.pathFailures}`).join(' '))
-  const failed = director.enemies.filter(enemy => enemy.spec.role !== 'sniper' && enemy.visitedWaypoints < enemy.spec.patrol.length).map(enemy => ({ id: enemy.spec.id, visited: enemy.visitedWaypoints, position: enemy.position.toArray(), waypoint: enemy.waypoint, stuck: enemy.stuck, pathFailures: enemy.pathFailures }))
+  // Stationary lookouts hold a single post and have no loop to complete.
+  const failed = director.enemies.filter(enemy => enemy.spec.role !== 'sniper' && enemy.spec.patrol.length > 1 && enemy.visitedWaypoints < enemy.spec.patrol.length).map(enemy => ({ id: enemy.spec.id, visited: enemy.visitedWaypoints, position: enemy.position.toArray(), waypoint: enemy.waypoint, stuck: enemy.stuck, pathFailures: enemy.pathFailures }))
   assert.deepEqual(failed, [])
   director.dispose()
 })

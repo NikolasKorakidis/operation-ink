@@ -61,11 +61,12 @@ export class MissionMenu {
         <dl class="mission-keys">
           <div><dt>Move</dt><dd><kbd>W A S D</kbd></dd></div>
           <div><dt>Look</dt><dd><kbd>Mouse</kbd></dd></div>
-          <div><dt>Fire</dt><dd><kbd>Left click</kbd></dd></div>
-          <div><dt>Toggle aim</dt><dd><kbd>Right click</kbd></dd></div>
+          <div><dt>Fire · knife slash</dt><dd><kbd>Left click</kbd></dd></div>
+          <div><dt>Aim · knife stab</dt><dd><kbd>Right click</kbd></dd></div>
           <div><dt>Interact / pick up</dt><dd><kbd>F</kbd></dd></div>
           <div><dt>Reload</dt><dd><kbd>R</kbd></dd></div>
           <div><dt>Sprint</dt><dd><kbd>Shift</kbd></dd></div>
+          <div><dt>Sneak (silent)</dt><dd><kbd>C</kbd></dd></div>
           <div><dt>Jump</dt><dd><kbd>Space</kbd></dd></div>
           <div><dt>Switch weapon</dt><dd><kbd>1–5</kbd></dd></div>
           <div><dt>Drop weapon</dt><dd><kbd>G</kbd></dd></div>

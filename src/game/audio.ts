@@ -22,6 +22,8 @@ const SAMPLES: Record<string, { files: string[]; gain: number; pitch?: number }>
   'enemy-shot-smg': { files: series('shot_rifle', 5), gain: 0.6, pitch: 1.28 },
   'enemy-shot-shotgun': { files: series('shot_rifle', 5), gain: 0.88, pitch: 0.62 },
   'enemy-shot-sniper': { files: series('shot_rifle', 5), gain: 0.82, pitch: 0.72 },
+  'shot-silenced': { files: series('shot_pistol', 4), gain: 0.28, pitch: 1.55 },
+  'enemy-shot-silenced': { files: series('shot_pistol', 4), gain: 0.24, pitch: 1.55 },
   impact: { files: series('hit_world', 5), gain: 0.35 },
   'enemy-hit': { files: series('hit_flesh', 5), gain: 0.75 },
   'hit-confirm': { files: series('hit_flesh', 5), gain: 0.34 },
@@ -486,21 +488,26 @@ export class MissionAudio {
     if (event.kind === 'ladder') return
     if (this.confirmation(event)) return
     const shot = event.kind.includes('shot'), horn = event.kind === 'horn', step = event.kind.endsWith('footstep')
-    const metal = ['door', 'reload', 'enemy-reload', 'reload-ready', 'weapon-pump', 'shell-load', 'switch', 'pickup', 'drop', 'empty', 'impact', 'enemy-down'].includes(event.kind)
-    const duration = horn ? 1.8 : shot ? event.kind.includes('sniper') ? 0.34 : 0.16 : step ? 0.08 : event.kind === 'empty' ? 0.045 : event.kind === 'callout' ? 0.18 : metal ? 0.11 : 0.28
+    const metal = ['door', 'reload', 'enemy-reload', 'reload-ready', 'weapon-pump', 'shell-load', 'switch', 'pickup', 'drop', 'empty', 'impact', 'enemy-down', 'knife-wall'].includes(event.kind)
+    // A blade cutting air: a short band of noise sweeping down in pitch.
+    const swish = event.kind === 'knife-slash' || event.kind === 'knife-stab'
+    const duration = horn ? 1.8 : swish ? event.kind === 'knife-stab' ? 0.16 : 0.22 : shot ? event.kind.includes('sniper') ? 0.34 : 0.16 : step ? 0.08 : event.kind === 'empty' ? 0.045 : event.kind === 'callout' ? 0.18 : metal ? 0.11 : 0.28
     const t = context.currentTime
     const { gain, panner } = this.output(event)
-    const volume = horn ? 0.28 : shot ? 0.7 : step ? 0.15 : metal ? 0.17 : 0.12
+    const volume = horn ? 0.28 : swish ? 0.3 : shot ? 0.7 : step ? 0.15 : metal ? 0.17 : 0.12
     gain.gain.setValueAtTime(0.001, t)
     gain.gain.exponentialRampToValueAtTime(volume, t + 0.007)
     gain.gain.exponentialRampToValueAtTime(0.001, t + duration)
-    const noisy = shot || step || event.kind === 'impact'
+    const noisy = shot || step || swish || event.kind === 'impact'
     const source = noisy ? context.createBufferSource() : context.createOscillator()
     const filter = context.createBiquadFilter()
     if (noisy) {
       const noiseSource = source as AudioBufferSourceNode
-      noiseSource.buffer = this.noise; noiseSource.playbackRate.value = shot ? event.kind.includes('sniper') ? 1.25 : 2.4 : 0.8
-      filter.type = 'highpass'; filter.frequency.value = shot ? 650 : 90
+      noiseSource.buffer = this.noise; noiseSource.playbackRate.value = shot ? event.kind.includes('sniper') ? 1.25 : 2.4 : swish ? 1.4 : 0.8
+      if (swish) {
+        filter.type = 'bandpass'; filter.Q.value = 1.4
+        filter.frequency.setValueAtTime(3400, t); filter.frequency.exponentialRampToValueAtTime(900, t + duration)
+      } else { filter.type = 'highpass'; filter.frequency.value = shot ? 650 : 90 }
     } else {
       const tone = source as OscillatorNode
       tone.type = horn ? 'sawtooth' : metal ? 'triangle' : 'sine'

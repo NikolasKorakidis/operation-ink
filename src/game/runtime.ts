@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { BulletTrails, bulletNearMiss } from './bullet-trails'
-import { PLAYER_BULLET_DAMAGE, PLAYER_HEALTH, fallDamage } from './balance'
+import { KNIFE, PLAYER_BULLET_DAMAGE, PLAYER_HEALTH, fallDamage } from './balance'
 import type { EnvironmentCamera } from '../camera'
 import type { FirstPersonController } from '../player/controller'
 import type { ActionTarget } from '../player/actions'
@@ -24,7 +24,7 @@ import { Teammates } from './teammates'
 import { CoopPanel } from './coop-panel'
 import { CoopSession } from '../net/session'
 import type { CoopMessage, NetSound, PlayerPose } from '../net/hub'
-import type { EnemyPuppet, EnemySnapshot, MissionWorld, PlayerSense, Shot, SoundEvent, Station, StationKind, Vec3, WeaponSnapshot } from './types'
+import type { EnemyPuppet, EnemySnapshot, MeleeAttack, MissionWorld, PlayerSense, Shot, SoundEvent, Station, StationKind, Vec3, WeaponSnapshot } from './types'
 
 type Checkpoint = { mission: MissionState; weapons: WeaponSnapshot; enemies: EnemySnapshot[]; doors: boolean[]; position: Vec3; quaternion: [number,number,number,number]; blood?: BloodSnapshot }
 
@@ -86,7 +86,7 @@ export class MissionRuntime {
     if (!camera.perspective.parent) scene.add(camera.perspective)
     this.weapons = new FirstPersonWeapons({ scene, camera: camera.perspective, world: player.world,
       aimDistance: (origin, direction, maxDistance) => this.ai.aimDistance(origin, direction, maxDistance),
-      emit: event => this.emit(event, true), onShot: shot => this.shot(shot) })
+      emit: event => this.emit(event, true), onShot: shot => this.shot(shot), onMelee: attack => this.melee(attack) })
     this.blood = new MissionBlood(scene, player.world, id => {
       const enemy = this.ai?.enemies.find(candidate => candidate.spec.id === id)
       if (!enemy || enemy.state !== 'dead' || enemy.deathClip !== 'dieShotgun') return null
@@ -156,7 +156,8 @@ export class MissionRuntime {
       if (!this.isActive() || event.target !== document.querySelector('#world')) return
       void this.audio.unlock()
       if (event.button === 0) this.weapons.trigger(true)
-      if (event.button === 2) {
+      if (event.button === 2 && this.weapons.current?.name === 'knife') this.weapons.stab()
+      else if (event.button === 2) {
         this.aiming = this.weapons.canAim && !this.aiming
         if (this.weapons.current && !this.weapons.canAim) this.hud.notify("You can't aim with this weapon.", 2, true)
       }
@@ -352,6 +353,34 @@ export class MissionRuntime {
     } : undefined
     this.bulletTrails.emit(shot.origin, end, shot.weapon, undefined, impact)
     this.coop.send({ t: 'shot', id: this.coop.hub.selfId, origin: shot.origin.toArray() as Vec3, end: end.toArray() as Vec3, weapon: shot.weapon ?? 'ak' })
+  }
+
+  /** Knife: a short fan of rays forgives thin animated limbs at arm's length. Walls stop the blade. */
+  private melee(attack: MeleeAttack) {
+    if (!this.isActive()) return
+    const by = this.coop.active ? this.coop.hub.selfId : undefined
+    const sideways = new THREE.Vector3().crossVectors(attack.direction, new THREE.Vector3(0, 1, 0)).normalize()
+    let found: ReturnType<EnemyDirector['findHit']> = null, shot: Shot | null = null, wall: number = KNIFE.range
+    for (const [side, lift] of [[0, 0], [0.22, 0], [-0.22, 0], [0, -0.2], [0, 0.14], [0.42, -0.1], [-0.42, -0.1]]) {
+      const direction = attack.direction.clone().addScaledVector(sideways, side).add(new THREE.Vector3(0, lift, 0)).normalize()
+      const reach = this.player.world.raySurface(attack.origin, direction, KNIFE.range)?.distance ?? KNIFE.range
+      if (!side && !lift) wall = reach
+      shot = { origin: attack.origin.clone(), direction, range: KNIFE.range, damage: attack.damage, weapon: 'knife', by }
+      found = this.ai.findHit(shot, reach)
+      if (found) break
+    }
+    // Teammates see the swing; there is no tracer and no round for guards to react to.
+    this.coop.send({ t: 'shot', id: this.coop.hub.selfId, origin: attack.origin.toArray() as Vec3,
+      end: attack.origin.clone().addScaledVector(attack.direction, KNIFE.range).toArray() as Vec3, weapon: 'knife' })
+    if (!found || !shot) {
+      if (wall < KNIFE.range) this.audio.play({ kind: 'knife-wall', position: attack.origin.clone().addScaledVector(attack.direction, wall), radius: 6 })
+      return
+    }
+    this.hitFlash = 0.15
+    if (this.role === 'guest') {
+      this.coop.send({ t: 'hit', id: this.coop.hub.selfId, hit: { i: found.index, zone: found.zone, point: found.point.toArray() as Vec3, bone: found.bone,
+        distance: found.distance, direction: found.direction.toArray() as Vec3, origin: attack.origin.toArray() as Vec3, weapon: 'knife', damage: attack.damage } })
+    } else this.ai.applyHit(shot, found)
   }
 
   damage(amount: number, source?: THREE.Vector3, hit?: PlayerBulletHit) {
@@ -559,8 +588,10 @@ export class MissionRuntime {
       const speed=Math.hypot(body.velocity.x,body.velocity.z)
       if(speed>0.5 && body.grounded || this.player.actions.climbing) {
         this.stepTime+=dt
-        if(this.stepTime>(this.player.actions.climbing?0.5:speed>5?0.3:0.48)) {
-          this.stepTime=0; this.emit({kind:this.player.actions.climbing?'ladder':'footstep',position:body.position.clone(),radius:speed>5?15:6},true)
+        // Sneaking (C) is silent to guards; the player still hears their own soft steps.
+        const sneaking = !this.player.actions.climbing && speed < 2.6
+        if(this.stepTime>(this.player.actions.climbing?0.5:speed>5?0.3:sneaking?0.62:0.48)) {
+          this.stepTime=0; this.emit({kind:this.player.actions.climbing?'ladder':'footstep',position:body.position.clone(),radius:speed>5?15:sneaking?2:6},!sneaking)
         }
       } else this.stepTime=0
       this.safePosition.copy(body.position); this.safeQuaternion.copy(this.camera.perspective.quaternion)
@@ -583,8 +614,7 @@ export class MissionRuntime {
     const hitPose = this.playerHits.update(reactionActive ? dt : 0,
       new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y, this.hud.reducedMotion)
     if (reactionActive) {
-      const zoom = this.aiming && this.weapons.current?.name === 'sniper' && !this.weapons.reloading ? this.weapons.scopeMagnification : 1
-      this.playerHits.applyCamera(this.camera.perspective, this.player.world, 1 / zoom)
+      this.playerHits.applyCamera(this.camera.perspective, this.player.world, 1 / this.weapons.magnification)
     }
     // A lethal AI hit can start the sequence inside this very update.
     deathVisible = this.death.active && this.player.enabled && !this.player.immersive
@@ -740,6 +770,7 @@ export class MissionRuntime {
 
   /** Host: a guest's round passes guards (they react to it) and may frighten a nearby hostage. */
   private guestShot(origin: THREE.Vector3, end: THREE.Vector3, weapon: Shot['weapon']) {
+    if (weapon === 'knife') return
     const distance = origin.distanceTo(end)
     if (distance > 0.01) this.ai.nearMiss({ origin, direction: end.clone().sub(origin).normalize(), range: distance, damage: 0, weapon }, distance)
     if (this.state.hostages.some(hostage => hostage.status === 'following' && origin.distanceTo(new THREE.Vector3(...hostage.position)) < 15)) this.gunfireUntil = this.state.elapsed + 1.1

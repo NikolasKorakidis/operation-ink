@@ -208,9 +208,9 @@ export class MissionHUD {
     // No health meter: the view darkens with each wound and clears as health refills.
     const wound = (1 - health / 100).toFixed(3)
     if (this.health.style.getPropertyValue('--wound') !== wound) this.health.style.setProperty('--wound', wound)
-    this.ammo.hidden = !data.weapon
+    this.ammo.hidden = !data.weapon || data.weapon.name === 'knife'
     this.reloadIcon.toggleAttribute('hidden', !data.reloading)
-    if (data.weapon) {
+    if (data.weapon && data.weapon.name !== 'knife') {
       const rule = WEAPON_RULES[data.weapon.name]
       const rounds = Math.max(0, Math.min(rule.capacity, data.weapon.magazine))
       const magazines = (rounds > 0 ? 1 : 0) + Math.ceil(Math.max(0, data.weapon.reserve) / rule.capacity)

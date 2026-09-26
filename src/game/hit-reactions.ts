@@ -186,9 +186,11 @@ export class MissionBlood {
 
   emitHit(hit: HitReaction) {
     if (this.disposed) return
-    const shotgun = hit.weapon === 'shotgun'
+    const shotgun = hit.weapon === 'shotgun', knife = hit.weapon === 'knife'
     const forward = hit.direction.clone().normalize()
-    this.spray(hit.point, forward, shotgun ? (hit.lethal ? 144 : 64) : hit.lethal ? 72 : 48, hit.lethal, shotgun)
+    this.spray(hit.point, forward, shotgun ? (hit.lethal ? 144 : 64) : knife ? (hit.lethal ? 150 : 80) : hit.lethal ? 72 : 48, hit.lethal, shotgun)
+    // A blade opens a wound rather than punching through: a second arc sprays out sideways.
+    if (knife) this.spray(hit.point, forward.clone().cross(new THREE.Vector3(0, 1, 0)).normalize().addScaledVector(forward, 0.4).normalize(), hit.lethal ? 90 : 40, hit.lethal)
     const followsFall = shotgun && hit.lethal && hit.targetId && this.followBody
     if (followsFall) {
       this.shotgunBursts = this.shotgunBursts.filter(burst => burst.targetId !== hit.targetId)
@@ -196,7 +198,7 @@ export class MissionBlood {
       this.shotgunBursts = this.shotgunBursts.slice(-16)
     }
     // Immediate solid splashes reinforce the hit before airborne spray lands.
-    for (let i = 0; i < (shotgun ? (hit.lethal ? 10 : 5) : hit.lethal ? 8 : 4); i++) {
+    for (let i = 0; i < (shotgun ? (hit.lethal ? 10 : 5) : knife ? (hit.lethal ? 14 : 7) : hit.lethal ? 8 : 4); i++) {
       const spread = new THREE.Vector3((this.random() - 0.5) * 1.1, 0, (this.random() - 0.5) * 1.1)
         .addScaledVector(forward, 0.12 + this.random() * 0.28)
       spread.y = 0
@@ -208,7 +210,7 @@ export class MissionBlood {
     // never attach a pool to an unrelated earlier victim.
     this.stain(hit.point, hit.lethal ? 0.3 : 0.17,
       hit.lethal ? 16 + Math.floor(this.random() * 8) : Math.floor(this.random() * 16),
-      hit.lethal && !followsFall ? 0.55 + this.random() * 0.15 : undefined)
+      hit.lethal && !followsFall ? (knife ? 0.8 : 0.55) + this.random() * 0.15 : undefined)
     this.render()
   }
 

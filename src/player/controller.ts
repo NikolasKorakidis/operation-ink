@@ -5,7 +5,7 @@ import { CollisionWorld } from './collision'
 import { PlayerBody } from './body'
 import { PlayerActions } from './actions'
 
-const movementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Space']
+const movementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyC']
 
 export class FirstPersonController {
   readonly world: CollisionWorld
@@ -185,7 +185,7 @@ export class FirstPersonController {
       this.forward.y = 0
       this.forward.normalize()
       this.direction.set(-this.forward.z, 0, this.forward.x).multiplyScalar(x).addScaledVector(this.forward, z).normalize()
-      this.body.update(dt, this.direction, this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'))
+      this.body.update(dt, this.direction, this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'), this.pressed.has('KeyC'))
     }
     if (this.body.position.y < -20 || Math.max(Math.abs(this.body.position.x), Math.abs(this.body.position.z)) > 1150) this.respawn()
     this.actions.syncCamera(this.camera.active, dt)
@@ -205,7 +205,7 @@ export class FirstPersonController {
     const state = ride ? `Riding to ${ride.destination} · ${Math.round((1 - ride.remaining / ride.distance) * 100)}%` :
       this.actions.climbing ? (this.actions.climbing.descending ? 'Climbing down' : 'Climbing up') :
       !this.body.grounded ? 'In the air' : this.direction.lengthSq() > 0 ?
-        (this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') ? 'Sprinting' : 'Walking') : 'On foot'
+        (this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') ? 'Sprinting' : this.pressed.has('KeyC') ? 'Sneaking' : 'Walking') : 'On foot'
     this.status.textContent = this.fallback ? `${state} · drag to look` : state
     return true
   }

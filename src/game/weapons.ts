@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import { applyPenMaterial, createPenSilhouette, penPalette } from '../render/ballpoint'
 import { disposeGun, type Gun } from '../lab/weapons/models'
-import type { WeaponContext, WeaponFrame, WeaponItem, WeaponSnapshot } from './types'
-import { WEAPON_RULES, WEAPON_SLOTS, SHOTGUN_PELLETS, SHOTGUN_BALLISTICS, SNIPER_ZOOM, startingLoadout } from './balance'
+import type { WeaponContext, WeaponFrame, WeaponItem, WeaponName, WeaponSnapshot } from './types'
+import { AIM_ZOOM, KNIFE, SILENCED_REPORT_RADIUS, STARTING_SLOT, WEAPON_RULES, WEAPON_SLOTS, SHOTGUN_PELLETS, SHOTGUN_BALLISTICS, SNIPER_ZOOM, startingLoadout, type KnifeAttack } from './balance'
 import { createMissionGun } from './weapon-models'
 export { WEAPON_RULES } from './balance'
 
@@ -12,13 +12,15 @@ const AIM_PITCH = THREE.MathUtils.degToRad(-5)
 const AIM_LOWER_TIME = 0.18
 const copyItem = (item: WeaponItem): WeaponItem => ({ ...item, ...(item.position ? { position: [...item.position] } : {}) })
 const smooth = (value: number, a: number, b: number) => THREE.MathUtils.smoothstep(value, a, b)
+/** Held in the firing hand alone; the support hand only appears to reload. */
+const ONE_HANDED = new Set<WeaponName>(['pistol', 'silenced', 'knife'])
 type LooseWeapon = { item: WeaponItem; model: Gun }
 type Arm = { shoulder: THREE.Vector3; pole: THREE.Vector3; upper: THREE.Mesh; fore: THREE.Mesh; elbow: THREE.Mesh }
 
 /** Gameplay weapons deliberately have no lab action timers or animation-mixer dependencies. */
 export class FirstPersonWeapons {
   private inventory: (WeaponItem | null)[] = startingLoadout()
-  private slot = this.inventory.findIndex(item => item?.name === 'ak')
+  private slot = STARTING_SLOT
   private nextId = 1
   private loose = new Map<string, LooseWeapon>()
   private root = new THREE.Group()
@@ -63,6 +65,9 @@ export class FirstPersonWeapons {
   private deathVisible = false
   private scopeZoom: number = SNIPER_ZOOM.initial
   private baseFov: number | null = null
+  private zoom = 1
+  private pendingStab = false
+  private swing: { kind: KnifeAttack; elapsed: number; struck: boolean } | null = null
   private feet = new THREE.Vector3()
   private frame: WeaponFrame = { active: false, climbing: false, moving: 0, aiming: false, reducedMotion: false, feet: this.feet }
 
@@ -86,14 +91,17 @@ export class FirstPersonWeapons {
   }
 
   get label() { return this.current ? WEAPON_RULES[this.current.name].label : 'Empty hands' }
-  get ammo() { return this.current ? `${this.current.magazine} / ${this.current.reserve}` : '—' }
+  get ammo() { return this.current && this.current.name !== 'knife' ? `${this.current.magazine} / ${this.current.reserve}` : '—' }
   get reloading() { return this.reloadElapsed !== null }
   get blocked() { return this.obstructed }
   get selected() { return this.slot }
   get scoped() { return this.scopeActive }
-  get canAim() { return this.current?.name === 'ak' || this.current?.name === 'smg' || this.current?.name === 'sniper' }
+  get canAim() { return !!this.current && (this.current.name === 'sniper' || AIM_ZOOM[this.current.name] !== undefined) }
   get scopeMagnification() { return this.scopeZoom }
-  get lookSensitivity() { return this.scopeActive ? 1 / this.scopeZoom : 1 }
+  /** The view's current magnification: the sniper scope, or sight zoom that follows the aim blend. */
+  get magnification() { return this.zoom }
+  get lookSensitivity() { return 1 / this.zoom }
+  get knifeSwing() { return this.swing ? { ...this.swing } : null }
   get current(): WeaponItem | null { return this.inventory[this.slot] }
   get slots(): readonly (WeaponItem | null)[] { return this.inventory }
 
@@ -212,7 +220,7 @@ export class FirstPersonWeapons {
   }
 
   switchSlot(index: number) {
-    if (!this.enabled || !Number.isInteger(index) || index < 0 || index >= this.inventory.length || index === this.slot) return false
+    if (!this.enabled || !Number.isInteger(index) || index < 0 || index >= this.inventory.length || index === this.slot || !this.inventory[index]) return false
     this.cancel()
     this.slot = index
     this.switchTime = 0.22
@@ -225,6 +233,8 @@ export class FirstPersonWeapons {
   cancel() {
     this.held = false
     this.pendingShot = false
+    this.pendingStab = false
+    this.swing = null
     this.reloadElapsed = null
     this.reloadAim = 0
     this.switchTime = 0
@@ -260,18 +270,29 @@ export class FirstPersonWeapons {
   }
 
   private setScope(active: boolean) {
-    // The controller enters walk mode after construction, and owns every unscoped FOV.
-    // Capture only when entering scope, then restore only a scope-owned change.
-    if (!active && !this.scopeActive) return
-    if (active && !this.scopeActive) this.baseFov = this.context.camera.fov
     this.scopeActive = active
-    const baseline = this.baseFov ?? this.context.camera.fov
-    const fov = active ? THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(baseline) / 2) / this.scopeZoom)) : baseline
+    this.applyZoom(active ? this.scopeZoom : 1 + ((this.current && AIM_ZOOM[this.current.name] || 1) - 1) * this.aim)
+  }
+
+  /** The controller enters walk mode after construction and owns every unmagnified FOV.
+   *  Capture it when zoom starts, then restore exactly that value when zoom ends. */
+  private applyZoom(magnification: number) {
+    const zoomed = magnification > 1.001
+    if (!zoomed && this.baseFov === null) { this.zoom = 1; return }
+    if (zoomed && this.baseFov === null) this.baseFov = this.context.camera.fov
+    const baseline = this.baseFov!
+    const fov = zoomed ? THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(baseline) / 2) / magnification)) : baseline
+    this.zoom = zoomed ? magnification : 1
     if (this.context.camera.fov !== fov) {
       this.context.camera.fov = fov
       this.context.camera.updateProjectionMatrix()
     }
-    if (!active) this.baseFov = null
+    if (!zoomed) this.baseFov = null
+  }
+
+  /** Right click with the knife: a slower, heavier stab. */
+  stab() {
+    if (this.enabled && this.current?.name === 'knife') this.pendingStab = true
   }
 
   /** Adjust only an active sniper scope; preserve the unscoped camera's FOV. */
@@ -325,7 +346,8 @@ export class FirstPersonWeapons {
     this.lower += ((this.obstructed ? 1 : 0) - this.lower) * Math.min(1, delta * 15)
     this.pose(delta)
     const item = this.current
-    if (item && this.cooldown <= 0 && !this.reloading && this.switchTime <= 0 && !this.obstructed &&
+    if (item?.name === 'knife') this.updateKnife(delta)
+    else if (item && this.cooldown <= 0 && !this.reloading && this.switchTime <= 0 && !this.obstructed &&
         (this.pendingShot || (this.held && WEAPON_RULES[item.name].automatic))) this.shoot(item)
     else if (this.settle.pitch || this.settle.yaw) {
       // Resolve fire against the displayed sight before recovery moves it on this frame.
@@ -337,17 +359,42 @@ export class FirstPersonWeapons {
       if (Math.abs(this.settle.pitch) + Math.abs(this.settle.yaw) < 1e-6) this.settle.pitch = this.settle.yaw = 0
     }
     this.pendingShot = false
+    this.pendingStab = false
     this.flash.visible = this.flashTime > 0
   }
 
+  /** Swings start on click (held left click keeps slashing); the blade connects partway through the motion. */
+  private updateKnife(delta: number) {
+    if (this.swing) {
+      this.swing.elapsed += delta
+      const rules = KNIFE[this.swing.kind]
+      if (!this.swing.struck && this.swing.elapsed >= rules.hitAt) {
+        this.swing.struck = true
+        const origin = this.context.camera.getWorldPosition(new THREE.Vector3())
+        this.context.onMelee?.({ origin, direction: this.context.camera.getWorldDirection(new THREE.Vector3()), damage: rules.damage, kind: this.swing.kind })
+      }
+      if (this.swing.elapsed >= rules.duration) this.swing = null
+    }
+    if (this.swing || this.cooldown > 0 || this.switchTime > 0) return
+    const kind: KnifeAttack | null = this.pendingStab ? 'stab' : this.pendingShot || this.held ? 'slash' : null
+    if (!kind) return
+    this.swing = { kind, elapsed: 0, struck: false }
+    this.cooldown = KNIFE[kind].interval
+    // Barely audible: a guard at arm's length does not hear the blade coming.
+    this.context.emit({ kind: `knife-${kind}`, position: this.context.camera.getWorldPosition(new THREE.Vector3()), radius: 1.2 })
+    this.pose(0)
+  }
+
   private gripPosition() {
+    if (this.current?.name === 'knife') return new THREE.Vector3(0.16, -0.21, -0.35)
     const rifle = this.current?.name === 'ak' || this.current?.name === 'sniper' || this.current?.name === 'shotgun'
     return new THREE.Vector3(THREE.MathUtils.lerp(rifle ? 0.17 : 0.16, 0, this.aim),
       THREE.MathUtils.lerp(rifle ? -0.23 : -0.20, this.aimedGripY, this.aim), rifle ? -0.36 : -0.43)
   }
 
   private checkObstruction() {
-    if (!this.model) { this.obstructed = false; return }
+    // A knife is never lowered: it is meant for walls' and guards' arm's length.
+    if (!this.model || this.current?.name === 'knife') { this.obstructed = false; return }
     const camera = this.context.camera
     camera.updateWorldMatrix(true, false)
     const eye = camera.getWorldPosition(new THREE.Vector3())
@@ -375,6 +422,7 @@ export class FirstPersonWeapons {
     this.mount.position.copy(position)
     this.mount.rotation.set(AIM_PITCH * this.aim + (motion ? this.recoil * 0.035 : 0) + this.lower * 0.5,
       Math.PI + working * 0.18, -working * 0.23, 'YXZ')
+    if (this.current.name === 'knife') this.knifePose()
     const hit = motion ? this.frame.hitPose : undefined
     if (hit) {
       this.mount.position.add(hit.weaponPosition)
@@ -410,7 +458,7 @@ export class FirstPersonWeapons {
     // The firing hand stays attached and neither arm is stretched to fake impact.
     this.mount.position.add(reachableWrist.clone().sub(wrist))
     this.root.updateWorldMatrix(true, true)
-    const pistol = this.current.name === 'pistol'
+    const pistol = ONE_HANDED.has(this.current.name)
     this.leftHand.visible = !pistol || this.reloadElapsed !== null && this.reloadElapsed >= 0
     const leftArm = this.arms[1]
     leftArm.upper.visible = leftArm.fore.visible = leftArm.elbow.visible = this.leftHand.visible
@@ -449,6 +497,31 @@ export class FirstPersonWeapons {
     this.placeArm(this.arms[1], left, shoulders[1])
   }
 
+  /** Rambo grip: blade forward and tipped up. A slash sweeps right to left; a stab pulls back, then drives in. */
+  private knifePose() {
+    const rotation = this.mount.rotation
+    rotation.x -= 0.4; rotation.y -= 0.3; rotation.z += 1.35
+    const swing = this.swing
+    if (!swing) return
+    const p = swing.elapsed / KNIFE[swing.kind].duration, position = this.mount.position
+    if (swing.kind === 'slash') {
+      const wind = smooth(p, 0, 0.22) * (1 - smooth(p, 0.22, 0.45)), sweep = smooth(p, 0.18, 0.46) * (1 - smooth(p, 0.62, 1))
+      position.x += wind * 0.07 - sweep * 0.3
+      position.y += wind * 0.06 + sweep * 0.05
+      position.z -= sweep * 0.1
+      // The tip cocks right on the wind-up and leads the cut to the left.
+      rotation.y += sweep * 0.95 - wind * 0.45
+      rotation.z -= sweep * 0.35
+    } else {
+      const pull = smooth(p, 0, 0.28) * (1 - smooth(p, 0.28, 0.4)), thrust = smooth(p, 0.26, 0.4) * (1 - smooth(p, 0.62, 1))
+      position.x -= thrust * 0.15
+      position.y += thrust * 0.1 - pull * 0.03
+      position.z += pull * 0.08 - thrust * 0.3
+      rotation.x -= thrust * 0.25 - pull * 0.15
+      rotation.y -= thrust * 0.2
+    }
+  }
+
   private shoot(item: WeaponItem) {
     const rules = WEAPON_RULES[item.name]
     this.cooldown = rules.interval
@@ -472,7 +545,8 @@ export class FirstPersonWeapons {
         this.context.world.rayDistance(origin, direction, 0.15) < 0.15) { this.obstructed = true; return }
     item.magazine--
     this.recoil = item.name === 'shotgun' ? 1.7 : 1
-    this.flashTime = 0.045
+    // A suppressor hides the muzzle flash as well as most of the report.
+    this.flashTime = item.name === 'silenced' ? 0 : 0.045
     if (item.name === 'shotgun') {
       const right = new THREE.Vector3().crossVectors(direction, Math.abs(direction.y) > 0.98 ? new THREE.Vector3(1, 0, 0) : up).normalize()
       const vertical = new THREE.Vector3().crossVectors(right, direction).normalize()
@@ -490,7 +564,8 @@ export class FirstPersonWeapons {
     const yaw = (Math.random() - 0.5) * rules.kick * (item.name === 'shotgun' ? 0.55 : 1)
     this.nudge(pitch, yaw)
     this.settle.pitch += pitch * rules.settle; this.settle.yaw += yaw * 0.35
-    this.context.emit({ kind: `shot-${item.name}`, position: origin.clone(), radius: item.name === 'pistol' ? 38 : 55, text: `${rules.label} fired` })
+    this.context.emit({ kind: `shot-${item.name}`, position: origin.clone(),
+      radius: item.name === 'silenced' ? SILENCED_REPORT_RADIUS : item.name === 'pistol' ? 38 : 55, text: `${rules.label} fired` })
     this.pose(0)
   }
 
@@ -516,7 +591,7 @@ export class FirstPersonWeapons {
   }
 
   drop(feet: THREE.Vector3) {
-    if (!this.enabled || !this.current) return false
+    if (!this.enabled || !this.current || this.current.name === 'knife') return false
     const item = copyItem(this.current)
     item.position = this.groundPosition(feet).toArray() as [number, number, number]
     this.inventory[this.slot] = null
@@ -560,8 +635,9 @@ export class FirstPersonWeapons {
     if (eye.distanceTo(point) > 2.7 || point.clone().sub(eye).normalize().dot(this.context.camera.getWorldDirection(new THREE.Vector3())) < 0.25 ||
         !this.context.world.visible(eye, point, found.model)) return false
     const empty = this.inventory.findIndex(item => !item)
-    const destination = empty < 0 ? this.slot : empty
-    if (empty < 0) this.drop(this.feet)
+    // A full kit swaps the held gun; holding the knife swaps the primary instead, so the knife is never lost.
+    const destination = empty >= 0 ? empty : this.current?.name === 'knife' ? 0 : this.slot
+    if (empty < 0) { this.slot = destination; this.drop(this.feet) }
     this.cancel()
     this.loose.delete(id)
     disposeGun(found.model)

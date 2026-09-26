@@ -52,8 +52,13 @@ export class Teammates {
     const muzzle = mate?.actor?.root.visible ? mate.actor.muzzle() : new THREE.Vector3(...origin)
     mate?.actor?.shoot()
     if (mate) mate.firing = FIRING_HOLD
+    if (weapon === 'knife') {
+      this.play({ kind: 'knife-slash', position: muzzle, radius: 6 })
+      this.invalidate()
+      return
+    }
     this.trails.emit(muzzle, new THREE.Vector3(...end), weapon)
-    this.play({ kind: `enemy-shot-${weapon}`, position: muzzle, radius: weapon === 'pistol' ? 38 : 55 })
+    this.play({ kind: `enemy-shot-${weapon}`, position: muzzle, radius: weapon === 'silenced' ? 12 : weapon === 'pistol' ? 38 : 55 })
     this.invalidate()
   }
 

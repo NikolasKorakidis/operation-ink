@@ -13,6 +13,9 @@ export const IGI_SAMPLES: Record<string, { files: string[]; gain: number }> = {
   'enemy-shot-ak': { files: files('ak47_single'), gain: 0.75 },
   'shot-smg': { files: files('mp5sd_single'), gain: 0.62 },
   'enemy-shot-smg': { files: files('mp5sd_single'), gain: 0.6 },
+  // IGI's suppressed MP5 report doubles as the silenced pistol's muffled crack.
+  'shot-silenced': { files: files('mp5sd_single'), gain: 0.42 },
+  'enemy-shot-silenced': { files: files('mp5sd_single'), gain: 0.36 },
   'shot-shotgun': { files: files('spas12_shot_1'), gain: 0.95 },
   'enemy-shot-shotgun': { files: files('spas12_shot_1'), gain: 0.88 },
   'weapon-pump': { files: files('spas12_pump'), gain: 0.4 },

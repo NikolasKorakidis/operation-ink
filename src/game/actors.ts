@@ -218,7 +218,7 @@ export class EnemyActor {
       this.lastAim = aimed
       this.lastReady = ready
       this.lastPitch = pitch
-      const long = this.weapon !== 'pistol'
+      const long = this.weapon !== 'pistol' && this.weapon !== 'silenced' && this.weapon !== 'knife'
       // Keep lowered rifles within support-arm reach throughout the chest's scan turn.
       const hold = aimed ? { position: (long ? [-0.185, 1.22, 0.27] : [-0.13, 1.22, 0.55]) as [number, number, number], pitch: pitch * THREE.MathUtils.RAD2DEG } : ready ?
         { position: (long ? [-0.11, 1.10, 0.18] : [-0.16, 1.00, 0.32]) as [number, number, number], pitch: long ? 18 : 32 } :

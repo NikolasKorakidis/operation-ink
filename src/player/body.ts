@@ -41,17 +41,18 @@ export class PlayerBody {
     return true
   }
 
-  update(dt: number, direction: THREE.Vector3, sprint: boolean) {
+  /** Sprint wins over sneak; sneaking is the slow, silent walk. */
+  update(dt: number, direction: THREE.Vector3, sprint: boolean, sneak = false) {
     this.landingSpeed = 0
     const steps = Math.max(1, Math.ceil(Math.min(dt, 0.05) / (1 / 120)))
     const step = Math.min(dt, 0.05) / steps
-    for (let i = 0; i < steps; i++) this.step(step, direction, sprint)
+    for (let i = 0; i < steps; i++) this.step(step, direction, sprint, sneak)
   }
 
-  private step(dt: number, direction: THREE.Vector3, sprint: boolean) {
+  private step(dt: number, direction: THREE.Vector3, sprint: boolean, sneak: boolean) {
     const wasGrounded = this.grounded
     const acceleration = 1 - Math.exp(-(wasGrounded ? 18 : 5) * dt)
-    const speed = sprint ? 7.6 : 4.2
+    const speed = sprint ? 7.6 : sneak ? 1.9 : 4.2
     this.velocity.x += (direction.x * speed - this.velocity.x) * acceleration
     this.velocity.z += (direction.z * speed - this.velocity.z) * acceleration
     if (wasGrounded && this.velocity.y < 0) this.velocity.y = 0

@@ -40,7 +40,7 @@ export type CoopMessage =
 /** One open data channel. The host holds one per guest; a guest holds one to the host. */
 export interface Link { send(message: CoopMessage): void; close(): void }
 
-const WEAPONS = new Set<WeaponName>(['pistol', 'ak', 'smg', 'shotgun', 'sniper'])
+const WEAPONS = new Set<WeaponName>(['pistol', 'ak', 'smg', 'shotgun', 'sniper', 'silenced', 'knife'])
 const ZONES = new Set<HitZone>(['head', 'torso', 'arm', 'leg'])
 const STATIONS = new Set<StationKind>(['hostage', 'cameras', 'alarm', 'gate', 'jeep', 'rally', 'distraction'])
 const vec = (value: unknown): value is Vec3 => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite)
