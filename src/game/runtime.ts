@@ -15,7 +15,7 @@ import { PlayerHitReactions, type PlayerBulletHit } from './player-hit-reactions
 import { PlayerDeathSequence } from './player-death'
 import { EscapeCinematic } from './escape-cinematic'
 import { EscapeDust } from './escape-dust'
-import { advanceMission, completeEscape, damageMission, initialMission, loadedCount, stationLabel, useStation, type MissionState } from './mission'
+import { advanceMission, completeEscape, damageMission, shootMission, initialMission, loadedCount, stationLabel, useStation, type MissionState } from './mission'
 import { HostageEscort } from './hostages'
 import { SecuritySystem } from './security'
 import { RESCUE_LAYOUT } from './rescue-layout'
@@ -283,9 +283,9 @@ export class MissionRuntime {
   }
 
   damage(amount: number, source?: THREE.Vector3, hit?: PlayerBulletHit) {
-    // Bullets are fixed quarter-health hits; the weapon's own amount still scales the flinch and sound.
-    const loss = hit && amount > 0 ? PLAYER_BULLET_DAMAGE : amount
-    if (this.invincible || !this.isActive() || !damageMission(this.state,loss)) return
+    // Bullets are fixed quarter-health hits with brief immunity; the weapon's own amount still scales the flinch and sound.
+    if (this.invincible || !this.isActive()) return
+    if (!(hit && amount > 0 ? shootMission(this.state, PLAYER_BULLET_DAMAGE) : damageMission(this.state, amount))) return
     if (this.state.phase !== 'dead' && !this.hud.reducedMotion) {
       const point = this.player.body.position.clone().add(new THREE.Vector3(0, 1.17, 0))
       this.playerHits.hit(hit ?? { region: source ? 'torso' : 'leg', side: 0, point,

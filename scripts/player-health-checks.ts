@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { MissionRuntime } from '../src/game/runtime'
-import { advanceMission, damageMission, initialMission } from '../src/game/mission'
+import { advanceMission, damageMission, initialMission, shootMission } from '../src/game/mission'
 import { PLAYER_BULLET_DAMAGE, PLAYER_HEALTH } from '../src/game/balance'
 import { PlayerDeathSequence } from '../src/game/player-death'
 import { EscapeCinematic } from '../src/game/escape-cinematic'
@@ -28,6 +28,21 @@ const step = (state: ReturnType<typeof initialMission>, seconds: number) => {
 }
 console.log('PASS Health waits for the delay, then refills to full; a new hit restarts the delay')
 
+{
+  const state = initialMission()
+  assert(shootMission(state, PLAYER_BULLET_DAMAGE), 'The first bullet at mission start lands')
+  step(state, PLAYER_HEALTH.bulletImmunity - 0.1)
+  assert(!shootMission(state, PLAYER_BULLET_DAMAGE), 'A bullet inside the immunity window is ignored')
+  assert.equal(state.health, PLAYER_HEALTH.max - PLAYER_BULLET_DAMAGE)
+  step(state, 0.1)
+  assert(shootMission(state, PLAYER_BULLET_DAMAGE), 'The next bullet lands once immunity ends')
+  // Continuous fire at 60 fps: death takes three full immunity windows after the first hit.
+  const burst = initialMission(); let frames = 0
+  while (burst.phase === 'active') { shootMission(burst, PLAYER_BULLET_DAMAGE); advanceMission(burst, 1 / 60); frames++ }
+  assert(Math.abs(frames / 60 - 3 * PLAYER_HEALTH.bulletImmunity) < 0.05, `continuous fire kills after ${frames / 60}s`)
+}
+console.log('PASS A second of bullet immunity follows every hit; continuous fire needs 3 s to land four hits')
+
 // Real runtime damage path with small collaborators, as in player-death-runtime-checks.
 const noop = () => {}
 Object.assign(globalThis, { document: { hidden: false, querySelector: () => ({ classList: { toggle: noop } }) } })
@@ -46,13 +61,17 @@ Object.assign(m, {
 })
 const source = new THREE.Vector3(0, 1, -10)
 const bullet = (): PlayerBulletHit => ({ region: 'torso', side: 0, point: new THREE.Vector3(0, 1.2, 0), direction: new THREE.Vector3(0, 0, 1) })
-for (const weaponDamage of [7, 32, 9]) m.damage(weaponDamage, source, bullet())
+let hurtCues = 0; m.hud.hurt = () => hurtCues++
+m.damage(7, source, bullet()); m.damage(32, source, bullet())
+assert.equal(m.state.health, PLAYER_HEALTH.max - PLAYER_BULLET_DAMAGE, 'The runtime applies bullet immunity')
+assert.equal(hurtCues, 1, 'An ignored bullet shows no hit feedback')
+for (const weaponDamage of [32, 9]) { m.state.elapsed += PLAYER_HEALTH.bulletImmunity; m.damage(weaponDamage, source, bullet()) }
 assert.equal(m.state.health, PLAYER_HEALTH.max - 3 * PLAYER_BULLET_DAMAGE, 'Every bullet removes a quarter, whatever the enemy weapon')
 assert.equal(m.state.phase, 'active', 'Three hits leave the player alive')
-m.damage(7, source, bullet())
+m.state.elapsed += PLAYER_HEALTH.bulletImmunity; m.damage(7, source, bullet())
 assert.equal(m.state.phase, 'dead'); assert.equal(deaths, 1, 'The fourth bullet is lethal')
 
 m.state = initialMission(); player.playing = true
-m.damage(12)
-assert.equal(m.state.health, 88, 'Landings keep their energy-based damage')
-console.log('PASS Four enemy bullets kill regardless of weapon; landings keep scaled damage')
+m.damage(7, source, bullet()); m.damage(12)
+assert.equal(m.state.health, 63, 'Landings keep their energy-based damage and ignore bullet immunity')
+console.log('PASS Four spaced enemy bullets kill regardless of weapon; immune bullets are silent; landings keep scaled damage')

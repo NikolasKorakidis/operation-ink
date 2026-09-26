@@ -12,7 +12,7 @@ export type MissionState = {
   silencedElapsed: number; alarmPosition: Vec3 | null; reservesDispatched: number
   gateOpen: boolean; hostages: HostageState[]; jeep: 'waiting' | 'boarding' | 'escaping' | 'escaped'; escapeProgress: number
   detentionFound: boolean; cellsReached: boolean
-  health: number; lastDamageAt: number; elapsed: number; supplies: string[]; distractionUntil: number
+  health: number; lastDamageAt: number; lastBulletAt: number | null; elapsed: number; supplies: string[]; distractionUntil: number
   shots: number; kills: number; detections: number
 }
 export const initialMission = (): MissionState => ({
@@ -20,7 +20,7 @@ export const initialMission = (): MissionState => ({
   alarmPosition: null, reservesDispatched: 0, gateOpen: false,
   hostages: RESCUE_LAYOUT.hostageSpawns.map((position, index) => ({ id: `hostage-${index + 1}`, status: 'captive', position: [...position], routeIndex: index < 2 ? 1 : 0 })),
   jeep: 'waiting', escapeProgress: 0, detentionFound: false, cellsReached: false,
-  health: 100, lastDamageAt: 0, elapsed: 0, supplies: [], distractionUntil: 0, shots: 0, kills: 0, detections: 0,
+  health: 100, lastDamageAt: 0, lastBulletAt: null, elapsed: 0, supplies: [], distractionUntil: 0, shots: 0, kills: 0, detections: 0,
 })
 export const loadedCount = (state: MissionState) => state.hostages.filter(h => h.status === 'loaded').length
 export const releasedCount = (state: MissionState) => state.hostages.filter(h => h.status !== 'captive').length
@@ -108,5 +108,13 @@ export function damageMission(state: MissionState, amount: number) {
   state.health = Math.max(0, state.health - amount)
   state.lastDamageAt = state.elapsed
   if (!state.health) state.phase = 'dead'
+  return true
+}
+
+/** Bullets that arrive within the immunity window after a bullet hit are ignored entirely. */
+export function shootMission(state: MissionState, amount: number) {
+  if (state.lastBulletAt !== null && state.elapsed - state.lastBulletAt < PLAYER_HEALTH.bulletImmunity) return false
+  if (!damageMission(state, amount)) return false
+  state.lastBulletAt = state.elapsed
   return true
 }

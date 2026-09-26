@@ -13,8 +13,9 @@ export function fallDamage(landingSpeed: number) {
 }
 
 /** Call of Duty-style player health: every enemy bullet removes a quarter, so the fourth hit is lethal.
+ * Each bullet hit grants a second of bullet immunity, so a burst cannot land all four at once.
  * After a short pause without damage, health refills to full. Landings keep energy-based damage. */
-export const PLAYER_HEALTH = { max: 100, bulletHits: 4, regenDelay: 5, regenPerSecond: 40 } as const
+export const PLAYER_HEALTH = { max: 100, bulletHits: 4, bulletImmunity: 1, regenDelay: 5, regenPerSecond: 40 } as const
 export const PLAYER_BULLET_DAMAGE = PLAYER_HEALTH.max / PLAYER_HEALTH.bulletHits
 
 // No armor or damage immunity: every confirmed hit applies this damage immediately.
