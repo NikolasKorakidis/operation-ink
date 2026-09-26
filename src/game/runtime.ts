@@ -194,6 +194,7 @@ export class MissionRuntime {
       case 'Digit2': this.weapons.switchSlot(1); break
       case 'Digit3': this.weapons.switchSlot(2); break
       case 'Digit4': this.weapons.switchSlot(3); break
+      case 'Digit5': this.weapons.switchSlot(4); break
       case 'KeyG': this.weapons.drop(this.player.body.position); break
       default: return
     }

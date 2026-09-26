@@ -23,22 +23,26 @@ function fixture(wall = false) {
 {
   const f = fixture()
   const fresh = f.weapons.snapshot()
-  assert.deepEqual(fresh.slots.map(w => w?.name), ['pistol', 'shotgun', 'ak', 'smg'])
+  assert.deepEqual(fresh.slots.map(w => w?.name), ['pistol', 'shotgun', 'ak', 'smg', 'sniper'])
   assert.equal(fresh.selected, 2)
   assert.equal(f.weapons.current?.name, 'ak', 'Fresh missions equip the AK-47')
   assert.equal(f.weapons.ammo, '30 / 90')
-  assert(!fresh.slots.some(w => w?.name === 'sniper'))
-  for (let i = 0; i < 4; i++) { f.weapons.switchSlot(i); f.step(0.3); assert.equal(f.weapons.current?.name, fresh.slots[i]?.name) }
-  assert(!f.weapons.switchSlot(4)); assert(!f.weapons.switchSlot(-1)); assert(!f.weapons.switchSlot(1.5))
+  assert.equal(fresh.slots[4]?.magazine, 5); assert.equal(fresh.slots[4]?.reserve, 15)
+  for (let i = 0; i < 5; i++) { f.weapons.switchSlot(i); f.step(0.3); assert.equal(f.weapons.current?.name, fresh.slots[i]?.name) }
+  assert(!f.weapons.switchSlot(5)); assert(!f.weapons.switchSlot(-1)); assert(!f.weapons.switchSlot(1.5))
   const snapshot = f.weapons.snapshot(); f.weapons.restore(snapshot); assert.deepEqual(f.weapons.snapshot(), snapshot)
-  assert.equal(f.weapons.selected, 3)
+  assert.equal(f.weapons.selected, 4)
+  f.frame.aiming = true; f.step(0.3)
+  assert(f.weapons.scoped, 'The starting sniper enters its scope when aimed')
+  assert.equal(f.weapons.scopeMagnification, 4, 'The scope opens at 4x')
+  f.frame.aiming = false; f.step(0.3)
   const second = fixture(); f.weapons.current!.magazine = 1
   assert.equal(second.weapons.slots[3]?.magazine, 24, 'starting inventories cannot share mutable ammo')
   f.weapons.restore(fresh)
   assert.equal(f.weapons.current?.name, 'ak', 'Restoring the insertion checkpoint equips the AK-47')
   f.dispose(); second.dispose()
 }
-console.log('PASS AK-47 starts equipped; four independent guns keep their slots and checkpoint selection')
+console.log('PASS AK-47 starts equipped; five independent guns keep their slots and checkpoint selection; sniper scopes at 4x')
 {
   const f = fixture(); f.weapons.switchSlot(1); f.step(0.3)
   f.weapons.trigger(true); f.weapons.trigger(false); f.step(1 / 60)
@@ -83,7 +87,7 @@ console.log('PASS Solid cover blocks the shotgun muzzle without spending a shell
   f.weapons.addPickup({ id: 'found-sniper', name: 'sniper', magazine: 5, reserve: 10, position: [0, 0, -1] })
   f.camera.lookAt(f.weapons.pickupTargets().find(p => p.id === 'found-sniper')!.point)
   assert(f.weapons.pickup('found-sniper'))
-  assert.deepEqual(f.weapons.slots.map(w => w?.name), ['pistol', 'shotgun', 'ak', 'sniper'])
+  assert.deepEqual(f.weapons.slots.map(w => w?.name), ['pistol', 'shotgun', 'ak', 'sniper', 'sniper'])
   assert(f.weapons.snapshot().pickups.some(w => w.id === 'player-smg' && w.magazine === 24 && w.reserve === 72))
   f.frame.aiming = true; f.step(0.3)
   assert(f.weapons.scoped, 'A picked-up sniper can enter its scope')

@@ -7,11 +7,15 @@ import type { WeaponName } from '../src/game/types'
 
 for (const name of Object.keys(WEAPON_RULES) as WeaponName[]) {
   const damage = (zone: 'head'|'torso'|'arm'|'leg') => hitDamage(name, zone, WEAPON_RULES[name].damage)
-  assert.equal(damage('head') >= ENEMY_HEALTH, name === 'sniper')
+  if (name === 'sniper') {
+    for (const zone of ['head', 'torso', 'arm', 'leg'] as const) assert(damage(zone) >= ENEMY_HEALTH)
+    continue
+  }
+  assert(damage('head') < ENEMY_HEALTH)
   assert(damage('torso') < ENEMY_HEALTH)
   assert(damage('head') > damage('torso') && damage('torso') > damage('arm') && damage('leg') > 0)
 }
-console.log('PASS shared balance permits only sniper one-shot head kills; every limb takes positive damage')
+console.log('PASS shared balance makes every sniper hit lethal; other weapons need follow-up shots and every limb takes positive damage')
 
 for (const zone of ['head','torso','arm','leg'] as const) {
   assert(reactionClipName({zone,lethal:false},false).startsWith('flinch'))

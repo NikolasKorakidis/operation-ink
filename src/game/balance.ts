@@ -31,8 +31,10 @@ export const ENEMY_WEAPONS = {
   sniper: { magazine: 5, reload: 2.9, damage: 32, burst: 1, gap: 1.35, pause: [2.0, 2.6] },
 } as const
 
+/** Player sniper rounds are lethal on any confirmed hit. */
 export function hitDamage(weapon: WeaponName | undefined, zone: HitZone, baseDamage: number) {
-  return Math.max(0, baseDamage) * (zone === 'head' && weapon === 'sniper' ? 2 : HIT_MULTIPLIERS[zone])
+  if (weapon === 'sniper') return ENEMY_HEALTH
+  return Math.max(0, baseDamage) * HIT_MULTIPLIERS[zone]
 }
 
 /** Responsive combat: reaction runs alongside weapon presentation, never after it. */
@@ -67,7 +69,7 @@ export function shotgunDamageMultiplier(distance: number) {
   return 1 - travel * (1 - SHOTGUN_BALLISTICS.minimumDamageScale)
 }
 
-export const WEAPON_SLOTS = 4
+export const WEAPON_SLOTS = 5
 export const SNIPER_ZOOM = { min: 2, max: 8, initial: 4 } as const
 export function startingLoadout(): WeaponItem[] {
   return [
@@ -75,5 +77,6 @@ export function startingLoadout(): WeaponItem[] {
     { id: 'player-shotgun', name: 'shotgun', magazine: 6, reserve: 24 },
     { id: 'player-ak', name: 'ak', magazine: 30, reserve: 90 },
     { id: 'player-smg', name: 'smg', magazine: 24, reserve: 72 },
+    { id: 'player-sniper', name: 'sniper', magazine: 5, reserve: 15 },
   ]
 }

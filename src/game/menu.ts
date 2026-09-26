@@ -65,7 +65,7 @@ export class MissionMenu {
           <div><dt>Reload</dt><dd><kbd>R</kbd></dd></div>
           <div><dt>Sprint</dt><dd><kbd>Shift</kbd></dd></div>
           <div><dt>Jump</dt><dd><kbd>Space</kbd></dd></div>
-          <div><dt>Switch weapon</dt><dd><kbd>1–4</kbd></dd></div>
+          <div><dt>Switch weapon</dt><dd><kbd>1–5</kbd></dd></div>
           <div><dt>Drop weapon</dt><dd><kbd>G</kbd></dd></div>
           <div><dt>Scope zoom</dt><dd><kbd>Q / E / Wheel</kbd></dd></div>
           <div><dt>Mission map</dt><dd><kbd>M</kbd></dd></div>
