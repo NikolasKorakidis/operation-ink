@@ -33,6 +33,7 @@
     "test:bullets": "node scripts/check-player.mjs scripts/bullet-feedback-checks.ts && node scripts/check-player.mjs scripts/ink-impact-checks.ts && node scripts/check-player.mjs scripts/gun-distance-checks.ts && node scripts/check-player.mjs scripts/hit-audio-checks.ts"
   },
   "dependencies": {
+    "peerjs": "^1.5.5",
     "preact": "^10.29.8",
     "three": "^0.186.0"
   },

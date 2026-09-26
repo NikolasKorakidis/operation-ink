@@ -138,6 +138,7 @@ export class MissionHUD {
 
   ready() { this.menu.ready() }
   showMap() { this.menu.showMap() }
+  showCoop() { this.menu.showCoop() }
   setPlaying(playing: boolean) { this.menu.setPlaying(playing) }
   error(message: string) { this.menu.error(message) }
   notify(message: string, duration = 5, visible = false) {

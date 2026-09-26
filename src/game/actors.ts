@@ -85,7 +85,7 @@ export class EnemyActor {
   private readonly arms: THREE.Bone[]
   deathClip = 'dieBody'
 
-  private constructor(readonly rig: Rig, private lib: Library, readonly weapon: WeaponName) {
+  private constructor(readonly rig: Rig, private lib: Library, readonly weapon: WeaponName, color: number) {
     this.root = rig.root
     this.root.name = 'Black stickman guard'
     this.root.userData.actor = true
@@ -101,7 +101,7 @@ export class EnemyActor {
     // Material.clone does not preserve callbacks. Keep the original dual-quaternion shader setup.
     this.material.onBeforeCompile = original.onBeforeCompile
     this.material.customProgramCacheKey = original.customProgramCacheKey.bind(original)
-    this.material.color.setHex(penPalette.character)
+    this.material.color.setHex(color)
     this.material.toneMapped = false
     this.material.depthTest = this.material.depthWrite = true
     rig.mesh.material = this.material
@@ -125,9 +125,10 @@ export class EnemyActor {
     this.update(0, 'guard', false)
   }
 
-  static async create(weapon: WeaponName) {
+  /** Guards are solid black; co-op teammates reuse the same rig in their team colour. */
+  static async create(weapon: WeaponName, color: number = penPalette.character) {
     const rig = await loadStickman()
-    return new EnemyActor(rig, await animations(rig), weapon)
+    return new EnemyActor(rig, await animations(rig), weapon, color)
   }
 
   update(dt: number, state: EnemyState, moving: boolean, aim?: THREE.Vector3, speed = moving ? 1.4 : 0) {

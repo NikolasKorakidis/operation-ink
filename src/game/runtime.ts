@@ -20,6 +20,10 @@ import { HostageEscort } from './hostages'
 import { SecuritySystem } from './security'
 import { RESCUE_LAYOUT } from './rescue-layout'
 import { updateRescueJeepDoor } from './rescue-jeep'
+import { Teammates } from './teammates'
+import { CoopPanel } from './coop-panel'
+import { CoopSession } from '../net/session'
+import type { CoopMessage } from '../net/hub'
 import type { EnemySnapshot, MissionWorld, Shot, SoundEvent, Station, Vec3, WeaponSnapshot } from './types'
 
 type Checkpoint = { mission: MissionState; weapons: WeaponSnapshot; enemies: EnemySnapshot[]; doors: boolean[]; position: Vec3; quaternion: [number,number,number,number]; blood?: BloodSnapshot }
@@ -39,6 +43,10 @@ export class MissionRuntime {
   readonly hud: MissionHUD
   readonly escort: HostageEscort
   readonly security: SecuritySystem
+  readonly teammates: Teammates
+  readonly coop: CoopSession
+  private coopPanel: CoopPanel
+  private poseTimer = 0
   ready = false
   readonly initialized: Promise<void>
   deaths = 0
@@ -92,6 +100,10 @@ export class MissionRuntime {
       this.hud.setPlaying(playing)
       if (this.escape.active) this.hud.setEscape(this.escape)
     }
+    this.teammates = new Teammates(scene, event => this.audio.play(event), invalidate)
+    this.coop = new CoopSession(message => this.coopMessage(message))
+    this.coop.onChange(() => { if (!this.coop.active) this.teammates.clear(); this.invalidate() })
+    this.coopPanel = new CoopPanel(document.querySelector('.coop-slot')!, document.querySelector('#coop-status')!, this.coop)
     this.escort = new HostageEscort(scene, player.world, player.actions.doors)
     this.security = new SecuritySystem(player.world, world, this.ai, event => this.emit(event, false))
     this.syncWorld()
@@ -151,6 +163,9 @@ export class MissionRuntime {
       this.initial = this.snapshot()
       this.checkpoint = structuredClone(this.initial)
       this.ready = true; this.hud.ready(); this.invalidate()
+      // An invite link (?join=ROOM) connects straight away and shows the room on the Co-op page.
+      const room = new URLSearchParams(location.search).get('join')
+      if (room) { this.hud.showCoop(); void this.coop.join(room) }
     } catch (error) {
       if (this.disposed) return
       console.error('Mission loading failed', error)
@@ -280,6 +295,7 @@ export class MissionRuntime {
       this.impacts.emit(end, shot.direction, surface, shot.weapon)
     } : undefined
     this.bulletTrails.emit(shot.origin, end, shot.weapon, undefined, impact)
+    this.coop.send({ t: 'shot', id: this.coop.hub.selfId, origin: shot.origin.toArray() as Vec3, end: end.toArray() as Vec3, weapon: shot.weapon ?? 'ak' })
   }
 
   damage(amount: number, source?: THREE.Vector3, hit?: PlayerBulletHit) {
@@ -427,7 +443,9 @@ export class MissionRuntime {
     this.finishFrame()
     const landingSpeed = this.player.body.landingSpeed
     this.player.body.landingSpeed = 0
-    if (this.escape.active) return this.updateEscape(dt, elapsed)
+    // Teammates keep moving while this player pauses, dies or rides out; keep rendering while in a room.
+    const coop = this.syncCoop(dt)
+    if (this.escape.active) return this.updateEscape(dt, elapsed) || coop
     const active=this.isActive()
     if (this.player.immersive || !this.player.enabled || this.state.phase !== 'active') {
       this.playerHits.clear(); this.hud.clearThreat()
@@ -527,9 +545,31 @@ export class MissionRuntime {
     this.hud.update(dt,this.state,{playing:this.player.playing,enabled:this.player.enabled&&!this.player.immersive,
       weapon:this.weapons.current,reloading:this.weapons.reloading,
       position:this.player.body.position,yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y,deaths:this.deaths,ready:this.ready})
-    return active || this.death.running
+    return active || this.death.running || coop
+  }
+
+  private coopMessage(message: CoopMessage) {
+    if (message.t === 'pose') this.teammates.pose(message.id, message.pose)
+    else if (message.t === 'shot') this.teammates.shot(message.id, message.origin, message.end, message.weapon)
+    else if (message.t === 'leave') this.teammates.remove(message.id)
+  }
+
+  /** Draw teammates, and share this player's pose about 15 times a second. */
+  private syncCoop(dt: number) {
+    this.teammates.update(dt)
+    if (!this.coop.active) return this.teammates.count > 0
+    this.poseTimer -= dt
+    if (this.poseTimer <= 0) {
+      this.poseTimer = 1 / 15
+      const body = this.player.body, direction = this.camera.perspective.getWorldDirection(new THREE.Vector3())
+      this.coop.send({ t: 'pose', id: this.coop.hub.selfId, pose: {
+        feet: body.position.toArray() as Vec3, yaw: Math.atan2(direction.x, direction.z), pitch: Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)),
+        speed: Math.hypot(body.velocity.x, body.velocity.z), weapon: this.weapons.current?.name ?? null,
+        aiming: this.aiming, alive: this.state.phase !== 'dead' } })
+    }
+    return true
   }
 
   finishFrame() { this.playerHits.removeCamera() }
-  dispose() { this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
+  dispose() { this.coopPanel.dispose();this.coop.dispose();this.teammates.dispose();this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
 }

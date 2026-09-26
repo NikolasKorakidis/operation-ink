@@ -29,6 +29,7 @@ const player = { enabled: true, immersive: false, playing: true, body, movementL
   pause() { paused++; this.playing = false },
 }
 Object.assign(m, {
+  teammates: { update: () => {}, count: 0 }, coop: { active: false, send: () => {}, hub: { selfId: 0 } }, 
   state: initialMission(), ready: true, deaths: 0, camera: { perspective: camera }, player,
   world: { bounds: { minX: -100, maxX: 100, minZ: -100, maxZ: 100 } },
   death: new PlayerDeathSequence(), escape: new EscapeCinematic(), escapeDust: { clear: noop }, playerHits: new PlayerHitReactions(),

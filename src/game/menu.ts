@@ -1,6 +1,6 @@
 import { missionObjective, type MissionState } from './mission'
 
-type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart'
+type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart' | 'coop'
 type MenuCallbacks = { retry: () => void; restart: () => void }
 
 /** One decision at a time; reference material never blocks entering the game. */
@@ -29,6 +29,7 @@ export class MissionMenu {
       <section data-menu-page="home">
         <h1 id="mission-menu-title">Operation Safe Return</h1>
         <p id="mission-premise">Find the hostage. Get out together.</p>
+        <p id="coop-status" hidden></p>
         <div id="mission-debrief" role="status" hidden></div>
         <div class="mission-actions">
           <div class="mission-start-slot"></div>
@@ -37,6 +38,7 @@ export class MissionMenu {
         </div>
         <nav class="mission-menu-links" aria-label="Mission menu">
           <button data-menu-open="mission">Mission</button>
+          <button data-menu-open="coop">Co-op</button>
           <button data-menu-open="controls">Controls</button>
           <button data-menu-open="settings">Settings</button>
         </nav>
@@ -87,6 +89,11 @@ export class MissionMenu {
         <h2 id="vr-page-title">Explore in VR</h2>
         <p>Walk through the compound with your headset. Your mission stays paused.</p>
         <div class="mission-vr-slot"></div>
+      </section>
+      <section data-menu-page="coop" hidden>
+        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
+        <h2 id="coop-page-title">Play together</h2>
+        <div class="coop-slot"></div>
       </section>
       <section data-menu-page="restart" hidden>
         <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
@@ -148,6 +155,7 @@ export class MissionMenu {
   }
 
   showMap() { this.returnFocus = null; this.show('mission') }
+  showCoop() { this.returnFocus = null; this.show('coop') }
   setPlaying(playing: boolean) {
     if (playing) {
       this.hasPlayed = true

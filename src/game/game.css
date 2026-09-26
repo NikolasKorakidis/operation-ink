@@ -25,6 +25,22 @@ body[data-mission="true"] .walk-heading { display: none; }
 body[data-mission="true"] .walk-card { width: min(440px, 100%); padding: 38px; background: var(--paper); border-radius: 4px 7px 3px 6px; box-shadow: 3px 4px 0 #00000012; }
 body[data-mission="true"] .walk-card[data-page="mission"] { width: min(760px, 100%); }
 body[data-mission="true"] .walk-card[data-page="controls"] { width: min(560px, 100%); }
+/* Co-op: the home line names the room; the page hosts, joins and lists teammates in their colours. */
+body[data-mission="true"] .walk-card #coop-status { margin-top: 10px; font-size: 13px; color: var(--ink); }
+.coop-join { margin-top: 22px; display: grid; gap: 8px; font-size: 13px; color: var(--ink-muted); }
+.coop-join div, .coop-invite { display: flex; gap: 8px; }
+.coop-join input, .coop-invite input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--ink-rule); border-radius: 3px; background: var(--paper); color: var(--ink); font: 15px var(--font-mono, monospace); }
+.coop-join input { text-transform: uppercase; letter-spacing: 0.2em; }
+.coop-invite input { font-size: 12px; }
+body[data-mission="true"] .walk-card .coop-join button, body[data-mission="true"] .walk-card .coop-invite button { width: auto; flex: none; }
+body[data-mission="true"] .walk-card .coop-room { color: var(--ink); margin: 20px 0 12px; }
+.coop-room strong { font: 600 18px var(--font-mono, monospace); letter-spacing: 0.15em; }
+.coop-players { list-style: none; margin: 18px 0 12px; padding: 0; display: grid; gap: 8px; font-size: 14px; color: var(--ink); }
+.coop-players li { display: flex; align-items: center; gap: 10px; }
+.coop-players i { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+body[data-mission="true"] .walk-card .coop-message { margin-top: 14px; color: var(--ink); font-size: 13px; }
+body[data-mission="true"] .walk-card .coop-message:empty { display: none; }
+body[data-mission="true"] .walk-card .coop-note { margin-top: 18px; font-size: 12px; }
 body[data-mission="true"] .walk-card h1 { font: 600 44px/1.08 var(--hand); margin: 0 0 16px; color: var(--ink); letter-spacing: -0.02em; text-wrap: balance; }
 body[data-mission="true"] .walk-card h2 { font: 600 36px/1.15 var(--hand); margin: 20px 0 24px; color: var(--ink); }
 body[data-mission="true"] .walk-card p { font: 14px/1.6 var(--notes); color: var(--ink-muted); }
