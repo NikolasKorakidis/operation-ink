@@ -7,6 +7,7 @@ import { FirstPersonController } from './player/controller'
 import { VRWalkthrough } from './vr/walkthrough'
 import { createMissionWorld, prepareCompound } from './game/world'
 import { MissionRuntime } from './game/runtime'
+import { BuildingLabels } from './world/labels'
 import './style.css'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#world')!
@@ -29,6 +30,8 @@ const missionWorld = new URLSearchParams(location.search).get('explore') === '1'
 if (missionWorld) prepareCompound(compound)
 scene.add(compound)
 if (missionWorld) scene.add(missionWorld.root)
+// Name tags over each building for the map views; CSS hides them while walking.
+const buildingLabels = new BuildingLabels(scene)
 
 let frame = 0
 let lastTime = performance.now()
@@ -84,6 +87,7 @@ function render(now: number, xrFrame?: XRFrame) {
     // Cinematic travel follows real frame time; physics keeps its safe step cap.
     missionMoving = mission?.update(dt, elapsed) ?? false
     renderer.render(scene, vr.active ? vr.rig.camera : camera.active)
+    if (!vr.active && document.body.dataset.mode !== 'walk') buildingLabels.update(camera.active)
   }
   finally { mission?.finishFrame() }
   if (startupReady) {
@@ -180,6 +184,7 @@ import.meta.hot?.dispose(() => {
   window.removeEventListener('resize', resize)
   document.removeEventListener('visibilitychange', visibilityChanged)
   vr.dispose()
+  buildingLabels.dispose()
   mission?.dispose()
   player.dispose()
   camera.dispose()

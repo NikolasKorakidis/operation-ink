@@ -30,6 +30,13 @@ body[data-mode="walk"] .inspection-help { display: none; }
 #walk-status { font-size: 15px; }
 .mode-button { position: fixed; z-index: 3; right: 25px; top: 25px; padding: 10px 14px; display: flex; gap: 24px; align-items: center; border: 1px solid var(--ink-rule); background: #ffffffee; color: var(--ink); border-radius: 3px; pointer-events: auto; font: 12px var(--notes); }
 .mode-button:hover { background: var(--paper-shade); }
+/* Map views: paper name tags pinned above each building, with a short ink leader down to the roof. */
+#building-labels { position: fixed; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+body[data-mode="walk"] #building-labels, body[data-vr="active"] #building-labels { display: none; }
+.building-label { position: absolute; left: 0; top: 0; margin-top: -9px; padding: 3px 8px 4px; border: 1px solid var(--ink); border-radius: 3px; background: #ffffffee; color: var(--ink); font: 600 12px/1.25 var(--notes); white-space: nowrap; text-align: center; will-change: transform; }
+.building-label small { display: block; font-weight: 400; font-size: 10px; color: var(--ink-muted); }
+.building-label::after { content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: 9px; background: var(--ink); }
+.building-label[hidden] { display: none; }
 /* Free roam and the map views link back to the main menu; hidden while actually walking. */
 .home-link { left: 25px; right: auto; text-decoration: none; }
 body[data-mode="walk"] .home-link { display: none; }
