@@ -58,6 +58,17 @@ body[data-mission="true"] .walk-card button:disabled { background: var(--paper-s
 .mission-menu-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 22px; padding-top: 14px; border-top: 1px solid #e5e5e5; }
 .mission-menu-links button, .menu-back { padding: 0; border: 0; background: transparent; color: var(--ink-muted); }
 .mission-menu-links button:hover, .menu-back:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 5px; }
+/* Main menu: every mode is a full-width entry with a one-line description. */
+.main-menu { display: grid; gap: 8px; margin-top: 12px; }
+.main-entry { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; align-items: center; width: 100%; padding: 10px 16px; text-align: left; background: transparent; color: var(--ink); border: 1px solid var(--ink-rule); border-radius: 3px; cursor: pointer; }
+.main-entry::after { content: '→'; grid-column: 2; grid-row: 1 / span 2; color: var(--ink-muted); }
+.main-entry strong { font: 600 15px/1.35 var(--notes); }
+.main-entry span { grid-column: 1; font: 12px/1.4 var(--notes); color: var(--ink-muted); }
+.main-entry:hover { background: var(--paper-shade); }
+.main-entry:hover::after { color: var(--ink); }
+body[data-mission="true"] .walk-card .main-entry { min-height: 58px; }
+.view-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 22px; }
+body[data-mission="true"] .walk-card[data-page="views"] { width: min(620px, 100%); }
 .menu-back { display: flex; gap: 10px; align-items: center; }
 .menu-back kbd { margin-left: 5px; color: var(--ink-muted); font-size: 11px; border: 1px solid #d5d5d5; border-radius: 3px; padding: 0 5px; }
 .walk-card :is(button, input, summary):focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
@@ -125,6 +136,7 @@ body[data-reduced-motion="true"] #action-marker,body[data-reduced-motion="true"]
   .mission-weapon { bottom: 20px; right: 18px; }
 }
 @media(max-width:540px) {
+  .view-grid { grid-template-columns: 1fr; }
   body[data-mission="true"][data-mode="walk"] #walk-pause { padding: 18px 14px; }
   body[data-mission="true"] .walk-card { padding: 26px; }
   body[data-mission="true"] .walk-card h1 { font-size: 38px; }

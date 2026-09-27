@@ -30,6 +30,11 @@ body[data-mode="walk"] .inspection-help { display: none; }
 #walk-status { font-size: 15px; }
 .mode-button { position: fixed; z-index: 3; right: 25px; top: 25px; padding: 10px 14px; display: flex; gap: 24px; align-items: center; border: 1px solid var(--ink-rule); background: #ffffffee; color: var(--ink); border-radius: 3px; pointer-events: auto; font: 12px var(--notes); }
 .mode-button:hover { background: var(--paper-shade); }
+/* Free roam and the map views link back to the main menu; hidden while actually walking. */
+.home-link { left: 25px; right: auto; text-decoration: none; }
+body[data-mode="walk"] .home-link { display: none; }
+.walk-card .walk-home { display: inline-block; margin-top: 16px; color: var(--ink-muted); font-size: 12px; text-decoration: none; }
+.walk-card .walk-home:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
 .crosshair { position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; border: 1px solid var(--paper); border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 1px #00000055; transform: translate(-50%, -50%); }
 .crosshair.confirmed-hit { background: var(--ink-deep); outline: 1px solid var(--ink); outline-offset: 4px; border-radius: 1px; }
 #walk-hud[data-playing="false"] .crosshair { display: none; }

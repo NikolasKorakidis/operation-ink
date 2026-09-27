@@ -114,7 +114,12 @@ export class MissionRuntime {
         else this.respawn()
         void this.audio.unlock(); this.player.requestControl()
       },
-      volume: value => this.audio.setVolume(value), mute: value => this.audio.setMuted(value) })
+      volume: value => this.audio.setVolume(value), mute: value => this.audio.setMuted(value),
+      leaveWarning: () => {
+        const room = this.coop.active ? ` You will leave co-op room ${this.coop.room}.` : ''
+        if (this.state.phase === 'active' && this.state.elapsed > 0) return `Your mission progress will be lost.${room}`
+        return room ? room.trim() : null
+      } })
     player.onPlayingChange = playing => {
       this.hud.setPlaying(playing)
       if (this.escape.active) this.hud.setEscape(this.escape)

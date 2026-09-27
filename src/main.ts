@@ -142,8 +142,13 @@ canvas.addEventListener('webglcontextrestored', () => {
 })
 resize()
 const initialView = new URLSearchParams(location.search).get('view')
-if (initialView && initialView in views) camera.setView(initialView as ViewName)
-else player.enable()
+if (initialView && initialView in views) {
+  camera.setView(initialView as ViewName)
+  // The mission's player shares the perspective camera and is placed at the insertion once loaded; restore the view after that.
+  void mission?.initialized.then(() => { if (!player.enabled) camera.setView(initialView as ViewName) })
+} else player.enable()
+// Free roam and the map views are separate pages; give them a way back to the main menu.
+if (!missionWorld || initialView) document.querySelector<HTMLElement>('#home-link')!.hidden = false
 
 // Development inspection surface, intentionally absent from production builds and the page UI.
 if (import.meta.env.DEV) {

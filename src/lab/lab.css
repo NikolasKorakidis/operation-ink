@@ -4,6 +4,9 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; font: 12px/
 body { display: flex; }
 #lab { flex: 1; min-width: 0; height: 100%; display: block; outline: none; touch-action: none; cursor: grab; }
 #lab:active { cursor: grabbing; }
+#lab-home { position: fixed; z-index: 5; left: 14px; top: 12px; padding: 7px 12px; border: 1px solid var(--ink-rule); border-radius: 3px; background: #ffffffee; color: var(--ink); text-decoration: none; }
+#lab-home:hover { background: var(--paper-shade); }
+#lab-home:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 #panel { width: 300px; height: 100%; overflow-y: auto; background: var(--paper); color: var(--ink-deep); padding: 8px 12px 24px; border-left: 1px dashed var(--ink-rule); user-select: none; }
 #panel h3 { margin: 14px 0 6px; font-size: 11px; font-family: var(--hand); font-size: 17px; color: var(--ink-muted); }
 #panel button { background: transparent; color: inherit; border: 1px solid var(--ink-rule); border-radius: 4px; padding: 4px 8px; margin: 0 4px 4px 0; cursor: pointer; font: inherit; }

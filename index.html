@@ -28,6 +28,7 @@
       <p>Loading…</p>
     </div>
     <canvas id="world" tabindex="0" aria-label="Explore the military compound in first person. Click Start walking, mouse to look, WASD to walk, Shift to sprint, Space to jump, F to open doors or climb nearby ladders, Escape to pause, R to return to the entrance. Inspect map switches to the inspection camera."></canvas>
+    <a id="home-link" class="mode-button home-link" href="./" hidden><span aria-hidden="true">←</span> Main menu</a>
     <button id="walk-mode" class="mode-button" hidden>Walk the map <span>↗</span></button>
     <section id="walk-hud" hidden aria-label="First-person controls">
       <div class="walk-heading"><span class="walk-eyebrow">COMPOUND / EXPLORATION</span><span id="walk-status">On foot</span></div>
@@ -43,6 +44,7 @@
           <p>Take the ladder ahead to the mess hall roof and head downstairs. Follow the EXIT sign through the dining hall to reach the compound yard.</p>
           <div class="walk-instructions"><span><kbd>W A S D</kbd> Walk</span><span><kbd>Mouse</kbd> Look around</span><span><kbd>Shift</kbd> Sprint</span><span><kbd>Space</kbd> Jump</span><span><kbd>F</kbd> Doors &amp; ladders</span><span><kbd>R</kbd> Back to entrance</span></div>
           <button id="walk-start">Start walking <span>→</span></button>
+          <a class="walk-home" href="./"><span aria-hidden="true">←</span> Main menu</a>
           <small>Look for the blinking symbol. Press F when you’re within reach.<br>Esc pauses and releases your mouse.</small>
         </div>
       </div>

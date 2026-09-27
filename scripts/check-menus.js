@@ -25,8 +25,15 @@
   try {
     check(page() === 'home' && !visible('.field-map') && !visible('.mission-settings'), 'Opening menu contains no map or settings clutter')
     check(!visible('#mission-retry') && !visible('#mission-restart'), 'Fresh mission hides irrelevant recovery actions')
+    const entries = [...document.querySelectorAll('.main-menu .main-entry')].map(entry => entry.dataset.menuOpen ?? entry.dataset.menuGo)
+    check(JSON.stringify(entries) === JSON.stringify(['coop', 'explore', 'views', 'lab']), `Main menu offers co-op, free roam, map views and the lab: ${entries}`)
     const initialWords = $('[data-menu-page="home"]').innerText.trim().split(/\s+/).length
-    check(initialWords <= 25, `Opening screen has only ${initialWords} words`)
+    check(initialWords <= 60, `Opening screen stays brief: ${initialWords} words`)
+    click('[data-menu-open="views"]')
+    const views = [...document.querySelectorAll('[data-menu-page="views"] [data-menu-go]')].map(entry => entry.dataset.menuGo)
+    check(page() === 'views' && singlePage() && views.length === 10 && views.every(view => view.startsWith('view:')), 'Map views lists all ten inspection cameras')
+    key('Escape')
+    check(page() === 'home' && document.activeElement === $('[data-menu-open="views"]'), 'Escape returns from map views')
 
     check(!$('[data-menu-open="vr"]') && !visible('#vr-panel'), 'Unfinished VR is not offered in the menu')
     for (const name of ['mission', 'controls', 'settings']) {
@@ -43,7 +50,7 @@
     key('Tab', { shiftKey: true })
     check(document.activeElement.dataset.menuOpen === 'settings', 'Shift+Tab wraps backwards')
     $('#walk-start').focus(); key('ArrowDown')
-    check(document.activeElement.dataset.menuOpen === 'mission', 'Arrow keys navigate the menu')
+    check(document.activeElement.dataset.menuOpen === 'coop', 'Arrow keys navigate the menu')
 
     click('[data-menu-open="settings"]')
     const volume = $('#mission-volume')
@@ -57,6 +64,12 @@
 
     click('#walk-start'); draw()
     check(p.playing && $('#walk-pause').hidden, 'Begin mission enters play directly')
+    p.pause(); m.state.elapsed = 12; draw()
+    click('[data-menu-go="explore"]')
+    check(page() === 'leave' && $('#leave-warning').textContent.includes('progress') && document.activeElement.id === 'mission-cancel-leave', 'Leaving mid-mission asks first and focuses Stay')
+    click('#mission-cancel-leave')
+    check(page() === 'home' && m.state.elapsed === 12 && location.search === '', 'Stay keeps the mission')
+    click('#walk-start'); draw()
     key('KeyM'); draw()
     check(!p.playing && page() === 'mission' && visible('.field-map'), 'M opens the mission map directly from gameplay')
     key('KeyM')

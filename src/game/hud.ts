@@ -43,7 +43,7 @@ export class MissionHUD {
   private threatLabel: HTMLElement
   reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
 
-  constructor(world: MissionWorld, callbacks: { retry: () => void; restart: () => void; volume: (value: number) => void; mute: (value: boolean) => void }) {
+  constructor(world: MissionWorld, callbacks: { retry: () => void; restart: () => void; volume: (value: number) => void; mute: (value: boolean) => void; leaveWarning?: () => string | null }) {
     document.body.dataset.mission = 'true'
     document.body.dataset.reducedMotion = String(this.reducedMotion)
     document.title = 'Operation Safe Return — Stickman'

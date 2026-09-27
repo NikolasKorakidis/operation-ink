@@ -1,7 +1,28 @@
 import { missionObjective, type MissionState } from './mission'
+import type { ViewName } from '../camera'
 
-type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart' | 'coop'
-type MenuCallbacks = { retry: () => void; restart: () => void }
+/** Every other way into the game. Links are relative, so they work on GitHub Pages' /<repository>/ path too. */
+export const MAP_VIEWS: { id: ViewName; label: string; note: string }[] = [
+  { id: 'overview', label: 'Whole compound', note: 'High orbit over the camp' },
+  { id: 'plan', label: 'Top-down plan', note: 'The map from directly above' },
+  { id: 'yard', label: 'Compound yard', note: 'Ground level, looking north' },
+  { id: 'roof', label: 'Mess hall roof', note: 'Where the mission starts' },
+  { id: 'mess', label: 'Mess hall', note: 'Inside the dining hall' },
+  { id: 'office', label: 'Signals office', note: 'The camera terminal' },
+  { id: 'water', label: 'Water tower', note: 'The marksman\'s catwalk' },
+  { id: 'watch', label: 'Watchtower', note: 'The observation post' },
+  { id: 'rail', label: 'Rail siding', note: 'Down the tracks to the water tower' },
+  { id: 'tanks', label: 'Fuel tanks', note: 'The west tank farm' },
+]
+export type Destination = 'explore' | 'lab' | `view:${ViewName}`
+export function destinationUrl(destination: Destination) {
+  const path = destination === 'lab' ? 'lab.html' : destination === 'explore' ? './?explore=1' : `./?view=${destination.slice(5)}`
+  return new URL(path, location.href).toString()
+}
+
+type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart' | 'coop' | 'views' | 'leave'
+/** `leaveWarning` names what leaving to another mode would lose, or null when nothing is at stake. */
+type MenuCallbacks = { retry: () => void; restart: () => void; leaveWarning?: () => string | null }
 
 /** One decision at a time; reference material never blocks entering the game. */
 export class MissionMenu {
@@ -15,6 +36,7 @@ export class MissionMenu {
   private loaded = false
   private loadError = ''
   private returnFocus: HTMLElement | null = null
+  private leaving: string | null = null
   private title: HTMLElement
   private premise: HTMLElement
   private retry: HTMLButtonElement
@@ -36,12 +58,32 @@ export class MissionMenu {
           <button id="mission-retry" class="menu-primary" hidden>Try again</button>
           <button id="mission-restart" class="menu-quiet" hidden>Restart mission</button>
         </div>
+        <nav class="main-menu" aria-label="Main menu">
+          <button class="main-entry" data-menu-open="coop"><strong>Play with friends</strong><span>Co-op for up to 4 players</span></button>
+          <button class="main-entry" data-menu-go="explore"><strong>Free roam</strong><span>Walk the compound with no guards</span></button>
+          <button class="main-entry" data-menu-open="views"><strong>Map views</strong><span>Fly-over cameras around the camp</span></button>
+          <button class="main-entry" data-menu-go="lab"><strong>Animation lab</strong><span>Characters, moves and weapons</span></button>
+        </nav>
         <nav class="mission-menu-links" aria-label="Mission menu">
-          <button data-menu-open="mission">Mission</button>
-          <button data-menu-open="coop">Co-op</button>
+          <button data-menu-open="mission">Briefing</button>
           <button data-menu-open="controls">Controls</button>
           <button data-menu-open="settings">Settings</button>
         </nav>
+      </section>
+      <section data-menu-page="views" hidden>
+        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
+        <h2 id="views-page-title">Map views</h2>
+        <p>Inspection cameras. Drag to orbit, scroll to zoom, and press <kbd>V</kbd> to fly freely.</p>
+        <div class="view-grid">${MAP_VIEWS.map(view => `<button class="main-entry" data-menu-go="view:${view.id}"><strong>${view.label}</strong><span>${view.note}</span></button>`).join('')}</div>
+      </section>
+      <section data-menu-page="leave" hidden>
+        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
+        <h2 id="leave-page-title">Leave the mission?</h2>
+        <p id="leave-warning"></p>
+        <div class="mission-actions">
+          <button id="mission-cancel-leave" class="menu-primary">Stay</button>
+          <button id="mission-confirm-leave" class="menu-secondary">Leave</button>
+        </div>
       </section>
       <section data-menu-page="mission" hidden>
         <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
@@ -126,6 +168,11 @@ export class MissionMenu {
       else this.show('restart', this.restart)
     }, options)
     this.element('#mission-confirm-restart').addEventListener('click', callbacks.restart, options)
+    this.card.querySelectorAll<HTMLElement>('[data-menu-go]').forEach(button => {
+      button.addEventListener('click', () => this.go(button.dataset.menuGo as Destination, button, callbacks.leaveWarning?.() ?? null), options)
+    })
+    this.element('#mission-cancel-leave').addEventListener('click', () => this.back(), options)
+    this.element('#mission-confirm-leave').addEventListener('click', () => { if (this.leaving) location.assign(this.leaving) }, options)
     this.element('#mission-cancel-restart').addEventListener('click', () => this.back(), options)
     this.element('#mission-volume').addEventListener('input', event => {
       this.element('#mission-volume-value').textContent = `${(event.target as HTMLInputElement).value}%`
@@ -134,6 +181,15 @@ export class MissionMenu {
   }
 
   private element<T extends HTMLElement = HTMLElement>(selector: string) { return this.card.querySelector<T>(selector)! }
+
+  /** Other modes are separate pages. Ask first when leaving would end a mission or a co-op room. */
+  private go(destination: Destination, source: HTMLElement, warning: string | null) {
+    const url = destinationUrl(destination)
+    if (!warning) { location.assign(url); return }
+    this.leaving = url
+    this.element('#leave-warning').textContent = warning
+    this.show('leave', source)
+  }
 
   private show(page: MenuPage, source?: HTMLElement, focus = true) {
     if (source) this.returnFocus = source
@@ -144,7 +200,7 @@ export class MissionMenu {
     this.pause.scrollTop = 0
     if (focus) {
       if (page === 'home') this.focusPrimary()
-      else this.element<HTMLButtonElement>(`[data-menu-page="${page}"] ${page === 'restart' ? '#mission-cancel-restart' : '[data-menu-back]'}`).focus({ preventScroll: true })
+      else this.element<HTMLButtonElement>(`[data-menu-page="${page}"] ${page === 'restart' ? '#mission-cancel-restart' : page === 'leave' ? '#mission-cancel-leave' : '[data-menu-back]'}`).focus({ preventScroll: true })
     }
   }
 
@@ -246,7 +302,7 @@ export class MissionMenu {
       if (index === -1 || (event.shiftKey ? index === 0 : index === buttons.length - 1)) {
         event.preventDefault(); buttons[event.shiftKey ? buttons.length - 1 : 0]?.focus()
       }
-    } else if (['ArrowUp', 'ArrowDown'].includes(event.key) && (this.page === 'home' || this.page === 'restart')) {
+    } else if (['ArrowUp', 'ArrowDown'].includes(event.key) && (this.page === 'home' || this.page === 'restart' || this.page === 'leave' || this.page === 'views')) {
       event.preventDefault()
       buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus()
     }
