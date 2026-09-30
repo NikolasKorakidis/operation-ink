@@ -57,7 +57,7 @@ Object.assign(m, {
   death: Object.assign(new PlayerDeathSequence(), { begin: () => deaths++ }), escape: new EscapeCinematic(),
   playerHits: { hit: noop, clear: noop }, weapons: { cancel: noop, beginDeath: noop },
   audio: { play: noop, beginDeath: noop }, hud: { reducedMotion: false, hurt: noop, hitFrom: noop, notify: noop, clearThreat: noop, setScoped: noop, setDeath: noop },
-  invalidate: noop,
+  invalidate: noop, leanKeys: new Set(),
 })
 const source = new THREE.Vector3(0, 1, -10)
 const bullet = (): PlayerBulletHit => ({ region: 'torso', side: 0, point: new THREE.Vector3(0, 1.2, 0), direction: new THREE.Vector3(0, 0, 1) })

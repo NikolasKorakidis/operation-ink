@@ -1,6 +1,6 @@
-# Project Stickman
+# Stickman: Ghost Ink
 
-A browser-based first-person hostage-rescue game ("Operation Safe Return") with a paper-and-ink look. TypeScript, Three.js (WebGL, unlit surfaces + screen-space outlines), Vite, Preact. No backend.
+A browser-based first-person hostage-rescue game, "Stickman: Ghost Ink", with a paper-and-ink look. TypeScript, Three.js (WebGL, unlit surfaces + screen-space outlines), Vite, Preact. No backend.
 
 ## Commands
 
@@ -44,7 +44,7 @@ npm run test:<area>  # focused suite, see table
 
 ## Conventions and gotchas
 
-- **Style:** pure white paper `#ffffff`, ink `#000000` / `#808080` / `#bdbdbd`. NPCs are solid black, the hostage is blue `#2878d0`, blood is solid red. Structural strokes are 2.2 CSS px and taper with distance. Never render mesh tessellation as wireframe.
+- **Style:** pure white paper `#ffffff`, ink `#000000` / `#808080` / `#bdbdbd`. NPCs are solid black, the hostage is blue `#2878d0`, blood is solid red. Quest items are the one painted exception: radios (olive and brown) and breakable crates (wood brown), from the `QUEST_COLORS` fills in `src/render/ink.ts`. Structural strokes are 2.2 CSS px and taper with distance. Never render mesh tessellation as wireframe.
 - The stickman must read as one continuous body — no visible joints or separate limb meshes.
 - Collision extraction skips `ShaderMaterial` meshes. Keep solid material types on anything that must block movement.
 - Physics `dt` is capped at 50 ms; cinematics and door/gate timing use real elapsed time. Test timing-sensitive work at 30/60/144 fps like the existing checks do.

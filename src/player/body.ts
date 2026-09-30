@@ -2,7 +2,17 @@ import * as THREE from 'three'
 import { Capsule } from 'three/addons/math/Capsule.js'
 import { CollisionWorld } from './collision'
 
-export const EYE_HEIGHT = 1.65
+export type Stance = 'stand' | 'crouch' | 'prone'
+/** Eye height (m) and walking speed (m/s) per stance. Only standing can sprint or jump. */
+export const STANCES: Record<Stance, { eye: number; speed: number }> = {
+  stand: { eye: 1.65, speed: 4.2 },
+  crouch: { eye: 1.12, speed: 1.9 },
+  prone: { eye: 0.42, speed: 0.75 },
+}
+export const EYE_HEIGHT = STANCES.stand.eye
+const SPRINT_SPEED = 7.6
+/** How quickly the view glides to a new stance's eye height (per second). */
+const STANCE_BLEND = 10
 const HEIGHT = 1.8
 const RADIUS = 0.28
 const STEP_HEIGHT = 0.34
@@ -15,6 +25,9 @@ export class PlayerBody {
   grounded = false
   /** Downward speed at ground contact, retained across this frame's substeps. */
   landingSpeed = 0
+  stance: Stance = 'stand'
+  /** Current eye height above the feet, easing toward the stance's height. */
+  eyeHeight = EYE_HEIGHT
   private capsule = new Capsule(new THREE.Vector3(), new THREE.Vector3(), RADIUS)
   private candidate = new THREE.Vector3()
   private delta = new THREE.Vector3()
@@ -35,24 +48,27 @@ export class PlayerBody {
   }
 
   jump() {
-    if (!this.grounded) return false
+    if (!this.grounded || this.stance !== 'stand') return false
     this.velocity.y = 7
     this.grounded = false
     return true
   }
 
-  /** Sprint wins over sneak; sneaking is the slow, silent walk. */
-  update(dt: number, direction: THREE.Vector3, sprint: boolean, sneak = false) {
+  /** Sprinting only works standing; crouching and lying prone move at their own slower speeds. */
+  update(dt: number, direction: THREE.Vector3, sprint: boolean, stance: Stance = 'stand') {
     this.landingSpeed = 0
+    this.stance = stance
+    const blend = 1 - Math.exp(-STANCE_BLEND * Math.max(0, Math.min(dt, 0.1)))
+    this.eyeHeight += (STANCES[stance].eye - this.eyeHeight) * blend
     const steps = Math.max(1, Math.ceil(Math.min(dt, 0.05) / (1 / 120)))
     const step = Math.min(dt, 0.05) / steps
-    for (let i = 0; i < steps; i++) this.step(step, direction, sprint, sneak)
+    for (let i = 0; i < steps; i++) this.step(step, direction, sprint && stance === 'stand')
   }
 
-  private step(dt: number, direction: THREE.Vector3, sprint: boolean, sneak: boolean) {
+  private step(dt: number, direction: THREE.Vector3, sprint: boolean) {
     const wasGrounded = this.grounded
     const acceleration = 1 - Math.exp(-(wasGrounded ? 18 : 5) * dt)
-    const speed = sprint ? 7.6 : sneak ? 1.9 : 4.2
+    const speed = sprint ? SPRINT_SPEED : STANCES[this.stance].speed
     this.velocity.x += (direction.x * speed - this.velocity.x) * acceleration
     this.velocity.z += (direction.z * speed - this.velocity.z) * acceleration
     if (wasGrounded && this.velocity.y < 0) this.velocity.y = 0

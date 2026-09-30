@@ -1,4 +1,4 @@
-# Operation Safe Return
+# Stickman: Ghost Ink
 
 A browser-based first-person hostage-rescue game with a paper-and-ink look. Find the hostage and escape together. Built with TypeScript, Three.js, Preact, and Vite.
 

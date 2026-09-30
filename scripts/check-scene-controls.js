@@ -31,7 +31,7 @@
       const results = []
       for (const id of ['security-computer', 'detention-alarm', 'exit-gate-control']) {
         const station = m.world.stations.find(s => s.id === id)
-        m.state.camerasActive = true; m.state.camerasDisabledUntil = null
+        m.state.camerasOff = []
         m.state.alarm = 'active'; m.state.gateOpen = false
         e.player.playing = true
         const outward = vector([0, 0, 1]).transformDirection(station.object.matrixWorld)
@@ -42,10 +42,10 @@
         assert(e.player.actions.findTarget(c)?.object === station.object, `${id} must be the interaction target`)
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyF', bubbles: true }))
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyF', bubbles: true }))
-        assert(m.state.camerasActive === (id !== 'security-computer'), `${id}: camera independence`)
+        assert(m.state.camerasOff.includes('security-computer') === (id === 'security-computer'), `${id}: camera independence`)
         assert(m.state.alarm === (id === 'detention-alarm' ? 'silenced' : 'active'), `${id}: alarm independence`)
         assert(m.state.gateOpen === (id === 'exit-gate-control'), `${id}: gate independence`)
-        results.push({ id, camerasActive: m.state.camerasActive, alarm: m.state.alarm, gateOpen: m.state.gateOpen })
+        results.push({ id, camerasOff: [...m.state.camerasOff], alarm: m.state.alarm, gateOpen: m.state.gateOpen })
       }
       e.player.pause(); m.audio.setActive(false)
       for (let i = 0; i < 181; i++) e.interactions.update(1 / 60)

@@ -482,6 +482,7 @@ export class MissionAudio {
       this.duckMusic()
       return
     }
+    if (event.kind === 'crate-explosion') { this.explosion(event); return }
     if (event.kind.includes('shot') || event.kind === 'damage') this.duckMusic()
     if (this.sample(event)) return
     // Climbing emits one sampled rung sound every 0.5s, never a synthetic tone.
@@ -520,6 +521,36 @@ export class MissionAudio {
     source.connect(filter).connect(gain)
     if (horn) this.alarmSource = source
     this.track(source, panner ? [filter, gain, panner] : [filter, gain], INCIDENTAL.has(event.kind) ? 'incidental' : undefined); source.start(t); source.stop(t + duration)
+  }
+
+  /** A small blast: a dull thump falling in pitch under a burst of splintering noise that darkens as it dies. */
+  private explosion(event: SoundEvent) {
+    if (!this.reserveSources(2)) return
+    const context = this.context!, t = context.currentTime, duration = 0.95
+    const { gain, panner } = this.output(event)
+    gain.gain.setValueAtTime(0.001, t)
+    gain.gain.exponentialRampToValueAtTime(0.95, t + 0.006)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration)
+    const thump = context.createOscillator()
+    thump.type = 'sine'
+    thump.frequency.setValueAtTime(120, t)
+    thump.frequency.exponentialRampToValueAtTime(36, t + 0.5)
+    const noise = context.createBufferSource()
+    noise.buffer = this.noise
+    noise.playbackRate.value = 0.85
+    const filter = context.createBiquadFilter(), mix = context.createGain()
+    filter.type = 'lowpass'
+    filter.frequency.setValueAtTime(3200, t)
+    filter.frequency.exponentialRampToValueAtTime(180, t + duration)
+    mix.gain.value = 0.75
+    thump.connect(gain)
+    noise.connect(filter).connect(mix).connect(gain)
+    const chain = panner ? [gain, panner] : [gain]
+    this.track(thump, chain)
+    this.track(noise, [filter, mix])
+    this.duckMusic()
+    thump.start(t); thump.stop(t + duration)
+    noise.start(t); noise.stop(t + duration)
   }
 
   clear() {

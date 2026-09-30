@@ -21,7 +21,7 @@ export function buildKnife() {
     // Edge runs along the bottom and sweeps up into the clip point; saw teeth cut the spine.
     const blade: [number, number][] = [[guard, -0.017], [0.11, -0.02], [0.2, -0.021], [0.262, -0.015], [0.296, -0.006], [tip, 0.004],
       [0.278, 0.017], [0.245, 0.023]]
-    for (let z = 0.228; z > 0.1; z -= 0.013) blade.push([z, 0.031], [z - 0.0065, 0.023])
+    for (let z = 0.214; z > 0.1; z -= 0.0085) blade.push([z, 0.0285], [z - 0.0042, 0.023])
     blade.push([0.092, 0.023], [guard, 0.022])
     g.add(profile(blade, 0.0065))
     // Fuller groove and the honed bevel line, drawn on both faces.

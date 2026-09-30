@@ -1,6 +1,7 @@
 import { BoxGeometry, CylinderGeometry, Shape, ExtrudeGeometry } from 'three'
 import { Draft, type Fill, type Point } from '../render/ink'
 import { createDoor } from './doors'
+import { darkRoom, daylightWindow, doorwayLight } from './lights'
 import { militaryInterior } from './interiors'
 
 export interface BuildingSpec {
@@ -12,6 +13,8 @@ export interface BuildingSpec {
   height: number
   angle?: number
   type?: 'barracks' | 'warehouse' | 'utility' | 'service'
+  /** No light fittings: inside it is dim, lit only by daylight through its windows and open doors. */
+  daylightOnly?: boolean
 }
 
 export const WALL_THICKNESS = 0.14
@@ -189,11 +192,14 @@ export function building(spec: BuildingSpec) {
   const sideOpenings: WallOpening[] = []
   const windows = { front: 0, rear: 0, left: 0, right: 0 }
   const entrances: { x: number; z: number; width: number; height: number; floor: number }[] = []
+  const entryDoors: ReturnType<typeof createDoor>[] = []
   const addEntry = (x: number, width: number, height: number, industrial = false) => {
     frontOpenings.push({ centre: x, width, bottom: 0, height })
     entrances.push({ x, z: front, width, height, floor })
-    g.add(createDoor({ name: `${spec.name} · entry ${entrances.length}`, x, z: front + 0.02,
-      floor, width, height, industrial }))
+    const door = createDoor({ name: `${spec.name} · entry ${entrances.length}`, x, z: front + 0.02,
+      floor, width, height, industrial, exit: true })
+    entryDoors.push(door)
+    g.add(door)
   }
   if (type === 'warehouse') {
     const entries = w > 30 ? [-w * 0.31, 0, w * 0.31] : [-w * 0.22, w * 0.22]
@@ -245,6 +251,7 @@ export function building(spec: BuildingSpec) {
     windows[side > 0 ? 'right' : 'left'] = sideCount
   }
   interiorRoomOutline(walls, w - 2 * WALL_THICKNESS, d - 2 * WALL_THICKNESS, floor, floor + h, 0, 0, 'gable')
+  if (spec.daylightOnly) daylightInterior(g, spec.name, w, d, h, floor, backOpenings, sideOpenings, entryDoors)
   if (type !== 'warehouse') {
     const x = w * 0.29, z = -d * 0.19, y = floor + h + Math.min(2.15, d * 0.17) * 0.62
     covering.box(0.55, 1.25, 0.65, x, y + 0.5, z, 'paper', 'detail')
@@ -263,6 +270,26 @@ export function building(spec: BuildingSpec) {
   g.userData.walkableInterior = { width: w - 2 * WALL_THICKNESS, depth: d - 2 * WALL_THICKNESS, floor }
   g.add(walls.finish(), covering.finish(), interior)
   return g.finish()
+}
+
+/**
+ * Make a building's inside a dim room lit only by daylight: through each back and end-wall window, and through
+ * each entrance while its door is open. The dark room follows the walls and the pitched roof (see roof()).
+ */
+function daylightInterior(g: Draft, name: string, w: number, d: number, h: number, floor: number,
+  back: WallOpening[], ends: WallOpening[], doors: ReturnType<typeof createDoor>[]) {
+  const eave = floor + h, rise = Math.min(2.15, d * 0.17), span = d / 2 + 0.4
+  const top = eave + rise + 0.14, edge = eave - rise * 0.4 / (d / 2) + 0.14
+  const middle = floor + h / 2
+  // Box walls on the wall centre lines; its top halfway through the roof slab, falling with the pitch.
+  g.add(darkRoom(name, [0, middle, 0], [w / 2 - WALL_THICKNESS / 2, middle - floor + 0.3, d / 2 - WALL_THICKNESS / 2],
+    { ambient: 0.16, pitch: { ridge: top - 0.07 - middle, slope: (top - edge) / span } }))
+  for (const o of back) g.add(daylightWindow(`${name} · back window`, [o.centre, floor + o.bottom + o.height / 2, -d / 2 + WALL_THICKNESS / 2], 0, o.width))
+  for (const side of [-1, 1]) for (const o of ends) {
+    g.add(daylightWindow(`${name} · ${side < 0 ? 'west' : 'east'} window`, [side * (w / 2 - WALL_THICKNESS / 2), floor + o.bottom + o.height / 2, o.centre],
+      side * -Math.PI / 2, o.width))
+  }
+  for (const door of doors) doorwayLight(door, -1, { intensity: 5, range: 16 })
 }
 
 export function steps(g: Draft, x: number, z: number, width: number, height: number, count: number) {

@@ -4,7 +4,7 @@ import { Capsule } from 'three/addons/math/Capsule.js'
 import { EnemyActor, type ActorPostureSnapshot } from './actors'
 import type { Posture } from '../lab/postures'
 import { EnemyNavigation } from './navigation'
-import { ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as COMBAT, WEAPON_RULES, hitDamage, shotgunDamageMultiplier } from './balance'
+import { ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as COMBAT, HEAD_BURST_CHANCE, WEAPON_RULES, hitDamage, shotgunDamageMultiplier } from './balance'
 import { rayCapsuleDistance, reactionClipName, type HitReaction, type HitZone } from './hit-reactions'
 import { playerHitTarget, type PlayerBulletHit } from './player-hit-reactions'
 import type { AIContext, EnemyPuppet, EnemyReaction, EnemySnapshot, EnemySpec, EnemyState, PlayerSense, Shot, SoundEvent, Vec3, WeaponName } from './types'
@@ -15,6 +15,8 @@ const eyeOffset = new THREE.Vector3(0, 1.5, 0)
 // Per-frame targets for face and aim, which only read their argument.
 const point = new THREE.Vector3(), aimPoint = new THREE.Vector3()
 const clamp = THREE.MathUtils.clamp
+/** Eye height above the feet: 1.65 standing, lower crouched or prone. */
+const bodyHeight = (player: PlayerSense) => Math.max(0.3, player.eye.y - player.feet.y)
 
 /** The cone operates horizontally; occlusion is a separate, real-geometry test. */
 export function insideVisionCone(from: THREE.Vector3, yaw: number, target: THREE.Vector3, range = 36, halfAngle = 55) {
@@ -106,6 +108,8 @@ export type Enemy = {
   woundArm: boolean
   woundLeg: boolean
   deathClip: string
+  /** Killed by a head shot that blew the head apart. */
+  headless: boolean
   speaker: number
   noticedBodies: string[]
   scanTimer: number
@@ -165,7 +169,7 @@ export class EnemyDirector {
         communicationTimer: 0, wait: 0.5 + i * 0.13, dropped: false, random: 7391 + i * 3571,
         reserveRoute: false, alarmResponse: false, alarmExit: null, post: null, visitedWaypoints: 0, distanceWalked: 0, footstepDistance: 0, pathFailures: 0,
         tactic: 'hold', tacticTimer: 0, tacticPoint: null, burst: 0, aimTime: 0, blockedFor: 0, contactMemory: 0, suppress: 0, settledFor: 0, hitPause: 0, moveSpeed: 0,
-        searchPoints: [], searchIndex: 0, woundArm: false, woundLeg: false, deathClip: 'dieBody', speaker: i % 4, noticedBodies: [],
+        searchPoints: [], searchIndex: 0, woundArm: false, woundLeg: false, deathClip: 'dieBody', headless: false, speaker: i % 4, noticedBodies: [],
         scanTimer: 0, scanDuration: 0, scanCooldown: 0, scanYaw: 0, defensiveTimer: 0,
       }
       if (spec.patrolMode === 'perimeter') {
@@ -267,7 +271,7 @@ export class EnemyDirector {
       (sniper ? COMBAT.sniperPassiveRange : COMBAT.passiveRange)
     if (!insideVisionCone(origin, enemy.yaw, player.eye, range, enemy.state === 'combat' ? 70 : 55)) return false
     return this.context.world.visible(origin, player.eye, ignore) ||
-      this.context.world.visible(origin, player.feet.clone().add(new THREE.Vector3(0, 0.95, 0)), ignore)
+      this.context.world.visible(origin, player.feet.clone().add(new THREE.Vector3(0, Math.min(0.95, bodyHeight(player) * 0.58), 0)), ignore)
   }
 
   private speed(enemy: Enemy, base: number) { return enemy.woundLeg ? base * 0.6 : base }
@@ -899,7 +903,8 @@ export class EnemyDirector {
     const yaw = Math.atan2(aimAt.x - enemy.position.x, aimAt.z - enemy.position.z)
     if (Math.cos(yaw - enemy.yaw) < Math.cos(COMBAT.aimHalfAngle)) return false
     const muzzle = enemy.actor.muzzle()
-    const target = aimAt.clone().add(new THREE.Vector3(0, 1.12, 0))
+    // Aim at the chest, which is lower while the player crouches or lies prone.
+    const target = aimAt.clone().add(new THREE.Vector3(0, THREE.MathUtils.clamp(bodyHeight(player) * 0.68, 0.25, 1.12), 0))
     // Aim at the exposed head when the torso is hidden by low cover.
     if (!this.context.world.visible(muzzle, target, ignore)) {
       if (blind || !this.context.world.visible(muzzle, player.eye, ignore)) return false
@@ -914,7 +919,7 @@ export class EnemyDirector {
     const hitChance = blind ? 0 : clamp(0.72 - distance * rangePenalty - Math.min(0.18, player.velocity.length() * 0.025) - recoil - (enemy.woundArm ? 0.16 : 0) + Math.min(enemy.aimTime, 1.5) * 0.06, 0.08, 0.8)
     const hit = this.random(enemy) < hitChance
     let bodyHit: Pick<PlayerBulletHit, 'region' | 'side' | 'point'> = {
-      region: target.y - player.feet.y > 1.5 ? 'head' : 'torso', side: 0, point: target.clone(),
+      region: target.y - player.feet.y > bodyHeight(player) * 0.9 ? 'head' : 'torso', side: 0, point: target.clone(),
     }
     if (hit && bodyHit.region !== 'head') {
       const candidate = playerHitTarget(player, this.random(enemy))
@@ -970,6 +975,8 @@ export class EnemyDirector {
 
   hear(event: SoundEvent) {
     if (!event.position || !event.radius || event.kind.startsWith('enemy-') || ['callout', 'ambience', 'door'].includes(event.kind)) return
+    // The suppressed pistol has no flash and a report only the shooter hears: no guard reacts to the shot itself.
+    if (event.kind === 'shot-silenced') return
     for (const enemy of this.enemies) {
       if (['dead', 'reserve', 'combat'].includes(enemy.state)) continue
       const from = this.eye(enemy)
@@ -1126,23 +1133,27 @@ export class EnemyDirector {
     const best = found, normalized = found.direction
     const falloff = shot.weapon === 'shotgun' ? shotgunDamageMultiplier(best.distance) : 1
     const fromBehind = normalized.x * Math.sin(nearest.yaw) + normalized.z * Math.cos(nearest.yaw) > 0.25
+    // A head shot can blow the head apart, by weapon (see HEAD_BURST_CHANCE); that always kills.
+    const burstChance = best.zone === 'head' ? HEAD_BURST_CHANCE[shot.weapon ?? 'ak'] ?? 0 : 0
+    const headBurst = burstChance >= 1 || (burstChance > 0 && this.random(nearest) < burstChance)
     // A blade in the back always kills.
-    const damage = shot.weapon === 'knife' && fromBehind ? ENEMY_HEALTH : hitDamage(shot.weapon, best.zone, shot.damage) * falloff
+    const damage = headBurst || shot.weapon === 'knife' && fromBehind ? ENEMY_HEALTH : hitDamage(shot.weapon, best.zone, shot.damage) * falloff
     nearest.health = Math.max(0, nearest.health - damage)
     nearest.contactMemory = COMBAT.contactMemory
     nearest.canSee = false
     nearest.senseTimer = 0
     const lethal = nearest.health === 0
-    const reaction: HitReaction = { zone: best.zone, point: best.point, direction: normalized, lethal, bone: best.bone, weapon: shot.weapon, targetId: nearest.spec.id, by: shot.by }
+    const reaction: HitReaction = { zone: best.zone, point: best.point, direction: normalized, lethal, bone: best.bone, weapon: shot.weapon, targetId: nearest.spec.id, by: shot.by, headBurst }
     nearest.scanTimer = 0
     nearest.actor.root.userData.alertScan = undefined
     const clip = reactionClipName(reaction, fromBehind), travel = lethal && shot.weapon === 'shotgun' ? this.shotgunTravel(nearest, normalized) : 1
     nearest.actor.react(clip, lethal, normalized, travel)
     if (!lethal) { nearest.hitPause = nearest.actor.reactionRemaining || 0.6; nearest.settledFor = 0; nearest.moveSpeed = 0 }
     if (lethal) nearest.deathClip = nearest.actor.deathClip
+    if (headBurst) { nearest.headless = true; nearest.actor.burstHead?.() }
     this.context.onHit?.(reaction)
     this.context.onReact?.({ index: found.index, clip, lethal, direction: tuple(normalized), travel, deathClip: nearest.deathClip,
-      hit: { zone: best.zone, point: tuple(best.point), bone: best.bone, weapon: shot.weapon, by: shot.by } })
+      hit: { zone: best.zone, point: tuple(best.point), bone: best.bone, weapon: shot.weapon, by: shot.by, ...(headBurst ? { burst: true } : {}) } })
     this.context.emit({ kind: 'enemy-hit', position: best.point.clone(), radius: 14, zone: best.zone })
     this.context.emit({ kind: 'enemy-pain', position: nearest.position.clone().add(eyeOffset), radius: 38, speaker: nearest.speaker, zone: best.zone })
     if (lethal) {
@@ -1160,8 +1171,8 @@ export class EnemyDirector {
         if (ally === nearest || ['dead', 'reserve', 'combat'].includes(ally.state) || ally.position.distanceTo(nearest.position) > 18) continue
         const body = nearest.position.clone().add(new THREE.Vector3(0, 0.9, 0))
         if (!this.context.world.visible(this.eye(ally), body, ignore)) continue
-        // A knife kill makes no report: only a guard actually looking at the body notices it.
-        if (shot.weapon === 'knife' && !insideVisionCone(this.eye(ally), ally.yaw, body, 18)) continue
+        // A knife or suppressed kill makes no report: only a guard actually looking at the body notices it.
+        if ((shot.weapon === 'knife' || shot.weapon === 'silenced') && !insideVisionCone(this.eye(ally), ally.yaw, body, 18)) continue
         const eye = this.eye(ally)
         const sawShooter = insideVisionCone(eye, ally.yaw, shot.origin, ally.spec.role === 'sniper' ? COMBAT.sniperEngagedRange : COMBAT.engagedRange) && this.context.world.visible(eye, shot.origin, ignore)
         ally.lastKnown = sawShooter ? shot.origin.clone().setY(this.lastPlayer?.feet.y ?? ally.position.y) : nearest.position.clone()
@@ -1246,6 +1257,7 @@ export class EnemyDirector {
       p: [r(enemy.position.x), r(enemy.position.y), r(enemy.position.z)], y: r(enemy.yaw), s: enemy.state, v: r(enemy.moveSpeed),
       a: enemy.canSee && enemy.lastKnown ? [r(enemy.lastKnown.x), r(enemy.lastKnown.y + 1.65), r(enemy.lastKnown.z)] : null,
       o: this.posture(enemy), c: typeof enemy.actor.root.userData.alertScan === 'number' ? r(enemy.actor.root.userData.alertScan) : null, d: enemy.deathClip,
+      ...(enemy.headless ? { h: true } : {}),
     }))
   }
 
@@ -1262,6 +1274,7 @@ export class EnemyDirector {
         else enemy.position.lerp(target, blend)
         enemy.yaw += Math.atan2(Math.sin(puppet.y - enemy.yaw), Math.cos(puppet.y - enemy.yaw)) * blend
         if (puppet.s === 'dead' && enemy.state !== 'dead') { enemy.deathClip = puppet.d; enemy.actor.deathClip = puppet.d }
+        if (puppet.h && !enemy.headless) { enemy.headless = true; enemy.actor.burstHead?.() }
         enemy.state = puppet.s
         enemy.health = puppet.s === 'dead' ? 0 : ENEMY_HEALTH
         enemy.moveSpeed = puppet.v
@@ -1288,8 +1301,9 @@ export class EnemyDirector {
       enemy.state = 'dead'; enemy.health = 0; enemy.deathClip = reaction.deathClip
       enemy.actor.update(0, 'dead', false)
     }
+    if (reaction.hit.burst) { enemy.headless = true; enemy.actor.burstHead?.() }
     return { zone: reaction.hit.zone, point: new THREE.Vector3(...reaction.hit.point), direction, lethal: reaction.lethal,
-      bone: reaction.hit.bone as HitReaction['bone'], weapon: reaction.hit.weapon, targetId: enemy.spec.id, by: reaction.hit.by }
+      bone: reaction.hit.bone as HitReaction['bone'], weapon: reaction.hit.weapon, targetId: enemy.spec.id, by: reaction.hit.by, headBurst: !!reaction.hit.burst }
   }
 
   /** Co-op guests replay a guard's shot: recoil, muzzle flash and tracer. Returns the muzzle for sound and near-miss checks. */
@@ -1312,7 +1326,7 @@ export class EnemyDirector {
       alarmExit: enemy.alarmExit ? tuple(enemy.alarmExit) : null, post: enemy.post ? tuple(enemy.post) : null,
       canSee: enemy.canSee, tactic: enemy.tactic, tacticPoint: enemy.tacticPoint ? tuple(enemy.tacticPoint) : null,
       searchPoints: enemy.searchPoints.map(tuple), woundArm: enemy.woundArm, woundLeg: enemy.woundLeg, deathClip: enemy.deathClip,
-      noticedBodies: [...enemy.noticedBodies],
+      headless: enemy.headless, noticedBodies: [...enemy.noticedBodies],
       actorPosture: enemy.actor.postureSnapshot?.(),
       animationTime: enemy.actor.animationTime, elapsed: this.elapsed, reserveDestination: this.reserveDestination ? tuple(this.reserveDestination) : null,
     }))
@@ -1354,6 +1368,8 @@ export class EnemyDirector {
       enemy.actor.root.rotation.y = enemy.yaw
       enemy.actor.root.visible = enemy.state !== 'reserve'
       enemy.actor.restore(enemy.state, number(saved.animationTime), enemy.deathClip, saved.actorPosture as ActorPostureSnapshot | undefined)
+      enemy.headless = enemy.state === 'dead' && !!saved.headless
+      if (enemy.headless) enemy.actor.burstHead?.()
       enemy.actor.root.userData.alertScan = enemy.scanTimer > 0 && enemy.scanDuration > 0 && this.posture(enemy) !== 'prone' && this.posture(enemy) !== 'kneel' ? 1 - enemy.scanTimer / enemy.scanDuration : undefined
       this.elapsed = number(saved.elapsed)
       this.reserveDestination = vector(saved.reserveDestination)

@@ -1,27 +1,39 @@
 import type { StationKind, Vec3 } from './types'
-import { RESCUE_LAYOUT } from './rescue-layout'
+import { CAMERA_TERMINALS, RESCUE_LAYOUT } from './rescue-layout'
 import { PLAYER_HEALTH } from './balance'
 
-export const CAMERA_SHUTDOWN_SECONDS = 60
-export const SIGNALS_COMPUTER_ID = 'signals-office-computer'
+export const SIGNALS_COMPUTER_ID = CAMERA_TERMINALS.office
 
 export type HostageState = { id: string; status: 'captive' | 'following' | 'loaded'; position: Vec3; routeIndex: number }
 export type MissionState = {
   phase: 'active' | 'dead' | 'complete'
-  camerasActive: boolean; camerasDisabledUntil: number | null; alarm: 'inactive' | 'active' | 'silenced'; alarmElapsed: number
+  /** Camera terminals shut down for good. Each one stops only its own cameras (rescue-layout `terminal`). */
+  camerasOff: string[]; alarm: 'inactive' | 'active' | 'silenced'; alarmElapsed: number
   silencedElapsed: number; alarmPosition: Vec3 | null; reservesDispatched: number
   gateOpen: boolean; hostages: HostageState[]; jeep: 'waiting' | 'boarding' | 'escaping' | 'escaped'; escapeProgress: number
   detentionFound: boolean; cellsReached: boolean
   health: number; lastDamageAt: number; lastBulletAt: number | null; elapsed: number; supplies: string[]; distractionUntil: number
   shots: number; kills: number; detections: number
+  /** Quest crates shot apart (ids from world/interiors.ts). */
+  brokenCrates: string[]
+  /** Enemy field radios switched off (F) and shot apart; either one takes a radio out of action. */
+  disabledRadios: string[]; destroyedRadios: string[]
 }
 export const initialMission = (): MissionState => ({
-  phase: 'active', camerasActive: true, camerasDisabledUntil: null, alarm: 'inactive', alarmElapsed: 0, silencedElapsed: 0,
+  phase: 'active', camerasOff: [], alarm: 'inactive', alarmElapsed: 0, silencedElapsed: 0,
   alarmPosition: null, reservesDispatched: 0, gateOpen: false,
   hostages: RESCUE_LAYOUT.hostageSpawns.map((position, index) => ({ id: `hostage-${index + 1}`, status: 'captive', position: [...position], routeIndex: index < 2 ? 1 : 0 })),
   jeep: 'waiting', escapeProgress: 0, detentionFound: false, cellsReached: false,
   health: 100, lastDamageAt: 0, lastBulletAt: null, elapsed: 0, supplies: [], distractionUntil: 0, shots: 0, kills: 0, detections: 0,
+  brokenCrates: [], disabledRadios: [], destroyedRadios: [],
 })
+/** A radio is out of action once it is switched off or destroyed. */
+export const radioOut = (state: MissionState, id: string) => state.disabledRadios.includes(id) || state.destroyedRadios.includes(id)
+/** Whether a camera still watches: its terminal has not been shut down. */
+export const cameraOnline = (state: MissionState, id: string) => {
+  const terminal = RESCUE_LAYOUT.cameras.find(camera => camera.id === id)?.terminal
+  return !terminal || !state.camerasOff.includes(terminal)
+}
 export const loadedCount = (state: MissionState) => state.hostages.filter(h => h.status === 'loaded').length
 export const releasedCount = (state: MissionState) => state.hostages.filter(h => h.status !== 'captive').length
 
@@ -29,14 +41,14 @@ export function stationLabel(state: MissionState, kind: StationKind, id: string)
   if (state.phase !== 'active' || state.jeep === 'escaping') return null
   switch (kind) {
     case 'hostage': return state.hostages.find(h => h.id === id)?.status === 'captive' ? 'Unlock' : null
-    case 'cameras': return state.camerasActive || (id !== SIGNALS_COMPUTER_ID && state.camerasDisabledUntil !== null)
-      ? id === SIGNALS_COMPUTER_ID ? 'Disable cameras · 60s' : 'Disable cameras' : null
+    case 'cameras': return state.camerasOff.includes(id) ? null : 'Disable cameras'
     case 'alarm': return state.alarm === 'active' ? 'Silence alarm' : null
     case 'gate': return state.gateOpen ? null : 'Open gate'
     case 'jeep': return loadedCount(state) < state.hostages.length ? 'Hostage needed' : !state.gateOpen ? 'Open gate first' : 'Board jeep'
     case 'rally': return state.hostages.some(h => h.status === 'following') ? 'Regroup hostage' : null
     case 'supply': return state.supplies.includes(id) ? null : 'Heal'
     case 'distraction': return state.elapsed < state.distractionUntil ? null : 'Ring bell'
+    case 'radio': return radioOut(state, id) ? null : 'Switch off radio'
     default: return null
   }
 }
@@ -51,9 +63,9 @@ export function useStation(state: MissionState, kind: StationKind, id: string): 
       return { changed: true, message: 'Cell unlocked. Wait for him to stand, then lead him upstairs to the jeep.' }
     }
     case 'cameras': {
-      state.camerasActive = false
-      state.camerasDisabledUntil = id === SIGNALS_COMPUTER_ID ? state.elapsed + CAMERA_SHUTDOWN_SECONDS : null
-      return { changed: true, message: `${state.camerasDisabledUntil === null ? 'Camera network disabled.' : 'Camera network offline for 60 seconds.'} An active alarm must be silenced at a wall panel.` }
+      state.camerasOff.push(id)
+      const count = RESCUE_LAYOUT.cameras.filter(camera => camera.terminal === id).length
+      return { changed: true, message: `${count === 1 ? 'This terminal\'s camera is' : `This terminal's ${count} cameras are`} shut down for good. Cameras on other networks keep watching until their own terminal is shut down.` }
     }
     case 'alarm': state.alarm = 'silenced'; state.silencedElapsed = 0; return { changed: true, message: 'Alarm silenced. Guards will search their last known contact, then return to duty.' }
     case 'gate': state.gateOpen = true; return { changed: true, message: 'Exit gate opening. Bring the hostage to the jeep.' }
@@ -67,6 +79,7 @@ export function useStation(state: MissionState, kind: StationKind, id: string): 
       if (state.health === 100) return { changed: false, message: 'Health is full. Leave the dressing for later.' }
       state.supplies.push(id); state.health = 100; return { changed: true, message: 'Field dressing used. Health restored.' }
     case 'distraction': state.distractionUntil = state.elapsed + 25; return { changed: true, message: 'Service bell ringing. Nearby guards will investigate.' }
+    case 'radio': state.disabledRadios.push(id); return { changed: true, message: 'Radio switched off. It can\'t call for help now.' }
     default: return { changed: false, message: '' }
   }
 }
@@ -91,10 +104,6 @@ export function advanceMission(state: MissionState, dt: number, running = state.
   state.elapsed += Math.max(0, dt)
   if (state.phase === 'active' && state.health < PLAYER_HEALTH.max && state.elapsed - state.lastDamageAt >= PLAYER_HEALTH.regenDelay)
     state.health = Math.min(PLAYER_HEALTH.max, state.health + PLAYER_HEALTH.regenPerSecond * Math.max(0, dt))
-  if (state.camerasDisabledUntil !== null && state.elapsed >= state.camerasDisabledUntil) {
-    state.camerasActive = true
-    state.camerasDisabledUntil = null
-  }
   return true
 }
 
@@ -121,9 +130,9 @@ export function shootMission(state: MissionState, amount: number) {
 }
 
 /** Mission fields the co-op host owns. Health, death, supplies and shot count stay with each player. */
-export const SHARED_MISSION_KEYS = ['camerasActive', 'camerasDisabledUntil', 'alarm', 'alarmElapsed', 'silencedElapsed', 'alarmPosition',
+export const SHARED_MISSION_KEYS = ['camerasOff', 'alarm', 'alarmElapsed', 'silencedElapsed', 'alarmPosition',
   'reservesDispatched', 'gateOpen', 'hostages', 'jeep', 'escapeProgress', 'detentionFound', 'cellsReached', 'elapsed', 'distractionUntil',
-  'kills', 'detections'] as const satisfies readonly (keyof MissionState)[]
+  'kills', 'detections', 'brokenCrates', 'disabledRadios', 'destroyedRadios'] as const satisfies readonly (keyof MissionState)[]
 export type SharedMission = Pick<MissionState, typeof SHARED_MISSION_KEYS[number]>
 
 export function sharedMission(state: MissionState): SharedMission {

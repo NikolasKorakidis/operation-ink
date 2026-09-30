@@ -92,6 +92,72 @@ for (const ladder of actions.ladders) test(`${ladder.name}: climb up, stand on l
   assert.equal(landingDamage, 0, 'Ladder travel and dismounts never cause fall damage')
 })
 
+{
+  const ladder = actions.ladders[0]
+  test(`${ladder.name}: up or down while climbing turns the climb around`, () => {
+    actions.reset()
+    const bottom = actions.ladderPoint(ladder, false)
+    const outward = new THREE.Vector3(0, 0, 1).transformDirection(ladder.matrixWorld)
+    const start = bottom.clone().addScaledVector(outward, 0.8)
+    stand(start)
+    actions.syncCamera(camera); camera.lookAt(bottom.clone().add(new THREE.Vector3(0, 1.25, 0)))
+    assert(actions.activate(camera))
+    for (let i = 0; i < 12; i++) actions.updateClimb(0.05)
+    const partWay = body.position.y
+    assert(partWay > bottom.y + 0.5 && actions.climbing && !actions.climbing.descending, 'It climbs up on its own')
+    actions.steerClimb(-1)
+    actions.updateClimb(0.05)
+    assert(body.position.y < partWay && actions.climbing?.descending, 'Down turns it around')
+    actions.steerClimb(1)
+    actions.updateClimb(0.05)
+    assert(body.position.y > partWay - 0.2 && !actions.climbing?.descending, 'Up sends it back up')
+    actions.steerClimb(0)
+    assert(!actions.climbing?.descending, 'No input keeps it going the same way')
+    actions.steerClimb(-1)
+    for (let i = 0; i < 300 && actions.climbing; i++) actions.updateClimb(0.05)
+    assert(!actions.climbing)
+    near(body.position.x, start.x, 0.01); near(body.position.z, start.z, 0.01)
+    simulate(0.5); assert(body.grounded, 'Turning all the way back returns you to where you got on')
+  })
+}
+
+{
+  const ladder = actions.ladders[0]
+  test(`${ladder.name}: a jump and F grab the ladder at that height; Space jumps off it`, () => {
+    actions.reset()
+    const bottom = actions.ladderPoint(ladder, false)
+    const outward = new THREE.Vector3(0, 0, 1).transformDirection(ladder.matrixWorld)
+    stand(bottom.clone().addScaledVector(outward, 0.6))
+    assert(body.jump())
+    for (let i = 0; i < 12; i++) simulate(1 / 60)
+    const height = body.position.y
+    assert(height > bottom.y + 0.5 && !body.grounded, 'In the air')
+    actions.syncCamera(camera); camera.lookAt(bottom.clone().setY(height + 1.25))
+    assert.equal(actions.findTarget(camera)?.object, ladder)
+    assert(actions.activate(camera))
+    actions.updateClimb(1 / 60)
+    assert(body.position.y > height - 0.05, `The climb starts at the jump height, not the foot of the ladder: ${body.position.y.toFixed(2)} vs ${height.toFixed(2)}`)
+    for (let i = 0; i < 5; i++) actions.updateClimb(0.05)
+    assert(body.position.y > height + 0.3, 'and goes on up from there')
+    const grip = body.position.clone()
+    assert(actions.jumpOffLadder())
+    assert(!actions.climbing && !body.grounded)
+    simulate(2)
+    const away = body.position.clone().sub(grip).setY(0).dot(outward)
+    assert(away > 0.9, `Space pushes off, clear of the rungs: ${away.toFixed(2)} m`)
+    assert(body.grounded, 'and lands')
+    // Falling past it partway up, F still grabs it where you are.
+    body.teleport(bottom.clone().addScaledVector(outward, 0.7).setY(bottom.y + 2.2))
+    body.grounded = false; body.velocity.set(0, -2, 0)
+    actions.syncCamera(camera); camera.lookAt(bottom.clone().setY(bottom.y + 2.2 + 1.25))
+    const target = actions.findTarget(camera)
+    assert.equal(target?.object, ladder, 'Partway up, the ladder is still in reach')
+    assert(actions.activate(camera)); actions.updateClimb(1 / 60)
+    assert(body.position.y > bottom.y + 2.1, 'and it is grabbed at that height')
+    actions.reset()
+  })
+}
+
 test('F opens a closed door and the animated leaf permits passage', () => {
   const door = actions.doors.find(object => object.name === 'Rooftop access door')!
   setDoorOpen(door, false, true); world.refresh()

@@ -7,7 +7,7 @@ description: Verify a gameplay, HUD, menu, animation or visual change in the rea
 
 Logic checks (`npm test`) don't open a browser. Anything visible needs this.
 
-1. Make sure the dev server is up: `curl -sf localhost:5173 >/dev/null || (npm run dev > /tmp/project-stickman-vite.log 2>&1 &)`.
+1. Make sure the dev server is up: `curl -sf localhost:5173 >/dev/null || (npm run dev > /tmp/stickman-ghost-ink-vite.log 2>&1 &)`.
 2. Open the right page with `npx agent-browser open <url>`:
    - game: `http://localhost:5173/` — wait until `window.__environment.mission.ready` is true
    - lab: `http://localhost:5173/lab.html` — hook is `window.__lab`

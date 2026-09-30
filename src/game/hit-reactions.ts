@@ -6,7 +6,7 @@ import type { Vec3, WeaponName } from './types'
 
 export type HitZone = 'head' | 'torso' | 'arm' | 'leg'
 export type ActorHit = { distance: number; point: THREE.Vector3; zone: HitZone; bone: BoneName }
-export type HitReaction = { zone: HitZone; point: THREE.Vector3; direction: THREE.Vector3; lethal: boolean; bone?: BoneName; weapon?: WeaponName; targetId?: string; by?: number }
+export type HitReaction = { zone: HitZone; point: THREE.Vector3; direction: THREE.Vector3; lethal: boolean; bone?: BoneName; weapon?: WeaponName; targetId?: string; by?: number; headBurst?: boolean }
 export type ActorReactionSnapshot = { clip: string; elapsed: number; zone: HitZone; lethal: boolean }
 export type HitVolume = { a: THREE.Vector3; b: THREE.Vector3; radius: number; zone: HitZone; bone: BoneName }
 
@@ -112,6 +112,8 @@ export function mirrorReactionClip(clip: THREE.AnimationClip, rig: Rig) {
 type Droplet = { position: Vec3; velocity: Vec3; radius: number; age: number }
 type Stain = { position: Vec3; size: number; angle: number; stamp: number; grow?: number }
 type ShotgunBurst = { targetId: string; direction: Vec3; elapsed: number; next: number }
+/** A piece of an exploding head: a `pop` swells and fades where the head was; a `chunk` flies and falls. */
+type Gob = { kind: 'pop' | 'chunk'; position: Vec3; velocity: Vec3; radius: number; age: number; life: number; dark: boolean }
 export type BloodSnapshot = { droplets: Droplet[]; stains: Stain[]; seed: number; shotgunBursts?: ShotgunBurst[] }
 
 /** Per-mission version of the lab's pigment stamps; no global lab singleton, flat-ground assumption or timers. */
@@ -120,12 +122,15 @@ export class MissionBlood {
   private readonly dropLimit = 192
   private readonly stainLimit = 512
   private droplets: Droplet[] = []
+  private gobs: Gob[] = []
+  private readonly gobLimit = 96
   private stains: Stain[] = []
   private shotgunBursts: ShotgunBurst[] = []
   private seed = 17923
   private surface = createStampSurface(this.stainLimit)
   private drops = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 5, 4), new THREE.MeshBasicMaterial({ color: bloodPalette.fresh, toneMapped: false }), this.dropLimit)
   private marks = new THREE.InstancedMesh(this.surface.geometry, this.surface.material, this.stainLimit)
+  private gore = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 9, 7), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), this.gobLimit)
   private matrix = new THREE.Matrix4()
   private position = new THREE.Vector3()
   private velocity = new THREE.Vector3()
@@ -147,7 +152,12 @@ export class MissionBlood {
     // The stamp shader reads instanceColor; allocate it before the first compile or the program fails once.
     this.marks.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.stainLimit * 3), 3)
     this.marks.renderOrder = 1
-    this.root.add(this.drops, this.marks)
+    this.gore.name = 'Exploding head gore'
+    this.gore.count = 0
+    this.gore.frustumCulled = false
+    this.gore.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    this.gore.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.gobLimit * 3), 3)
+    this.root.add(this.drops, this.marks, this.gore)
     scene.add(this.root)
   }
 
@@ -186,6 +196,7 @@ export class MissionBlood {
 
   emitHit(hit: HitReaction) {
     if (this.disposed) return
+    if (hit.headBurst) this.burstHead(hit.point, hit.direction.clone().normalize())
     const shotgun = hit.weapon === 'shotgun', knife = hit.weapon === 'knife'
     const forward = hit.direction.clone().normalize()
     this.spray(hit.point, forward, shotgun ? (hit.lethal ? 144 : 64) : knife ? (hit.lethal ? 150 : 80) : hit.lethal ? 72 : 48, hit.lethal, shotgun)
@@ -212,6 +223,48 @@ export class MissionBlood {
       hit.lethal ? 16 + Math.floor(this.random() * 8) : Math.floor(this.random() * 16),
       hit.lethal && !followsFall ? (knife ? 0.8 : 0.55) + this.random() * 0.15 : undefined)
     this.render()
+  }
+
+  /**
+   * A head blown apart: a dense cloud of blood thrown every way (mostly with the bullet and upward), heavy gobbets
+   * among it, and a wide ring of splatter on the ground around the body.
+   */
+  private burstHead(point: THREE.Vector3, forward: THREE.Vector3) {
+    // The blast itself: a red ball swelling out of where the head was, with lumps of it bulging off every way.
+    this.gobs.push({ kind: 'pop', position: point.toArray() as Vec3, velocity: [0, 0, 0], radius: 0.5, age: 0, life: 0.5, dark: false })
+    for (let i = 0; i < 9; i++) {
+      const out = new THREE.Vector3(this.random() * 2 - 1, this.random() * 1.6 - 0.4, this.random() * 2 - 1).normalize().multiplyScalar(1.4 + this.random() * 1.6)
+        .addScaledVector(forward, 1.2)
+      this.gobs.push({ kind: 'pop', position: point.toArray() as Vec3, velocity: out.toArray() as Vec3, radius: 0.16 + this.random() * 0.14,
+        age: 0, life: 0.4 + this.random() * 0.25, dark: i % 3 === 0 })
+    }
+    // Gore thrown out hard, mostly with the bullet, that tumbles down and splatters where it lands.
+    for (let i = 0; i < 44; i++) {
+      const out = new THREE.Vector3(this.random() * 2 - 1, this.random() * 1.5 - 0.1, this.random() * 2 - 1).normalize()
+        .addScaledVector(forward, 0.8 + this.random() * 0.8).normalize().multiplyScalar(3 + this.random() * 5.5)
+      out.y += 1.2 + this.random() * 2
+      this.gobs.push({ kind: 'chunk', position: point.toArray() as Vec3, velocity: out.toArray() as Vec3, radius: 0.03 + this.random() * 0.055,
+        age: 0, life: 2.5, dark: this.random() < 0.4 })
+    }
+    this.gobs = this.gobs.slice(-this.gobLimit)
+    // With the kill's own 72-drop spray this fills the 192-drop budget exactly.
+    for (let i = 0; i < 120; i++) {
+      const direction = new THREE.Vector3(this.random() * 2 - 1, this.random() * 1.4 - 0.2, this.random() * 2 - 1).normalize()
+        .addScaledVector(forward, 0.9 + this.random() * 0.6).normalize()
+      const heavy = i % 6 === 0
+      const velocity = direction.multiplyScalar((heavy ? 2.2 : 3) + this.random() * (heavy ? 2.4 : 4.2))
+      velocity.y += 1 + this.random() * 1.6
+      this.droplets.push({ position: point.toArray() as Vec3, velocity: velocity.toArray() as Vec3,
+        radius: heavy ? 0.055 + this.random() * 0.045 : 0.028 + this.random() * 0.04, age: 0 })
+    }
+    this.droplets = this.droplets.slice(-this.dropLimit)
+    for (let i = 0; i < 14; i++) {
+      const angle = this.random() * Math.PI * 2, reach = 0.3 + this.random() * 1.4
+      const offset = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).multiplyScalar(reach).addScaledVector(forward.clone().setY(0), 0.6)
+      const distance = offset.length()
+      if (distance && this.nearby(point).rayDistance(point, offset.clone().normalize(), distance) < distance) continue
+      this.stain(point.clone().add(offset), 0.12 + this.random() * 0.16, Math.floor(this.random() * 16))
+    }
   }
 
   private stain(point: THREE.Vector3, size: number, stamp: number, grow?: number) {
@@ -292,6 +345,25 @@ export class MissionBlood {
       live.push(drop)
     }
     this.droplets = live
+    this.gobs = this.gobs.filter(gob => {
+      gob.age += delta
+      if (gob.age >= gob.life) return false
+      this.position.fromArray(gob.position)
+      this.velocity.fromArray(gob.velocity)
+      if (gob.kind === 'chunk') this.velocity.y -= 11 * delta
+      else this.velocity.multiplyScalar(Math.max(0, 1 - delta * 6))
+      this.position.addScaledVector(this.velocity, delta)
+      if (gob.kind === 'chunk') {
+        const floor = this.nearby(this.position).floor(this.position, 0.3, 0.12)
+        if (Number.isFinite(floor) && this.position.y <= floor + gob.radius * 0.5) {
+          this.stain(this.position.clone().setY(floor + 0.025), gob.radius * 3.2, Math.floor(this.random() * 16))
+          return false
+        }
+      }
+      gob.position = this.position.toArray() as Vec3
+      gob.velocity = this.velocity.toArray() as Vec3
+      return true
+    })
     this.render()
   }
 
@@ -307,6 +379,18 @@ export class MissionBlood {
       this.drops.setMatrixAt(index, this.matrix.compose(this.position, this.orientation, this.scale))
     })
     this.drops.instanceMatrix.needsUpdate = true
+    this.gore.count = this.gobs.length
+    const fresh = new THREE.Color(bloodPalette.fresh), dark = new THREE.Color(bloodPalette.dark)
+    this.gobs.forEach((gob, index) => {
+      const t = gob.age / gob.life
+      // A pop swells fast and then shrinks away; a chunk keeps its size until it lands.
+      const size = gob.kind === 'pop' ? gob.radius * (t < 0.3 ? 0.35 + 0.65 * t / 0.3 : 1 - (t - 0.3) / 0.7) : gob.radius
+      this.orientation.setFromAxisAngle(up, gob.age * 9 + index)
+      this.gore.setMatrixAt(index, this.matrix.compose(this.position.fromArray(gob.position), this.orientation, this.scale.set(size, size * (gob.kind === 'chunk' ? 0.7 : 1), size)))
+      this.gore.setColorAt(index, gob.dark ? dark : fresh)
+    })
+    this.gore.instanceMatrix.needsUpdate = true
+    if (this.gore.instanceColor) this.gore.instanceColor.needsUpdate = true
     this.marks.count = this.stains.length
     this.stains.forEach((mark, index) => {
       this.position.fromArray(mark.position)
@@ -327,6 +411,7 @@ export class MissionBlood {
     this.stains = structuredClone(snapshot?.stains ?? []).slice(-this.stainLimit)
     this.shotgunBursts = structuredClone(snapshot?.shotgunBursts ?? []).slice(-16)
     this.seed = snapshot?.seed ?? 17923
+    this.gobs = []
     this.render()
   }
   clear() { this.restore() }
@@ -337,10 +422,12 @@ export class MissionBlood {
     this.root.removeFromParent()
     this.drops.geometry.dispose()
     this.drops.material.dispose()
+    this.gore.geometry.dispose()
+    this.gore.material.dispose()
     this.surface.material.uniforms.atlas.value.dispose()
     this.surface.material.dispose()
     this.surface.geometry.dispose()
-    this.droplets = []; this.stains = []; this.shotgunBursts = []
-    this.drops.count = this.marks.count = 0
+    this.droplets = []; this.stains = []; this.shotgunBursts = []; this.gobs = []
+    this.drops.count = this.marks.count = this.gore.count = 0
   }
 }

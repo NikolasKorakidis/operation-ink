@@ -57,31 +57,47 @@ console.log('PASS Knife: any hit from behind kills; from the front a slash wound
   quiet.dispose()
   const loud = await fixture([guard('west', -3.5), guard('east', 3.5)])
   loud.ai.enemies[0].health = 1
-  loud.ai.hit({ origin: v(-3.5, 1.1, -1), direction: v(0, 0, 1), range: 50, damage: 30, weapon: 'silenced' }, 50)
+  loud.ai.hit({ origin: v(-3.5, 1.1, -1), direction: v(0, 0, 1), range: 50, damage: 30, weapon: 'pistol' }, 50)
   assert.equal(loud.ai.enemies[0].state, 'dead')
   assert.equal(loud.ai.enemies[1].state, 'investigate', 'A body dropped by gunfire is still reported by a nearby guard')
   loud.dispose()
+  const suppressed = await fixture([guard('west', -3.5), guard('east', 3.5)])
+  suppressed.ai.enemies[0].health = 1
+  suppressed.ai.hit({ origin: v(-3.5, 1.1, -1), direction: v(0, 0, 1), range: 50, damage: 30, weapon: 'silenced' }, 50)
+  assert.equal(suppressed.ai.enemies[0].state, 'dead')
+  assert.equal(suppressed.ai.enemies[1].state, 'guard', 'A suppressed kill is as quiet as a knife kill to a lookout facing away')
+  suppressed.dispose()
   const watching = await fixture([guard('west', -3.5), guard('east', 3.5, -Math.PI / 2)])
   strike(watching.ai, knife(v(-3.5, 1.1, -1), v(0, 0, 1), KNIFE.slash.damage))
   assert.equal(watching.ai.enemies[1].state, 'investigate', 'A lookout looking straight at the kill does notice it')
   watching.dispose()
 }
-console.log('PASS A knife kill is silent: only a guard actually looking at the body reacts')
+console.log('PASS A knife or suppressed kill is silent: only a guard actually looking at the body reacts')
+
+{
+  // A guard 2 m away, facing the shooter with a clear line of sight, ignores the suppressed pistol
+  // but investigates an ordinary pistol shot from the same spot.
+  for (const [kind, expected] of [['shot-silenced', 'guard'], ['shot-pistol', 'investigate']] as const) {
+    const f = await fixture([guard('near', 0)])
+    f.ai.hear({ kind, position: v(0, 1.5, 2), radius: kind === 'shot-silenced' ? 5 : 38 })
+    assert.equal(f.ai.enemies[0].state, expected, `${kind} at 2 m in plain view leaves the guard in ${expected}`)
+    f.dispose()
+  }
+}
+console.log('PASS No guard hears or reacts to the suppressed pistol, even at arm\'s length in plain view')
 
 {
   const mission = createMissionWorld()
   const lookouts = mission.enemies.filter(enemy => enemy.id.startsWith('roof-lookout'))
-  assert.equal(lookouts.length, 2)
+  assert.equal(lookouts.length, 1, 'Exactly one lookout guards the mess-hall roof')
   for (const lookout of lookouts) {
     assert.equal(lookout.weapon, 'ak'); assert.equal(lookout.facing, 0); assert.equal(lookout.patrol.length, 1)
-    assert(lookout.position[1] > 6, 'Lookouts stand on the mess-hall roof')
+    assert(lookout.position[1] > 6, 'The lookout stands on the mess-hall roof')
   }
-  const [a, b] = lookouts.map(lookout => new THREE.Vector3(...lookout.position))
-  assert(a.distanceTo(b) >= 6, 'Lookouts stand far enough apart for one silent kill at a time')
   const spawn = new THREE.Vector3(...mission.spawn)
   for (const lookout of lookouts) {
     const toSpawn = spawn.clone().sub(new THREE.Vector3(...lookout.position)).setY(0).normalize()
     assert(toSpawn.z < -0.5, 'The insertion point is behind the lookouts')
   }
 }
-console.log('PASS Two AK lookouts on the mess-hall roof face the yard with their backs to the insertion')
+console.log('PASS One AK lookout on the mess-hall roof faces the yard with his back to the insertion')

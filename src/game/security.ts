@@ -1,13 +1,16 @@
 import * as THREE from 'three'
 import type { CollisionWorld } from '../player/collision'
 import type { EnemyDirector } from './ai'
-import type { MissionState } from './mission'
+import { cameraOnline, type MissionState } from './mission'
 import { RESCUE_LAYOUT } from './rescue-layout'
 import type { EmitSound, MissionWorld } from './types'
 
 export const SECURITY_RULES = { detectionDwell: 0.75, secondWaveDelay: 14, searchCooldown: 12, reserveLimit: 4, hornInterval: 7 } as const
-export const CAMERA_LIGHTS = { watching: 0x21db66, alarm: 0xff2929, offline: 0x40464a } as const
+/** Green while a camera watches; red once its terminal shuts it down (it stays still), and red during an alarm. */
+export const CAMERA_LIGHTS = { watching: 0x21db66, alarm: 0xff2929, offline: 0xff2929 } as const
 export const CAMERA_PATROL = { holdSeconds: 3.5, turnSeconds: 1.8 } as const
+/** A switched-off monitor: near-black glass. */
+export const SCREEN_OFF = 0x050807
 
 /** Three lookout directions, with a full stop before each smooth motor turn. */
 export function cameraPatrolYaw(elapsed: number, index: number, yaw: number, arc: number) {
@@ -24,7 +27,8 @@ export function cameraPatrolYaw(elapsed: number, index: number, yaw: number, arc
 export class SecuritySystem {
   private dwell = new Map<string, number>()
   private lastAlarm: MissionState['alarm'] = 'inactive'
-  private lastLampColor: number | null = null
+  private lampColors = new Map<string, number>()
+  private screensPowered = new Map<string, boolean>()
   private hornElapsed = 0
 
   constructor(private world: CollisionWorld, private missionWorld: MissionWorld, private ai: EnemyDirector, private emit: EmitSound) {}
@@ -32,8 +36,30 @@ export class SecuritySystem {
   reset() {
     this.dwell.clear()
     this.lastAlarm = 'inactive'
-    this.lastLampColor = null
+    this.lampColors.clear()
+    this.screensPowered.clear()
     this.hornElapsed = 0
+  }
+
+  /**
+   * Each camera terminal's screen shows its own network's feeds, so it goes black, and stops lighting the room,
+   * when that terminal is shut down, and comes back on with it (on a checkpoint retry or restart).
+   */
+  private powerScreens(state: MissionState) {
+    for (const station of this.missionWorld.stations ?? []) {
+      if (station.kind !== 'cameras') continue
+      const on = !state.camerasOff.includes(station.id)
+      if (this.screensPowered.get(station.id) === on) continue
+      this.screensPowered.set(station.id, on)
+      station.object.traverse(object => {
+        if (object.userData.neonLight && 'powered' in object.userData) object.userData.powered = on
+        const screen = object as THREE.Mesh
+        if (!object.userData.cameraScreen || !screen.isMesh) return
+        const material = screen.material as THREE.MeshBasicMaterial
+        screen.userData.poweredColor ??= material.color.getHex()
+        material.color.setHex(on ? screen.userData.poweredColor : SCREEN_OFF)
+      })
+    }
   }
 
   sync(state: MissionState, visualElapsed = state.elapsed) {
@@ -43,21 +69,22 @@ export class SecuritySystem {
       this.hornElapsed = 0
     }
     this.lastAlarm = state.alarm
-    const color = !state.camerasActive ? CAMERA_LIGHTS.offline : state.alarm === 'active' ? CAMERA_LIGHTS.alarm : CAMERA_LIGHTS.watching
-    const changed = this.lastLampColor !== color
     for (const camera of this.missionWorld.rescue?.cameras ?? []) {
       const spec = RESCUE_LAYOUT.cameras.find(candidate => candidate.id === camera.id)
       if (!spec) continue
-      if (state.camerasActive) camera.pivot.rotation.y = cameraPatrolYaw(visualElapsed, RESCUE_LAYOUT.cameras.indexOf(spec), spec.yaw, spec.arc)
-      if (changed) {
+      const online = cameraOnline(state, camera.id)
+      const color = !online ? CAMERA_LIGHTS.offline : state.alarm === 'active' ? CAMERA_LIGHTS.alarm : CAMERA_LIGHTS.watching
+      if (online) camera.pivot.rotation.y = cameraPatrolYaw(visualElapsed, RESCUE_LAYOUT.cameras.indexOf(spec), spec.yaw, spec.arc)
+      else this.dwell.delete(camera.id)
+      if (this.lampColors.get(camera.id) !== color) {
+        this.lampColors.set(camera.id, color)
         for (const material of Array.isArray(camera.lamp.material) ? camera.lamp.material : [camera.lamp.material]) {
           if ('color' in material) (material as THREE.MeshBasicMaterial).color.setHex(color)
           if ('emissive' in material) (material as THREE.MeshStandardMaterial).emissiveIntensity = 0
         }
       }
     }
-    if (!state.camerasActive) this.dwell.clear()
-    this.lastLampColor = color
+    this.powerScreens(state)
   }
 
   trigger(state: MissionState, position: THREE.Vector3, running = state.phase === 'active') {
@@ -95,10 +122,9 @@ export class SecuritySystem {
       state.silencedElapsed += dt
       if (state.silencedElapsed >= SECURITY_RULES.searchCooldown) state.alarm = 'inactive'
     }
-    if (!state.camerasActive) return
     for (const camera of this.missionWorld.rescue?.cameras ?? []) {
       const spec = RESCUE_LAYOUT.cameras.find(candidate => candidate.id === camera.id)
-      if (!spec) continue
+      if (!spec || !cameraOnline(state, camera.id)) continue
       const origin = new THREE.Vector3(...spec.position)
       const yaw = camera.pivot.rotation.y
       const seen = eyes.find(eye => {

@@ -3,22 +3,31 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
+import { darkenInkInDarkRooms } from './neon'
 import { penDistanceGLSL, penPalette, penRandom, penSeed, sketchSegments, type SketchSegments } from './ballpoint'
 
 export type Point = [number, number, number]
-export type Fill = 'paper' | 'roof' | 'concrete' | 'glass' | 'green' | 'rock'
+/**
+ * The world is white paper. Quest items are the exception: they are painted so they stand out
+ * (olive and brown radios, wooden crates).
+ */
+export type Fill = 'paper' | 'roof' | 'concrete' | 'glass' | 'green' | 'rock' | QuestFill
+export type QuestFill = 'olive' | 'umber' | 'wood' | 'timber'
+export const QUEST_COLORS: Record<QuestFill, number> = { olive: 0x5f7d34, umber: 0x5a3a20, wood: 0xb07a43, timber: 0x7d5129 }
+const questFills = Object.keys(QUEST_COLORS) as QuestFill[]
 export type Stroke = 'edge' | 'detail' | 'mesh' | 'landscape'
 
 export const palette = {
   paper: penPalette.paper, roof: penPalette.paper, concrete: penPalette.paper,
   glass: penPalette.paper, green: penPalette.paper, rock: penPalette.paper,
+  ...QUEST_COLORS,
   ink: penPalette.ink,
 }
 
 export type HatchOptions = { spacing?: number; inset?: number; seed?: number; cross?: boolean; stroke?: Stroke }
 
 const fills = Object.fromEntries(
-  (['paper', 'roof', 'concrete', 'glass', 'green', 'rock'] as Fill[]).map(name => [name,
+  (['paper', 'roof', 'concrete', 'glass', 'green', 'rock', ...questFills] as Fill[]).map(name => [name,
     new THREE.MeshBasicMaterial({
       color: palette[name], side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
@@ -50,8 +59,9 @@ strokeMaterial.onBeforeCompile = shader => {
       clipEnd.xy += penNormal * instancePenOffset.y * penEndScale * 2.0 / resolution * clipEnd.w;
       // ndc space`)
     .replace('offset *= linewidth;', 'offset *= linewidth * instancePenWidth * penWidthScale;')
+  darkenInkInDarkRooms(shader)
 }
-strokeMaterial.customProgramCacheKey = () => 'ballpoint-world-strokes-v2'
+strokeMaterial.customProgramCacheKey = () => 'ballpoint-world-strokes-v3'
 
 // Smooth objects need a moving silhouette, not a wireframe of their tessellation.
 // Expand back faces with the same distance taper as the surrounding pen strokes.
@@ -93,7 +103,11 @@ export function resizeInk(width: number, height: number) {
 }
 
 /** Single-sided ink lettering, placed just outside a wall with no backing board. */
-export function wallText(text: string, position: Point, height = 0.6, angle = 0) {
+/** The one sign colour: blue lettering for security labels (the hostage's blue). */
+export const SIGN_BLUE = 0x2878d0
+
+/** Painted wall lettering. Ink black by default; a colour is reserved for the few signs that must stand out. */
+export function wallText(text: string, position: Point, height = 0.6, angle = 0, color: number = palette.ink) {
   const root = new THREE.Group()
   root.name = `Wall text · ${text}`
   root.position.set(...position)
@@ -108,7 +122,7 @@ export function wallText(text: string, position: Point, height = 0.6, angle = 0)
   canvas.width = Math.ceil(context.measureText(text).width) + 24
   canvas.height = 128
   context.font = font
-  context.fillStyle = `#${palette.ink.toString(16).padStart(6, '0')}`
+  context.fillStyle = `#${color.toString(16).padStart(6, '0')}`
   context.textAlign = 'center'
   context.textBaseline = 'middle'
   context.fillText(text, canvas.width / 2, canvas.height / 2)
@@ -219,9 +233,9 @@ export class Draft extends THREE.Group {
     if (flat !== geometry) geometry.dispose()
     flat.deleteAttribute('uv')
     if (smooth) this.shells.push(flat.clone())
-    // Every fill is the same white paper, so they batch into one mesh. Glass and
-    // concrete stay separate only because game code and checks find them by name.
-    const batch = fill === 'glass' || fill === 'concrete' ? fill : 'paper'
+    // Every plain fill is the same white paper, so they batch into one mesh. Glass and
+    // concrete stay separate only because game code and checks find them by name; painted quest fills keep their colour.
+    const batch = fill === 'glass' || fill === 'concrete' || questFills.includes(fill as QuestFill) ? fill : 'paper'
     const group = this.surfaces.get(batch) ?? []
     this.surfaces.set(batch, group)
     group.push(flat)

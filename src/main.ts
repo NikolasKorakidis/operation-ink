@@ -8,7 +8,10 @@ import { VRWalkthrough } from './vr/walkthrough'
 import { createMissionWorld, prepareCompound } from './game/world'
 import { MissionRuntime } from './game/runtime'
 import { BuildingLabels } from './world/labels'
+import { NeonLights } from './render/neon'
+import { addExitSigns } from './world/exitSigns'
 import './style.css'
+import './game/menu-neon.css'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#world')!
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' })
@@ -30,8 +33,13 @@ const missionWorld = new URLSearchParams(location.search).get('explore') === '1'
 if (missionWorld) prepareCompound(compound)
 scene.add(compound)
 if (missionWorld) scene.add(missionWorld.root)
+// Every way out gets a lit EXIT sign; they are real lights like every neon sign.
+addExitSigns(scene)
 // Name tags over each building for the map views; CSS hides them while walking.
 const buildingLabels = new BuildingLabels(scene)
+// Neon signs are the only real lights; they shade everything around them.
+const neonLights = new NeonLights(scene)
+const viewer = new THREE.Vector3()
 
 let frame = 0
 let lastTime = performance.now()
@@ -86,7 +94,9 @@ function render(now: number, xrFrame?: XRFrame) {
   try {
     // Cinematic travel follows real frame time; physics keeps its safe step cap.
     missionMoving = mission?.update(dt, elapsed) ?? false
-    renderer.render(scene, vr.active ? vr.rig.camera : camera.active)
+    const eye = vr.active ? vr.rig.camera : camera.active
+    neonLights.update(renderer, eye.getWorldPosition(viewer))
+    renderer.render(scene, eye)
     if (!vr.active && document.body.dataset.mode !== 'walk') buildingLabels.update(camera.active)
   }
   finally { mission?.finishFrame() }
@@ -159,7 +169,7 @@ if (import.meta.env.DEV) {
   Object.assign(window, {
     __environment: {
       scene, renderer, camera,
-      interactions, player, vr, mission,
+      interactions, player, vr, mission, neonLights,
       setView: (name: ViewName) => camera.setView(name),
       invalidate,
       stats: () => ({

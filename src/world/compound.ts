@@ -16,7 +16,7 @@ const buildingPlan: (Omit<BuildingSpec, 'x' | 'z' | 'width' | 'depth'> & {
   at: PlanPoint; size: PlanPoint
 })[] = [
   { name: 'Northwest service building', at: [522, 229], size: [185, 142], height: 5.8, type: 'service' },
-  { name: 'Central long warehouse', at: [920, 496], size: [373, 85], height: 5.0, type: 'warehouse' },
+  { name: 'Central long warehouse', at: [920, 496], size: [373, 85], height: 5.0, type: 'warehouse', daylightOnly: true },
   { name: 'South barracks A', at: [854, 785], size: [136, 92], height: 3.45 },
   { name: 'South barracks B · long wing', at: [1116, 773], size: [74, 115], height: 3.45 },
   { name: 'South barracks B · west wing', at: [1044, 743], size: [70, 55], height: 3.45 },
@@ -24,7 +24,7 @@ const buildingPlan: (Omit<BuildingSpec, 'x' | 'z' | 'width' | 'depth'> & {
   { name: 'West utility building', at: [531, 648], size: [46, 76], height: 3.3, type: 'utility' },
   { name: 'Inner gatehouse', at: [709, 695], size: [66, 102], height: 3.6, type: 'utility' },
   { name: 'Southwest service shed', at: [186, 889], size: [58, 132], height: 3.5, type: 'utility' },
-  { name: 'Southwest stores', at: [363, 970], size: [166, 74], height: 4.6, type: 'warehouse' },
+  { name: 'Southwest stores', at: [363, 970], size: [166, 74], height: 4.6, type: 'warehouse', daylightOnly: true },
   { name: 'East utility hut A', at: [1325, 734], size: [101, 42], height: 2.85, type: 'utility' },
   { name: 'East utility hut B', at: [1325, 801], size: [101, 42], height: 2.85, type: 'utility' },
   { name: 'West equipment shed A', at: [333, 466], size: [91, 43], height: 2.9, type: 'utility' },

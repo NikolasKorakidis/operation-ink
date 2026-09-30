@@ -24,10 +24,10 @@ const roomAssignments: [string, string, string?][] = [
   ['administration-room', 'West administration wing'], ['medical-room', 'East utility hut B'],
   ['southwest-stores-room', 'Southwest stores'], ['gatehouse-room', 'Inner gatehouse'],
 ]
-assert.equal(mission.enemies.length, 43)
-assert.equal(mission.enemies.filter(enemy => !enemy.reserve).length, 39)
+assert.equal(mission.enemies.length, 42)
+assert.equal(mission.enemies.filter(enemy => !enemy.reserve).length, 38)
 assert.equal(mission.enemies.filter(enemy => enemy.reserve).length, 4)
-assert.equal(new Set(mission.enemies.map(enemy => enemy.id)).size, 43)
+assert.equal(new Set(mission.enemies.map(enemy => enemy.id)).size, 42)
 const failures: string[] = []
 for (const [id, buildingName, roomName] of roomAssignments) {
   try {

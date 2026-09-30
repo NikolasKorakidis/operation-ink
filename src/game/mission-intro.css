@@ -1,0 +1,21 @@
+/*
+ * Mission opening (mission-intro.ts), 5 s: the scene starts as its negative, black paper and white ink, and
+ * slowly swaps to white paper and black ink. Nothing moves; the whole screen just turns over from dark to bright.
+ */
+.mission-intro { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+.mission-intro i { position: absolute; inset: 0; display: block; }
+.intro-negative {
+  backdrop-filter: invert(1);
+  -webkit-backdrop-filter: invert(1);
+  animation: intro-swap 5s ease-in-out forwards;
+}
+@keyframes intro-swap {
+  from { backdrop-filter: invert(1); -webkit-backdrop-filter: invert(1); }
+  to { backdrop-filter: invert(0); -webkit-backdrop-filter: invert(0); }
+}
+
+/* Reduced Motion: a plain fade up from black instead. */
+.mission-intro[data-reduced-motion="true"] .intro-negative { display: none; }
+.mission-intro .intro-shade { display: none; background: #000; }
+.mission-intro[data-reduced-motion="true"] .intro-shade { display: block; animation: intro-fade 5s ease-out forwards; }
+@keyframes intro-fade { from { opacity: 1; } to { opacity: 0; } }

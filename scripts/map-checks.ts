@@ -36,18 +36,23 @@ check('camera computer, alarm and exit control activate only their own function'
     actions.syncCamera(camera);camera.lookAt(station.point);camera.updateMatrixWorld(true)
     assert.equal(actions.findTarget(camera)?.object,station.object,`${id} must be targetable`)
     assert(actions.activate(camera),`${id} must activate`)
-    assert.equal(state.camerasActive,id!=='security-computer')
+    assert.equal(state.camerasOff.includes('security-computer'),id==='security-computer')
     assert.equal(state.alarm,id==='detention-alarm'?'silenced':'active')
     assert.equal(state.gateOpen,id==='exit-gate-control')
   }
   actions.extraTargets=()=>[]
 })
-check('office blue-screen computer uses the real nearby interaction and rejects use through the partition',()=>{
+check('office surveillance computer uses the real nearby interaction and rejects use through the partition',()=>{
   const station=mission.stations.find(station=>station.id===SIGNALS_COMPUTER_ID)!
   assert(station)
   assert.equal(station.object.name,'Signals office · monitor 1')
   const screen=station.object.getObjectByName('Signals office · powered surveillance screen') as THREE.Mesh
-  assert.equal((screen.material as THREE.MeshBasicMaterial).color.getHex(),0x146bff)
+  const glass=screen.material as THREE.MeshBasicMaterial
+  assert.equal(glass.color.getHex(),0x3dff8c,'the powered screen glows phosphor green')
+  assert('NEON_UNLIT' in (glass.defines??{}),'the screen shines on its own in the dark office')
+  assert(station.object.getObjectByName('Signals office · surveillance · screen light')?.userData.neonLight,'and lights what is in front of it')
+  const labels:string[]=[];station.object.traverse(object=>{if(object.userData.text)labels.push(object.userData.text)})
+  assert.deepEqual(labels,[],'no label under the screen')
   const state=initialMission(),camera=new THREE.PerspectiveCamera()
   actions.extraTargets=()=>stationLabel(state,station.kind,station.id)?[{object:station.object,point:station.point,kind:'mission',label:station.label,descending:false,use:()=>useStation(state,station.kind,station.id).changed}]:[]
   const outward=new THREE.Vector3(0,0,1).transformDirection(station.object.matrixWorld)
@@ -56,14 +61,14 @@ check('office blue-screen computer uses the real nearby interaction and rejects 
   assert(fits(body.position),'The chair must leave room to stand and use the monitor')
   actions.syncCamera(camera);camera.lookAt(station.point);camera.updateMatrixWorld(true)
   assert.equal(actions.findTarget(camera)?.object,station.object)
-  assert(actions.activate(camera));assert(!state.camerasActive);assert.equal(state.camerasDisabledUntil,60)
-  assert(!actions.activate(camera),'No timer extension while offline')
-  state.camerasActive=true;state.camerasDisabledUntil=null
+  assert(actions.activate(camera));assert.deepEqual(state.camerasOff,['signals-office-computer'])
+  assert(!actions.activate(camera),'Nothing left to do once the cameras are down')
+  state.camerasOff=[]
   body.teleport(stand(station.point.x+0.2,-51.3,0.28));actions.syncCamera(camera);camera.lookAt(station.point);camera.updateMatrixWorld(true)
   assert(camera.position.distanceTo(station.point)<2.65,'Occlusion fixture must be within interaction range')
   assert(!world.visible(camera.position,station.point,station.object))
   assert.notEqual(actions.findTarget(camera)?.object,station.object)
-  actions.activate(camera);assert(state.camerasActive)
+  actions.activate(camera);assert.deepEqual(state.camerasOff,[])
   actions.extraTargets=()=>[]
 })
 check('only pines remain and their crowns clear compound and annex fences',()=>{
@@ -89,10 +94,15 @@ check('only pines remain and their crowns clear compound and annex fences',()=>{
 })
 for(const station of mission.stations)check(`station ${station.kind} standing and visible`,()=>{
   // Wall controls face local +Z; the solid jeep is boarded from the driver's side, local -Z.
-  const outward=new THREE.Vector3(0,0,station.kind==='jeep'?-1:1).transformDirection(station.object.matrixWorld)
-  const p=station.point.clone().addScaledVector(outward,1.25);const feet=stand(p.x,p.z,station.point.y-1.3)
-  assert(fits(feet),`station has no clear standing point: ${feet.toArray()}`)
-  assert(world.visible(feet.clone().add(new THREE.Vector3(0,1.65,0)),station.point,station.object),'station occluded')
+  // A radio sits on a desk with a chair in front of it, so either side of the chair will do.
+  const turns=station.kind==='radio'?[0,-0.6,0.6,-1.1,1.1]:[0]
+  const spots=turns.map(turn=>{
+    const outward=new THREE.Vector3(0,0,station.kind==='jeep'?-1:1).applyAxisAngle(new THREE.Vector3(0,1,0),turn).transformDirection(station.object.matrixWorld)
+    const p=station.point.clone().addScaledVector(outward,1.25);return stand(p.x,p.z,station.point.y-1.3)
+  })
+  const feet=spots.find(spot=>fits(spot)&&world.visible(spot.clone().add(new THREE.Vector3(0,1.65,0)),station.point,station.object))
+  assert(spots.some(fits),`station has no clear standing point: ${spots[0].toArray()}`)
+  assert(feet,'station occluded')
 })
 for(const npc of mission.enemies)check(`${npc.id} starts clear`,()=>{
   const p = new THREE.Vector3(...npc.position)

@@ -7,6 +7,7 @@ import { IncomingFire } from './incoming-fire'
 import { MissionMenu } from './menu'
 import type { PlayerDeathSequence } from './player-death'
 import type { EscapeCinematic } from './escape-cinematic'
+import { ObjectivesPanel, type ObjectiveTotals } from './objectives'
 
 const icons: Record<string, string> = {
   door: '<path d="M5 21V3h14v18M9 21V5l8 2v14M13 13h1"/>',
@@ -41,17 +42,21 @@ export class MissionHUD {
   readonly incoming = new IncomingFire()
   private threat: HTMLElement
   private threatLabel: HTMLElement
+  private objectives = new ObjectivesPanel()
+  private briefingDue = true
+  /** Set once the level is built (see setObjectiveTotals). */
+  private objectiveTotals: ObjectiveTotals = { crates: 0, radios: [] }
   reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
 
   constructor(world: MissionWorld, callbacks: { retry: () => void; restart: () => void; volume: (value: number) => void; mute: (value: boolean) => void; leaveWarning?: () => string | null }) {
     document.body.dataset.mission = 'true'
     document.body.dataset.reducedMotion = String(this.reducedMotion)
-    document.title = 'Operation Safe Return — Stickman'
+    document.title = 'Stickman: Ghost Ink'
     const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!
     this.start = $<HTMLButtonElement>('#walk-start')
     this.start.textContent = 'Loading the compound…'; this.start.disabled = true
-    $('.walk-heading .walk-eyebrow').textContent = 'Operation Safe Return'
-    $('#world').setAttribute('aria-label', 'Operation Safe Return tactical mission. Mouse to look, WASD move, left click fire, right click toggle aim, F interact, R reload, M field map, Escape pause.')
+    $('.walk-heading .walk-eyebrow').textContent = 'Stickman: Ghost Ink'
+    $('#world').setAttribute('aria-label', 'Stickman: Ghost Ink tactical mission. Mouse to look, WASD move, left click fire, right click toggle aim, F interact, R reload, M field map, Escape pause.')
     this.menu = new MissionMenu(this.start, this.buildMap(world), this.reducedMotion, callbacks)
     this.mapDot = document.querySelector('#field-player')!
     this.root.id = 'mission-hud'
@@ -90,13 +95,13 @@ export class MissionHUD {
     this.threat.setAttribute('aria-hidden', 'true')
     this.threat.innerHTML = '<i></i><span></span>'
     this.threatLabel = this.threat.querySelector('span')!
-    this.root.append(this.threat)
+    this.root.append(this.threat, this.objectives.root)
     this.clearThreat()
     this.health = $('#mission-health')
     this.scope.className = 'mission-scope'
     this.scope.hidden = true
     this.scope.setAttribute('aria-hidden', 'true')
-    this.scope.innerHTML = '<div class="scope-lens"><i></i><b></b><span>4×</span><small>Q − · E + · Mouse wheel</small></div>'
+    this.scope.innerHTML = '<div class="scope-lens"><i></i><b></b><span>4×</span><small>Mouse wheel to zoom</small></div>'
     this.scopeLabel = this.scope.querySelector('span')!
     document.body.append(this.scope)
     this.ammo = $('#mission-ammo')
@@ -109,6 +114,13 @@ export class MissionHUD {
     const opts = { signal: this.abort.signal }
     $('#mission-volume').addEventListener('input', e => callbacks.volume(Number((e.target as HTMLInputElement).value) / 100), opts)
     $('#mission-mute').addEventListener('change', e => callbacks.mute((e.target as HTMLInputElement).checked), opts)
+    // I opens and folds the mission list while playing.
+    window.addEventListener('keydown', event => {
+      if (event.code !== 'KeyI' || event.repeat || event.ctrlKey || event.metaKey || event.altKey || this.root.hidden) return
+      if (event.target instanceof HTMLElement && event.target.closest('button, input, textarea, select')) return
+      event.preventDefault()
+      this.objectives.toggle()
+    }, opts)
     $('#mission-motion').addEventListener('change', e => { this.reducedMotion = (e.target as HTMLInputElement).checked; document.body.dataset.reducedMotion = String(this.reducedMotion) }, opts)
   }
 
@@ -139,7 +151,20 @@ export class MissionHUD {
   ready() { this.menu.ready() }
   showMap() { this.menu.showMap() }
   showCoop() { this.menu.showCoop() }
-  setPlaying(playing: boolean) { this.menu.setPlaying(playing) }
+  /** Aim drift in normalized screen coordinates (as from Vector3.project), applied to the crosshair and scope reticle. */
+  setAimOffset(ndcX: number, ndcY: number) {
+    const x = ndcX * window.innerWidth / 2, y = -ndcY * window.innerHeight / 2
+    const translate = Math.abs(x) + Math.abs(y) < 0.05 ? '' : `${x.toFixed(2)}px ${y.toFixed(2)}px`
+    const crosshair = document.querySelector<HTMLElement>('.crosshair'), lens = this.scope.querySelector<HTMLElement>('.scope-lens')
+    for (const element of [crosshair, lens]) if (element && element.style.translate !== translate) element.style.translate = translate
+  }
+  setPlaying(playing: boolean) {
+    this.menu.setPlaying(playing)
+    // The first time a run is played, the mission list is shown in the middle of the screen before it docks.
+    if (playing && this.briefingDue) { this.briefingDue = false; this.objectives.brief() }
+  }
+  /** Brief the missions again when the next run starts (a full restart). */
+  briefObjectives() { this.briefingDue = true }
   error(message: string) { this.menu.error(message) }
   notify(message: string, duration = 5, visible = false) {
     this.caption.textContent = message
@@ -147,6 +172,8 @@ export class MissionHUD {
     this.caption.classList.toggle('visible-notice', visible)
   }
   hurt() { this.damageTimer = 0.32 }
+  /** How many crates and which radios the level holds, for the side-mission counts. */
+  setObjectiveTotals(totals: ObjectiveTotals) { this.objectiveTotals = totals }
   hitFrom(intensity: number, direction: string) { this.incoming.pulse(intensity, direction) }
   clearThreat() { this.incoming.clear(); this.threat.hidden = true }
   reset() { this.damageTimer = 0; this.captionTimer = 0; this.root.classList.remove('hurt'); this.setScoped(false); this.clearThreat(); this.clearDeath(); this.clearEscape(); this.menu.reset() }
@@ -234,6 +261,7 @@ export class MissionHUD {
     if (!data.playing) {
       this.mapDot.setAttribute('transform', `translate(${(data.position.x+110)*1.55+12},${(data.position.z+78)*1.55+12}) rotate(${-data.yaw*180/Math.PI})`)
     }
+    this.objectives.update(state, this.objectiveTotals, data.playing ? dt : 0)
     this.menu.update(state, data)
   }
   dispose() { this.menu.dispose(); this.abort.abort(); this.clearDeath(); this.clearEscape(); this.escape.remove(); this.death.remove(); this.setScoped(false); this.scope.remove(); this.root.remove(); this.icon.remove(); delete document.body.dataset.mission }
