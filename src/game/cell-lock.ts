@@ -19,7 +19,8 @@ export function createCellLock(door: THREE.Group): Station {
   bezel.position.set(0.095, 0.135, 0.085)
   lock.add(bezel)
   const indicator = new THREE.Mesh(new THREE.SphereGeometry(0.03, 24, 16),
-    new THREE.MeshBasicMaterial({ color: CELL_LOCK_GREEN, toneMapped: false }))
+    // An LED: it glows on its own, even in the dark cell block.
+    Object.assign(new THREE.MeshBasicMaterial({ color: CELL_LOCK_GREEN, toneMapped: false }), { defines: { NEON_UNLIT: '' } }))
   indicator.name = 'Green cell lock indicator'
   indicator.scale.z = 0.45
   // Keep the light above the central interaction marker so it stays visible.

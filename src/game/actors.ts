@@ -9,6 +9,7 @@ import { disposeGun, type Gun } from '../lab/weapons/models'
 import { createMissionGun } from './weapon-models'
 import { supportHand } from '../lab/weapons/support'
 import { AnimatedHitVolumes, mirrorReactionClip } from './hit-reactions'
+import { bloodPalette } from '../lab/fx/blood-stamps'
 import type { EnemyState, WeaponName } from './types'
 
 type Library = {
@@ -84,6 +85,10 @@ export class EnemyActor {
   private readonly upperBody: THREE.Bone[]
   private readonly arms: THREE.Bone[]
   deathClip = 'dieBody'
+  /** The head was blown off by a gunshot: it is not drawn, and a stump shows on the neck. */
+  headless = false
+  private stump: THREE.Mesh | null = null
+  private readonly headUniforms = { headGone: { value: 0 }, headBone: { value: 0 } }
 
   private constructor(readonly rig: Rig, private lib: Library, readonly weapon: WeaponName, color: number) {
     this.root = rig.root
@@ -99,8 +104,27 @@ export class EnemyActor {
     const original = rig.mesh.material as THREE.MeshBasicMaterial
     this.material = original.clone()
     // Material.clone does not preserve callbacks. Keep the original dual-quaternion shader setup.
-    this.material.onBeforeCompile = original.onBeforeCompile
-    this.material.customProgramCacheKey = original.customProgramCacheKey.bind(original)
+    // A blown-off head is cut away in the shader: every pixel of skin bound mostly to the head bone is dropped,
+    // and the stump (see burstHead) caps the neck. Nothing moves, so nothing stretches.
+    const skinned = original.onBeforeCompile
+    this.material.onBeforeCompile = (shader, renderer) => {
+      skinned.call(this.material, shader, renderer)
+      Object.assign(shader.uniforms, this.headUniforms)
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float headBone;\nvarying float vHeadWeight;')
+        .replace('#include <project_vertex>', `#ifdef USE_SKINNING
+          vHeadWeight = dot( vec4( lessThan( abs( skinIndex - headBone ), vec4( 0.5 ) ) ), skinWeight );
+        #else
+          vHeadWeight = 0.0;
+        #endif
+        #include <project_vertex>`)
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float headGone;\nvarying float vHeadWeight;')
+        .replace('#include <clipping_planes_fragment>', 'if ( headGone > 0.5 && vHeadWeight > 0.4 ) discard;\n#include <clipping_planes_fragment>')
+    }
+    this.material.customProgramCacheKey = () => `${original.customProgramCacheKey()}|head-burst-v2`
+    // Nor does it copy defines: characters stay solid black under any light.
+    this.material.defines = { ...original.defines }
     this.material.color.setHex(color)
     this.material.toneMapped = false
     this.material.depthTest = this.material.depthWrite = true
@@ -145,6 +169,7 @@ export class EnemyActor {
         void this.player.play(this.deathAnimation ?? this.lib.clips[this.deathClip] ?? this.lib.clips.dieBody, { once: true, fade: this.deathAnimation ? 0 : 0.06 })
       }
       this.player.update(dt)
+      if (this.headless) this.collapseHead()
       return
     }
     if (this.dead) {
@@ -425,8 +450,37 @@ export class EnemyActor {
     this.releaseTransientClips()
   }
 
+  /** Blow the head off: the head disappears, leaving a bloody stump on the neck. */
+  burstHead() {
+    this.headless = true
+    if (!this.stump) {
+      const { head, neck } = this.rig.bones
+      const scale = this.root.getWorldScale(new THREE.Vector3()).x || 1
+      this.stump = new THREE.Mesh(new THREE.SphereGeometry(0.075 / scale, 14, 10),
+        new THREE.MeshBasicMaterial({ color: bloodPalette.fresh, toneMapped: false }))
+      this.stump.name = 'Neck stump'
+      this.stump.scale.y = 0.7
+      this.stump.position.copy(head.position)
+      neck.add(this.stump)
+    }
+    this.stump.visible = true
+    this.collapseHead()
+  }
+
+  private collapseHead() {
+    this.headUniforms.headGone.value = 1
+    this.headUniforms.headBone.value = this.rig.mesh.skeleton.bones.indexOf(this.rig.bones.head)
+  }
+
+  private restoreHead() {
+    this.headless = false
+    this.headUniforms.headGone.value = 0
+    if (this.stump) this.stump.visible = false
+  }
+
   /** Set a corpse immediately during a checkpoint restore, without creating a second dropped item. */
   restore(state: EnemyState, animationTime = 0, deathClip = 'dieBody', posture?: ActorPostureSnapshot) {
+    this.restoreHead()
     // Parsed clips retain their UUIDs. Evict the previous actions before parsing a
     // checkpoint, or the mixer can return an old action for the new clip object.
     this.player.stop(0)

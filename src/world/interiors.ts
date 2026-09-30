@@ -3,7 +3,7 @@ import { Draft, type Point } from '../render/ink'
 type Counts = Record<string, number>
 
 /** Furniture is built at human scale, leaving the centre of each room as a circulation aisle. */
-class Furnishing extends Draft {
+export class Furnishing extends Draft {
   counts: Counts = {}
 
   item(kind: string, x: number, z: number, floor: number, angle = 0) {
@@ -38,14 +38,58 @@ class Furnishing extends Draft {
     g.box(0.38, 0.025, 0.27, 0.33, 0.915, 0.11, 'paper', 'detail', [0, 0.12, 0])
     g.beam([-0.65, 0.9, -0.24], [-0.65, 1.35, -0.24], 0.035, 'paper', 'detail')
     g.box(0.27, 0.1, 0.18, -0.55, 1.34, -0.24, 'roof', 'detail')
-    if (radio) {
-      this.counts.radio = (this.counts.radio ?? 0) + 1
-      g.box(0.7, 0.32, 0.32, 0.1, 1.06, -0.2, 'green', 'detail')
-      g.box(0.25, 0.13, 0.02, -0.04, 1.09, -0.029, 'glass', 'detail')
-      for (const sx of [0.19, 0.29, 0.39]) g.box(0.045, 0.045, 0.04, sx, 1.07, -0.014, 'paper', 'detail')
-      g.beam([0.37, 1.2, -0.27], [0.45, 1.85, -0.27], 0.025, 'paper', 'detail')
+    if (radio) g.add(this.radio())
+    g.finish()
+  }
+
+  /**
+   * A field radio set for the desk top: olive case, dark brown front panel with a dial window and knobs,
+   * a carry handle and a whip antenna. Radios are quest items, so they are painted and tagged.
+   */
+  private radio() {
+    this.counts.radio = (this.counts.radio ?? 0) + 1
+    const g = new Draft(`${this.name} · radio ${this.counts.radio}`, 0.1, -0.2)
+    g.position.y = 0.9
+    g.userData.furniture = 'radio'
+    g.userData.questItem = 'radio'
+    g.box(0.66, 0.3, 0.3, 0, 0.15, 0, 'olive', 'detail')
+    g.box(0.6, 0.23, 0.02, 0, 0.15, 0.16, 'umber', 'detail')
+    g.box(0.2, 0.1, 0.012, -0.14, 0.17, 0.176, 'glass', 'detail')
+    g.line([[-0.2, 0.17, 0.183], [-0.08, 0.17, 0.183]], 'mesh')
+    for (const [sx, sy] of [[0.07, 0.19], [0.15, 0.19], [0.23, 0.19], [0.11, 0.1], [0.21, 0.1]]) g.box(0.045, 0.045, 0.035, sx, sy, 0.185, 'olive', 'detail')
+    for (const sx of [-0.2, 0.2]) g.beam([sx, 0.3, 0], [sx, 0.37, 0], 0.03, 'umber', 'detail')
+    g.beam([-0.2, 0.37, 0], [0.2, 0.37, 0], 0.03, 'umber', 'detail')
+    g.beam([0.27, 0.3, -0.07], [0.35, 0.95, -0.07], 0.018, 'umber', 'detail')
+    return g.finish()
+  }
+
+  /**
+   * A wooden supply crate that can be shot apart: planked sides in a darker frame with a cross brace.
+   * Crates are quest items. They collide as dynamic objects so a broken one can leave the collision world.
+   */
+  crate(x: number, z: number, floor: number, angle = 0) {
+    const g = this.item('quest-crate', x, z, floor, angle)
+    g.userData.questItem = 'crate'
+    g.userData.questCrate = g.name
+    g.userData.dynamicCollision = true
+    const s = 0.78, h = 0.72, t = 0.06
+    g.box(s - 0.02, h - 0.02, s - 0.02, 0, h / 2, 0, 'wood', 'detail')
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.box(t, h, t, sx * (s - t) / 2, h / 2, sz * (s - t) / 2, 'timber', 'detail')
+    for (const y of [t / 2, h - t / 2]) {
+      for (const sz of [-1, 1]) g.box(s, t, t, 0, y, sz * (s - t) / 2, 'timber', 'detail')
+      for (const sx of [-1, 1]) g.box(t, t, s, sx * (s - t) / 2, y, 0, 'timber', 'detail')
+    }
+    for (const side of [-1, 1]) {
+      const zf = side * (s / 2 + 0.002), xf = side * (s / 2 + 0.002)
+      // Plank seams on every face, and a brace across the front and back.
+      for (const y of [0.25, 0.47]) {
+        g.line([[-s / 2 + t, y, zf], [s / 2 - t, y, zf]], 'mesh')
+        g.line([[xf, y, -s / 2 + t], [xf, y, s / 2 - t]], 'mesh')
+      }
+      g.beam([-s / 2 + t, t, side * (s / 2 + 0.012)], [s / 2 - t, h - t, side * (s / 2 + 0.012)], 0.055, 'timber', 'detail')
     }
     g.finish()
+    return g
   }
 
   bunk(x: number, z: number, floor: number, angle = 0, single = false) {
@@ -168,6 +212,9 @@ export function militaryInterior(name: string, type: string, w: number, d: numbe
     g.desk(left + 0.5, d / 2 - 1.3, floor, Math.PI)
     g.chair(left + 0.5, d / 2 - 2.3, floor)
     g.lockers(right, d / 2 - 0.75, floor, 3, Math.PI)
+    // Quest crates: one beside the lockers, one against the west end wall.
+    g.crate(right - 1.6, d / 2 - 0.75, floor, 0.1)
+    g.crate(-w / 2 + 0.95, 0.2, floor, -0.12)
   } else if (/administration|service/i.test(name) && type !== 'utility') {
     variant = 'administration and briefing room'
     for (const x of [left + 1, right - 1]) {
@@ -212,6 +259,7 @@ export function militaryInterior(name: string, type: string, w: number, d: numbe
       g.chair(right - 0.3, d / 2 - 2.2, floor)
     } else {
       g.pallet(right, d / 2 - 1.1, floor)
+      g.crate(0.4, back + 0.4, floor, 0.08)
     }
   } else {
     variant = 'barracks sleeping quarters'
@@ -223,6 +271,7 @@ export function militaryInterior(name: string, type: string, w: number, d: numbe
     }
     g.lockers(left + 0.6, d / 2 - 0.7, floor, Math.min(5, count), Math.PI)
     g.shelf(right - 0.7, d / 2 - 0.8, floor, Math.PI)
+    g.crate(w / 2 - 0.75, d * 0.08, floor, 0.15)
     if (d > 9) {
       g.table(0, 0.5, floor, 2.8)
       for (const x of [-0.85, 0.85]) {

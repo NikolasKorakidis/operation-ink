@@ -25,40 +25,31 @@
     trees: () => view([125,18,81],[76,4,59],54),
     fence: () => view([85,13,43],[104,3,17],55),
     panel: () => view([122.5,2,-1.5],[125.4,1.25,-4.5],45),
-    green() { m.state.camerasActive=true; m.state.camerasDisabledUntil=null; m.state.alarm='inactive'; m.security.sync(m.state); this.camera(); },
-    red() { m.state.camerasActive=true; m.state.alarm='active'; m.security.sync(m.state); this.camera(); },
+    green() { m.state.camerasOff=[]; m.state.alarm='inactive'; m.security.sync(m.state); this.camera(); },
+    red() { m.state.camerasOff=[]; m.state.alarm='active'; m.security.sync(m.state); this.camera(); },
     async computer() {
       if (!e.player.enabled) e.player.enable(); e.player.playing=true;
-      m.state.alarm='inactive'; m.state.camerasActive=true; m.state.camerasDisabledUntil=null;
+      m.state.alarm='inactive'; m.state.camerasOff=[];
       const station = m.world.stations.find(s => s.id === 'signals-office-computer');
       e.player.body.teleport(vector([station.point.x+1.75,0.285,station.point.z]));
       e.player.actions.syncCamera(c); c.lookAt(station.point); c.updateMatrixWorld(true);
       assert(e.player.actions.findTarget(c)?.object === station.object,'The office monitor must be the F target');
       window.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyF',bubbles:true}));
       window.dispatchEvent(new KeyboardEvent('keyup',{code:'KeyF',bubbles:true}));
-      assert(!m.state.camerasActive,'F must shut down cameras');
-      assert(Math.abs(m.state.camerasDisabledUntil-m.state.elapsed-60)<1e-8,'Shutdown must last 60 seconds');
-      update(0);
-      const hud=document.querySelector('#mission-detail').textContent;
-      assert(hud.includes('60s remaining'),'HUD must show remaining time');
+      assert(m.state.camerasOff.includes('signals-office-computer'),'F must shut down the office cameras');
       const saved=m.snapshot();
-      e.player.playing=false; update(30);
-      assert(m.state.elapsed===saved.mission.elapsed,'Pause must freeze the shutdown timer');
-      e.player.playing=true;
-      for(let i=0;i<1199;i++) update(0.05);
-      assert(!m.state.camerasActive,'Cameras stay disabled before 60 seconds');
-      update(0.1);
-      assert(m.state.camerasActive,'Cameras recover after 60 seconds');
+      for(let i=0;i<1600;i++) update(0.05);
+      assert(m.state.camerasOff.includes('signals-office-computer'),'Cameras stay down for good');
       m.restore(saved);
-      assert(!m.state.camerasActive && Math.abs(m.state.camerasDisabledUntil-m.state.elapsed-60)<1e-8,'Checkpoint restores timer');
+      assert(m.state.camerasOff.includes('signals-office-computer'),'Checkpoint keeps the cameras down');
       m.restart();
-      assert(m.state.camerasActive && m.state.camerasDisabledUntil===null,'Restart restores cameras');
+      assert(!m.state.camerasOff.length,'Restart restores cameras');
       this.office();
-      return {fInteraction:true,hud,pausedTimer:true,timedRecovery:true,checkpoint:true,restart:true};
+      return {fInteraction:true,permanent:true,checkpoint:true,restart:true};
     },
     scan() {
       const camera=m.world.rescue.cameras.find(c=>c.id==='mess-hall-exit-camera');
-      m.state.camerasActive=true;m.state.alarm='inactive';
+      m.state.camerasOff=[];m.state.alarm='inactive';
       const poses=[0,0.8,1.3,2,3,4].map(time=>{m.state.elapsed=time;m.security.sync(m.state);return camera.pivot.rotation.y;});
       assert(poses[0]===poses[1],'Camera must pause');assert(poses[2]!==poses[3],'Camera must turn');assert(poses[4]===poses[5],'Camera must pause again');
       m.state.elapsed=0; m.security.sync(m.state); this.camera();return {poses};

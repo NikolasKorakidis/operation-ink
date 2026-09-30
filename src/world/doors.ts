@@ -1,5 +1,6 @@
-import { Group } from 'three'
+import { Group, Vector3 } from 'three'
 import { Draft } from '../render/ink'
+import type { ExitSignSpec } from './exitSigns'
 
 const swings = new WeakMap<Group, { from: number; target: number; elapsed: number; duration: number }>()
 
@@ -14,16 +15,18 @@ export interface DoorOptions {
   open?: boolean
   industrial?: boolean
   barred?: boolean
+  /** A way out of a building, which may get a lit EXIT sign above it on its inside (local -Z). See exitSigns.ts. */
+  exit?: boolean | ExitSignSpec
 }
 
 /** A separate hinged leaf, mounted in an opening supplied by the building. */
 export function createDoor({ name, x, z, floor, width = 1.35, height = 2.35,
-  angle = 0, open = false, industrial = false, barred = false }: DoorOptions) {
+  angle = 0, open = false, industrial = false, barred = false, exit = false }: DoorOptions) {
   const root = new Group()
   root.name = name
   root.position.set(x, floor, z)
   root.rotation.y = angle
-  root.userData = { kind: 'door', open, width, height, interactive: true }
+  root.userData = { kind: 'door', open, width, height, interactive: true, exit }
   const frame = new Draft(`${name} frame`)
   const frameWidth = 0.05, frameDepth = 0.14, inkOffset = 0.006
   root.userData.frameDepth = frameDepth
@@ -70,18 +73,43 @@ export function createDoor({ name, x, z, floor, width = 1.35, height = 2.35,
   return root
 }
 
-export function setDoorOpen(door: Group, open: boolean, instant = false) {
+export type DoorSide = 1 | -1
+
+/**
+ * The side a leaf should swing to so it moves away from whoever opens it. A leaf turned -90° about its hinge
+ * lies on the door's local +Z side (side 1); +90° puts it on -Z (side -1). Uses the door's own frame, so it
+ * works for every door orientation and from both sides.
+ */
+export function doorOpenSide(door: Group, opener: Vector3): DoorSide {
+  door.updateWorldMatrix(true, false)
+  return door.worldToLocal(opener.clone()).z > 0 ? -1 : 1
+}
+
+/** The hinge angle of a fully open leaf: away from the last opener, or the authored side when none was given. */
+export const openAngle = (door: Group) => -Math.PI / 2 * (door.userData.openSide === -1 ? -1 : 1)
+
+/** `from` is the opener's position (the leaf swings away from it) or an explicit side, as restores and co-op carry. */
+export function setDoorOpen(door: Group, open: boolean, instant = false, from?: Vector3 | DoorSide) {
+  if (open && from !== undefined && (!door.userData.open || typeof from === 'number')) {
+    door.userData.openSide = typeof from === 'number' ? from : doorOpenSide(door, from)
+  }
   door.userData.open = open
   if (instant) {
     swings.delete(door)
     const hinge = door.children.find(child => child.userData.doorHinge)
-    if (hinge) hinge.rotation.y = open ? -Math.PI / 2 : 0
+    if (hinge) hinge.rotation.y = open ? openAngle(door) : 0
   }
+}
+
+/** How far the leaf has swung, 0 closed to 1 fully open, either way. */
+export function doorOpenness(door: Group) {
+  const hinge = door.children.find(child => child.userData.doorHinge)
+  return hinge ? Math.min(1, Math.abs(hinge.rotation.y) / (Math.PI / 2)) : 0
 }
 
 export function isDoorFullyOpen(door: Group) {
   const hinge = door.children.find(child => child.userData.doorHinge)
-  return Boolean(door.userData.open && hinge && Math.abs(hinge.rotation.y + Math.PI / 2) < 0.000001)
+  return Boolean(door.userData.open && hinge && Math.abs(hinge.rotation.y - openAngle(door)) < 0.000001)
 }
 
 export function updateDoors(doors: Group[], dt: number, reducedMotion = false) {
@@ -89,7 +117,7 @@ export function updateDoors(doors: Group[], dt: number, reducedMotion = false) {
   for (const door of doors) {
     const hinge = door.children.find(child => child.userData.doorHinge)
     if (!hinge) continue
-    const target = door.userData.open ? -Math.PI / 2 : 0
+    const target = door.userData.open ? openAngle(door) : 0
     const distance = target - hinge.rotation.y
     if (door.userData.swingSeconds > 0) {
       let swing = swings.get(door)

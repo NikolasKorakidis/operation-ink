@@ -20,8 +20,9 @@ export type Gun = THREE.Group & {
 // face of the neighbouring piece (first-person pistol rear sight). Measured: 2 restores it, 3 starts to
 // show hidden edges through thin plates in the lab.
 const PAPER_OFFSET_UNITS = 2
-export const metal = new THREE.MeshBasicMaterial({ color: penPalette.paper, toneMapped: false,
-  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: PAPER_OFFSET_UNITS })
+// Weapons catch a bright highlight from neon light (see render/neon.ts).
+export const metal = Object.assign(new THREE.MeshBasicMaterial({ color: penPalette.paper, toneMapped: false,
+  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: PAPER_OFFSET_UNITS }), { defines: { NEON_SHINE: '1.2' } })
 export const dark = metal
 export const wood = metal
 export type V = [number, number, number]

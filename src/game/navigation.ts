@@ -221,7 +221,7 @@ export class EnemyNavigation {
       const closest = segment.closestPointToPoint(entry.position, true, new THREE.Vector3())
       if (Math.hypot(closest.x - entry.position.x, closest.z - entry.position.z) > 0.85) continue
       if (!entry.door.userData.open) {
-        setDoorOpen(entry.door, true)
+        setDoorOpen(entry.door, true, false, position)
         this.emit({ kind: 'door', position: entry.position.clone(), radius: 4 })
       }
     }

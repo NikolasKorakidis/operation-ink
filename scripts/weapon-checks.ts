@@ -56,16 +56,23 @@ test('A trigger consumes one cartridge, emits one sound and resolves one synchro
   weapons.dispose()
 })
 
-test('Reload transfer conserves cartridges and commits only at completion', () => {
+test('A reload throws the old magazine away with its rounds, and commits only at completion', () => {
   const { weapons, step } = setup()
   const snapshot = weapons.snapshot()
-  snapshot.slots[0]!.magazine = 3; snapshot.slots[0]!.reserve = 4
+  snapshot.slots[0]!.magazine = 3; snapshot.slots[0]!.reserve = 28
   weapons.restore(snapshot)
   assert(weapons.reload()); step(1)
-  assert.equal(weapons.ammo, '3 / 4')
+  assert.equal(weapons.ammo, '3 / 28', 'Nothing changes until the new magazine is seated')
   step(1)
-  assert.equal(weapons.ammo, '7 / 0')
-  assert(!weapons.reload())
+  assert.equal(weapons.ammo, '12 / 16', 'A full magazine goes in; the 3 leftover rounds are gone')
+  weapons.current!.magazine = 5
+  assert(weapons.reload()); step(2)
+  assert.equal(weapons.ammo, '12 / 4')
+  assert(!weapons.reload(), 'A full magazine is not reloaded')
+  weapons.current!.magazine = 1
+  assert(weapons.reload()); step(2)
+  assert.equal(weapons.ammo, '4 / 0', 'The last, partial magazine is whatever reserve remains')
+  assert(!weapons.reload(), 'With no spare magazines there is nothing to reload')
   weapons.dispose()
 })
 
@@ -102,24 +109,31 @@ test('Pause, climbing and restore cancel reloads and held automatic fire without
   weapons.dispose()
 })
 
-test('Two-slot swap, explicit drop and repeated pickup preserve every item and its ammunition', () => {
+test('Category slots: a pickup fills its own slot, a second weapon of a kind swaps, and ammunition is never lost', () => {
   const { weapons, step, aimPickup } = setup()
+  weapons.restore({ slots: [{ id: 'player-knife', name: 'knife', magazine: 0, reserve: 0 }, { id: 'player-pistol', name: 'pistol', magazine: 12, reserve: 36 }, null],
+    selected: 1, pickups: [], nextId: 1 })
+  step(0.3)
+  const take = (id: string) => { aimPickup(id); return weapons.pickup(id) }
   weapons.addPickup({ id: 'ak-1', name: 'ak', magazine: 7, reserve: 9, position: [0, 0, -1] })
-  aimPickup('ak-1'); assert(weapons.pickup('ak-1'))
-  assert(!weapons.pickup('ak-1'))
-  assert.equal(weapons.selected, 1)
+  assert.equal(weapons.pickupTargets()[0].label, 'Take AK rifle', 'An empty rifle slot takes the AK')
+  assert(take('ak-1')); assert(!weapons.pickup('ak-1'))
+  assert.equal(weapons.selected, 2, 'Rifles go to slot 3')
   weapons.addPickup({ id: 'smg-2', name: 'smg', magazine: 2, reserve: 8, position: [0, 0, -1] })
-  aimPickup('smg-2'); assert(weapons.pickup('smg-2'))
-  assert.equal(weapons.current!.name, 'smg')
-  assert.equal(weapons.pickupTargets().length, 1)
+  assert.equal(weapons.pickupTargets()[0].label, 'Swap for SMG', 'A second sidearm is offered as a swap')
+  assert(take('smg-2'))
+  assert.deepEqual(weapons.slots.map(item => item?.name ?? null), ['knife', 'smg', 'ak'], 'The SMG replaces the pistol; the rifle stays')
+  assert(weapons.snapshot().pickups.some(item => item.id === 'player-pistol' && item.magazine === 12 && item.reserve === 36), 'The swapped pistol drops with its ammunition')
+  weapons.addPickup({ id: 'sniper-3', name: 'sniper', magazine: 5, reserve: 10, position: [0, 0, -1] })
+  assert(take('sniper-3'))
+  assert.deepEqual(weapons.slots.map(item => item?.name ?? null), ['knife', 'smg', 'sniper'], 'Never more than one rifle, and never more than three weapons')
   assert(weapons.snapshot().pickups.some(item => item.id === 'ak-1' && item.magazine === 7 && item.reserve === 9))
   step(0.3); assert(weapons.drop(new THREE.Vector3()))
-  aimPickup('smg-2'); assert(weapons.pickup('smg-2'))
-  assert.equal(weapons.ammo, '2 / 8')
-  weapons.addPickup({ id: 'smg-2', name: 'smg', magazine: 24, reserve: 999, position: [0, 0, -1] })
-  assert.equal(weapons.pickupTargets().length, 1)
+  assert.equal(weapons.slots[2], null)
+  assert(take('sniper-3')); assert.equal(weapons.ammo, '5 / 10')
+  assert(weapons.switchSlot(0)); step(0.3); assert(!weapons.drop(new THREE.Vector3()), 'The knife cannot be dropped')
   const total = [...weapons.snapshot().slots, ...weapons.snapshot().pickups].reduce((sum, item) => sum + (item ? item.magazine + item.reserve : 0), 0)
-  assert.equal(total, 48 + 16 + 10)
+  assert.equal(total, 48 + 16 + 10 + 15, 'Swaps and drops conserve every cartridge')
   const checkpoint = JSON.parse(JSON.stringify(weapons.snapshot()))
   weapons.restore(checkpoint)
   assert.deepEqual(weapons.snapshot(), checkpoint)
@@ -169,7 +183,7 @@ test('First-person pistols use one hand while aiming and firing, with a left han
   const { weapons, scene, shots, step } = setup()
   const rig = scene.getObjectByName('First-person stickman arms')!
   const leftHand = rig.getObjectByName('Left reload and support hand')!
-  const limbs = rig.children.filter(object => object instanceof THREE.Mesh && object.geometry.type === 'CylinderGeometry')
+  const limbs = rig.children.filter(object => object instanceof THREE.Mesh && object.geometry.type === 'CylinderGeometry' && object.name !== 'Knife glove cuff')
   const elbows = rig.children.filter(object => object instanceof THREE.Mesh && object.geometry.type === 'SphereGeometry')
   const expectSupport = (visible: boolean) => {
     for (const part of [leftHand, ...limbs.slice(2), elbows[1]]) assert.equal(part.visible, visible)
@@ -202,7 +216,7 @@ test('All weapon poses retain fixed bone lengths and outlined paper arms', () =>
   const { weapons, scene, step, aimPickup, camera } = setup()
   // Inspect implementation geometry as a regression check, not a substitute for viewport review.
   const rig = scene.getObjectByName('First-person stickman arms')!
-  const limbs = rig.children.filter(object => object instanceof THREE.Mesh && object.geometry.type === 'CylinderGeometry') as THREE.Mesh[]
+  const limbs = rig.children.filter(object => object instanceof THREE.Mesh && object.geometry.type === 'CylinderGeometry' && object.name !== 'Knife glove cuff') as THREE.Mesh[]
   for (const name of ['pistol', 'ak', 'smg', 'shotgun', 'sniper'] as const) {
     if (name !== 'pistol') {
       weapons.addPickup({ id: `pose-${name}`, name, magazine: 4, reserve: 9, position: [0, 0, -1] })

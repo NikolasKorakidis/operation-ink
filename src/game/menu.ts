@@ -20,6 +20,9 @@ export function destinationUrl(destination: Destination) {
   return new URL(path, location.href).toString()
 }
 
+/** The title in blue neon, with one failing letter that stutters now and then (menu-neon.css). */
+const BRAND = 'Stickman: Ghost <span class="neon-broken">I</span>nk'
+
 type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart' | 'coop' | 'views' | 'leave'
 /** `leaveWarning` names what leaving to another mode would lose, or null when nothing is at stake. */
 type MenuCallbacks = { retry: () => void; restart: () => void; leaveWarning?: () => string | null }
@@ -49,7 +52,7 @@ export class MissionMenu {
     this.card.setAttribute('aria-labelledby', 'mission-menu-title')
     this.card.innerHTML = `
       <section data-menu-page="home">
-        <h1 id="mission-menu-title">Operation Safe Return</h1>
+        <h1 id="mission-menu-title">${BRAND}</h1>
         <p id="mission-premise">Find the hostage. Get out together.</p>
         <p id="coop-status" hidden></p>
         <div id="mission-debrief" role="status" hidden></div>
@@ -93,7 +96,7 @@ export class MissionMenu {
         <p class="map-legend"><span>— Rail route</span><span>┄ Service route</span><span>▲ You</span></p>
         <details class="mission-tips"><summary>Route tips</summary>
           <p>Take the mess-hall roof to the rail line, or the west service gate to the covered lanes.</p>
-          <p>The office terminal stops cameras for 60 seconds. Security shuts them down permanently. Open the exit gate before the rescue.</p>
+          <p>Each camera terminal shuts down its own cameras for good: the office terminal the west camera, the security computer the east ones. Open the exit gate before the rescue.</p>
           <p>The jeep is southeast of detention. If the hostage falls behind, return to him and lead him onward. Alarms bring reinforcements; you don’t need to fight everyone.</p>
         </details>
       </section>
@@ -104,15 +107,18 @@ export class MissionMenu {
           <div><dt>Move</dt><dd><kbd>W A S D</kbd></dd></div>
           <div><dt>Look</dt><dd><kbd>Mouse</kbd></dd></div>
           <div><dt>Fire · knife slash</dt><dd><kbd>Left click</kbd></dd></div>
-          <div><dt>Aim · knife stab</dt><dd><kbd>Right click</kbd></dd></div>
+          <div><dt>Aim (hold) · knife stab</dt><dd><kbd>Right click</kbd></dd></div>
           <div><dt>Interact / pick up</dt><dd><kbd>F</kbd></dd></div>
           <div><dt>Reload</dt><dd><kbd>R</kbd></dd></div>
           <div><dt>Sprint</dt><dd><kbd>Shift</kbd></dd></div>
-          <div><dt>Sneak (silent)</dt><dd><kbd>C</kbd></dd></div>
+          <div><dt>Crouch (toggle)</dt><dd><kbd>C</kbd></dd></div>
+          <div><dt>Prone (toggle)</dt><dd><kbd>Z</kbd></dd></div>
           <div><dt>Jump</dt><dd><kbd>Space</kbd></dd></div>
-          <div><dt>Switch weapon</dt><dd><kbd>1–5</kbd></dd></div>
+          <div><dt>Knife · sidearm · rifle</dt><dd><kbd>1 · 2 · 3 / Wheel</kbd></dd></div>
           <div><dt>Drop weapon</dt><dd><kbd>G</kbd></dd></div>
-          <div><dt>Scope zoom</dt><dd><kbd>Q / E / Wheel</kbd></dd></div>
+          <div><dt>Scope zoom</dt><dd><kbd>Wheel</kbd></dd></div>
+          <div><dt>Lean left · right (hold)</dt><dd><kbd>Q · E</kbd></dd></div>
+          <div><dt>Missions list</dt><dd><kbd>I</kbd></dd></div>
           <div><dt>Mission map</dt><dd><kbd>M</kbd></dd></div>
           <div><dt>Pause</dt><dd><kbd>Esc</kbd></dd></div>
         </dl>
@@ -247,7 +253,8 @@ export class MissionMenu {
       this.show('home', undefined, false)
     }
     const dead = state.phase === 'dead', complete = state.phase === 'complete'
-    this.title.textContent = dead ? 'No way through.' : complete ? 'Hostage safe.' : this.hasPlayed ? 'Paused.' : 'Operation Safe Return'
+    if (dead || complete || this.hasPlayed) this.title.textContent = dead ? 'No way through.' : complete ? 'Hostage safe.' : 'Paused.'
+    else if (this.title.textContent !== 'Stickman: Ghost Ink') this.title.innerHTML = BRAND
     this.premise.hidden = dead
     this.premise.textContent = complete ? 'You both made it out.' : this.hasPlayed ? missionObjective(state) : 'Find the hostage. Get out together.'
     this.start.hidden = dead || complete

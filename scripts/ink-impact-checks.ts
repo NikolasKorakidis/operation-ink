@@ -100,8 +100,8 @@ console.log('PASS Sustained fire caps stains at 128, reuses buffers, excludes in
   const f = fixture(), trails = new BulletTrails(f.scene)
   const runtime = Object.create(MissionRuntime.prototype) as any
   let bodyHit = false, sounds = 0
-  Object.assign(runtime, { teammates: { update: () => {}, count: 0 }, coop: { active: false, send: () => {}, hub: { selfId: 0 } }, isActive: () => true, state: { shots: 0 }, player: { world: f.world },
-    ai: { nearMiss() {}, hit: () => bodyHit }, audio: { play() { sounds++ } }, impacts: f.impacts, bulletTrails: trails })
+  Object.assign(runtime, { teammates: { update: () => {}, count: 0 }, coop: { active: false, send: () => {}, hub: { selfId: 0 } }, steadiness: { onShot() {} }, isActive: () => true, state: { shots: 0 }, player: { world: f.world },
+    ai: { nearMiss() {}, hit: () => bodyHit }, audio: { play() { sounds++ } }, impacts: f.impacts, crates: { at: () => null }, radios: { at: () => null }, bulletTrails: trails })
   const shot = { origin: v(0, 1.5, -2), direction: v(0, 0, 1), range: 100, weapon: 'ak', damage: 34 }
   runtime.shot(shot)
   assert.equal(runtime.state.shots, 1); assert.equal(f.impacts.splashes!.count, 0)

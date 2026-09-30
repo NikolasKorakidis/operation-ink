@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { Capsule } from 'three/addons/math/Capsule.js'
 import { setDoorOpen } from '../world/doors'
-import { EYE_HEIGHT, PlayerBody } from './body'
+import { PlayerBody } from './body'
 
 export type ActionTarget = {
   object: THREE.Object3D
@@ -21,7 +21,11 @@ export class PlayerActions {
   private cameraFeet = new THREE.Vector3()
   private cameraLanding = 0
   target: ActionTarget | null = null
-  climbing: { object: THREE.Object3D; points: THREE.Vector3[]; descending: boolean } | null = null
+  /**
+   * A ladder climb: the route runs from its low end to its high end, `at` metres along it. It moves on its own
+   * in the direction you started, and pressing up or down while on the ladder turns it around.
+   */
+  climbing: { object: THREE.Object3D; route: THREE.Vector3[]; at: number; length: number; descending: boolean } | null = null
   riding: { object: THREE.Object3D; points: THREE.Vector3[]; start: THREE.Vector3; end: THREE.Vector3;
     distance: number; remaining: number; destination: string } | null = null
   get traversing() { return !!(this.climbing || this.riding) }
@@ -105,6 +109,16 @@ export class PlayerActions {
       point.y += descending ? 0.85 : 1.25
       consider({ object: ladder, point, kind: 'ladder', label: descending ? 'Climb down' : 'Climb up', descending })
     }
+    for (const ladder of this.ladders) {
+      // Anywhere along the ladder, not only at its ends: jumping or falling beside it, F grabs it at that height.
+      const bottom = this.ladderPoint(ladder, false), top = this.ladderPoint(ladder, true, true), feet = this.body.position
+      if (feet.y < bottom.y + 0.3 || feet.y > top.y - 0.3) continue
+      const local = ladder.worldToLocal(feet.clone())
+      if (Math.abs(local.x) > 0.9 || local.z < 0 || local.z > 1.5) continue
+      const point = bottom.clone().lerp(top, (feet.y - bottom.y) / (top.y - bottom.y))
+      point.y += 1.25
+      consider({ object: ladder, point, kind: 'ladder', label: 'Climb', descending: false })
+    }
     for (const zipline of this.ziplines) {
       // Only the water tower is a launch point; the lower tower is arrival-only.
       const endpoint = this.ziplinePoint(zipline, false)
@@ -124,7 +138,7 @@ export class PlayerActions {
     if (!target) return false
     if (target.kind === 'door') {
       const door = target.object as THREE.Group
-      setDoorOpen(door, !door.userData.open)
+      setDoorOpen(door, !door.userData.open, false, this.body.position)
     } else if (target.kind === 'ladder') {
       const bottom = this.ladderPoint(target.object, false)
       const topOutside = this.ladderPoint(target.object, true, true)
@@ -139,13 +153,22 @@ export class PlayerActions {
         top.y = Math.min(top.y, this.body.position.y)
         topOutside.y = Math.min(topOutside.y, this.body.position.y)
       }
-      this.climbing = { object: target.object, descending: target.descending,
-        points: target.descending ? [top, topOutside, bottom] : [bottom, topOutside, top] }
+      // The route starts or ends where the player stands, so turning back returns them to that spot.
+      const here = this.body.position.clone()
+      let route = target.descending ? [bottom, topOutside, top, here] : [here, bottom, topOutside, top]
+      // In the air (a jump or a fall) or partway up, grab the rungs at this height and climb on from there,
+      // instead of first going back down to the foot of the ladder.
+      const grab = !target.descending && here.y > bottom.y + 0.15
+      if (grab) route = [bottom, bottom.clone().lerp(topOutside, THREE.MathUtils.clamp((here.y - bottom.y) / (topOutside.y - bottom.y), 0, 1)), topOutside, top]
+      let length = 0
+      for (let i = 1; i < route.length; i++) length += route[i - 1].distanceTo(route[i])
+      this.climbing = { object: target.object, route, length, descending: target.descending,
+        at: target.descending ? length : grab ? route[0].distanceTo(route[1]) : 0 }
       this.body.velocity.set(0, 0, 0)
       this.target = null
       if (climb === 'instant') {
         // VR uses a blink to the same landing, without moving or rotating the headset.
-        this.body.teleport(this.climbing.points[this.climbing.points.length - 1])
+        this.body.teleport(target.descending ? bottom : top)
         this.climbing = null
         return true
       }
@@ -182,22 +205,38 @@ export class PlayerActions {
     return true
   }
 
+  /** Space on a ladder: let go and push off backwards, about a metre clear of the rungs (air control brakes it). */
+  jumpOffLadder() {
+    const climb = this.climbing
+    if (!climb) return false
+    const away = new THREE.Vector3(0, 0, 1).transformDirection(climb.object.matrixWorld).setY(0).normalize()
+    this.climbing = null
+    this.body.velocity.copy(away.multiplyScalar(5.5)).setY(4.2)
+    this.body.grounded = false
+    return true
+  }
+
+  /** Up (positive) or down (negative) input while on a ladder turns the climb that way; zero keeps going. */
+  steerClimb(input: number) {
+    if (this.climbing && input) this.climbing.descending = input < 0
+  }
+
   updateClimb(dt: number) {
-    if (!this.climbing) return false
-    let travel = Math.max(0, Math.min(dt, 0.05)) * 2.7
-    while (travel > 0 && this.climbing.points.length) {
-      const next = this.climbing.points[0]
-      const distance = this.body.position.distanceTo(next)
-      if (distance <= travel) {
-        this.body.position.copy(next)
-        this.climbing.points.shift()
-        travel -= distance
-      } else {
-        this.body.position.lerp(next, travel / distance)
-        travel = 0
+    const climb = this.climbing
+    if (!climb) return false
+    const travel = Math.max(0, Math.min(dt, 0.05)) * 2.7
+    climb.at = THREE.MathUtils.clamp(climb.at + (climb.descending ? -travel : travel), 0, climb.length)
+    // Walk the route to the point `at` metres along it.
+    let left = climb.at
+    for (let i = 1; i < climb.route.length; i++) {
+      const from = climb.route[i - 1], to = climb.route[i], step = from.distanceTo(to)
+      if (left <= step || i === climb.route.length - 1) {
+        this.body.position.copy(from).lerp(to, step > 0 ? Math.min(1, left / step) : 1)
+        break
       }
+      left -= step
     }
-    if (!this.climbing.points.length) {
+    if (climb.at <= 0 || climb.at >= climb.length) {
       this.climbing = null
       this.body.grounded = false
     }
@@ -227,7 +266,7 @@ export class PlayerActions {
   syncCamera(camera: THREE.Camera, dt = 0) {
     const feet = this.body.position
     this.cameraLanding = dt <= 0 ? 0 : this.climbing ? 0.3 : Math.max(0, this.cameraLanding - dt)
-    let height = feet.y + EYE_HEIGHT
+    let height = feet.y + this.body.eyeHeight
     if (dt > 0 && this.body.grounded && !this.traversing) {
       for (const stairs of this.stairs) {
         const data = stairs.userData
@@ -238,7 +277,7 @@ export class PlayerActions {
         if (Math.abs(local.y - ramp) > 0.45) continue
         // Render a continuous incline while the physical capsule still follows
         // the real treads. This removes the repeated drop on each stair.
-        height = stairs.localToWorld(local.setY(ramp + 0.002)).y + EYE_HEIGHT
+        height = stairs.localToWorld(local.setY(ramp + 0.002)).y + this.body.eyeHeight
         break
       }
     }

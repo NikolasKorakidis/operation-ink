@@ -32,11 +32,11 @@ async function fixture(positions: Vec3[], cover?: [number, number, number]) {
 
 {
   const mission = createMissionWorld()
-  assert.equal(mission.enemies.length, 43)
-  assert.equal(mission.enemies.filter(e=>!e.reserve).length, 39)
-  assert.equal(new Set(mission.enemies.map(e=>e.id)).size, 43)
+  assert.equal(mission.enemies.length, 42)
+  assert.equal(mission.enemies.filter(e=>!e.reserve).length, 38)
+  assert.equal(new Set(mission.enemies.map(e=>e.id)).size, 42)
   assert.equal(mission.enemies.filter(e=>e.reserve).length, 4)
-  console.log('PASS Seventeen indoor guards and two roof lookouts bring the roster to 39 active and four reserves with unique identities')
+  console.log('PASS Seventeen indoor guards and one roof lookout bring the roster to 38 active and four reserves with unique identities')
 }
 {
   const f = await fixture([[0,0,0], [4,0,0], [-4,0,0]])

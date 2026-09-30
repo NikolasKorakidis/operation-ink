@@ -4,7 +4,7 @@ import { CoopHub, MAX_PLAYERS, type CoopMessage, type Link } from './hub'
 export type SessionStatus = 'solo' | 'connecting' | 'hosting' | 'joined'
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const ROOM_LENGTH = 5
-const peerId = (room: string) => `operation-ink-${room}`
+const peerId = (room: string) => `stickman-ghost-ink-${room}`
 
 export function newRoomCode() {
   return Array.from({ length: ROOM_LENGTH }, () => ROOM_ALPHABET[Math.floor(Math.random() * ROOM_ALPHABET.length)]).join('')

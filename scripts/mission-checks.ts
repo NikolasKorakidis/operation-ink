@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
-import { advanceMission, completeEscape, damageMission, initialMission, missionObjective, stationLabel, useStation, SIGNALS_COMPUTER_ID } from '../src/game/mission'
+import { advanceMission, cameraOnline, completeEscape, damageMission, initialMission, missionObjective, stationLabel, useStation, SIGNALS_COMPUTER_ID } from '../src/game/mission'
 import { CollisionWorld } from '../src/player/collision'
+import { RESCUE_LAYOUT } from '../src/game/rescue-layout'
 import { PlayerBody } from '../src/player/body'
 import { PlayerActions } from '../src/player/actions'
 
@@ -55,29 +56,23 @@ test('cameras and gate are idempotent; camera shutdown does not silently cancel 
   assert(!useStation(state, 'hostage', 'unknown').changed)
 })
 
-test('office computer disables for exactly one active minute; checkpoints and permanent shutdown preserve their semantics', () => {
-  const state = initialMission()
+test('each terminal shuts down only its own cameras, for good; checkpoints keep them down', () => {
+  const state = initialMission(), online = () => RESCUE_LAYOUT.cameras.filter(camera => cameraOnline(state, camera.id)).map(camera => camera.id)
   advanceMission(state, 17)
   assert(useStation(state, 'cameras', SIGNALS_COMPUTER_ID).changed)
-  assert.equal(state.camerasDisabledUntil, 77)
-  assert(!useStation(state, 'cameras', SIGNALS_COMPUTER_ID).changed, 'Repeated use cannot extend the timer')
-  advanceMission(state, 30)
+  assert.equal(stationLabel(state, 'cameras', SIGNALS_COMPUTER_ID), null, 'Nothing left to do at the office once its camera is down')
+  assert(!useStation(state, 'cameras', SIGNALS_COMPUTER_ID).changed)
+  assert.deepEqual(online(), ['detention-camera', 'jeep-camera', 'security-camera'], 'The office terminal leaves the east cameras watching')
+  assert.equal(stationLabel(state, 'cameras', 'security-computer'), 'Disable cameras', 'The security cabin still has its own cameras')
+  assert(useStation(state, 'cameras', 'security-computer').changed)
+  assert.deepEqual(online(), [])
+  const other = initialMission()
+  useStation(other, 'cameras', 'security-computer')
+  assert.deepEqual(RESCUE_LAYOUT.cameras.filter(camera => cameraOnline(other, camera.id)).map(camera => camera.id), ['mess-hall-exit-camera'],
+    'The security cabin leaves the office network alone')
   const restored = structuredClone(state)
-  advanceMission(restored, 29.99)
-  assert(!restored.camerasActive)
-  advanceMission(restored, 0.02)
-  assert(restored.camerasActive)
-  assert.equal(restored.camerasDisabledUntil, null)
-  assert(useStation(restored, 'cameras', SIGNALS_COMPUTER_ID).changed, 'Computer is reusable after recovery')
-  assert(useStation(restored, 'cameras', 'security-computer').changed, 'Security cabin can permanently override a timed shutdown')
-  advanceMission(restored, 120)
-  assert(!restored.camerasActive)
-  assert.equal(restored.camerasDisabledUntil, null)
-  assert(!useStation(restored, 'cameras', SIGNALS_COMPUTER_ID).changed, 'Office cannot re-enable permanently disabled cameras')
-  state.phase = 'dead'
-  advanceMission(state, 120)
-  assert.equal(state.elapsed, 47)
-  assert(!state.camerasActive)
+  advanceMission(restored, 600)
+  assert(RESCUE_LAYOUT.cameras.every(camera => !cameraOnline(restored, camera.id)), 'Cameras never come back on their own')
 })
 
 test('objectives follow actual hostage progress despite optional work performed first', () => {

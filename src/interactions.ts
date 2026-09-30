@@ -107,7 +107,7 @@ export class EnvironmentInteractions {
   }
 
   toggleDoor(door: THREE.Group) {
-    setDoorOpen(door, !door.userData.open)
+    setDoorOpen(door, !door.userData.open, false, this.camera().getWorldPosition(new THREE.Vector3()))
     this.hint.textContent = `${door.name} ${door.userData.open ? 'open' : 'closed'}`
     this.invalidate()
   }

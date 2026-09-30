@@ -26,6 +26,8 @@ export class HostageActor {
     this.material = original.clone()
     this.material.onBeforeCompile = original.onBeforeCompile
     this.material.customProgramCacheKey = original.customProgramCacheKey.bind(original)
+    // The hostage stays exactly its blue under any light.
+    this.material.defines = { ...original.defines }
     this.material.color.setHex(HOSTAGE_INK)
     this.material.toneMapped = false
     rig.mesh.material = this.material

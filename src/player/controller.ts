@@ -2,10 +2,10 @@ import * as THREE from 'three'
 import { EnvironmentCamera } from '../camera'
 import { EnvironmentInteractions } from '../interactions'
 import { CollisionWorld } from './collision'
-import { PlayerBody } from './body'
+import { PlayerBody, STANCES, type Stance } from './body'
 import { PlayerActions } from './actions'
 
-const movementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyC']
+const movementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Space']
 
 export class FirstPersonController {
   readonly world: CollisionWorld
@@ -19,11 +19,20 @@ export class FirstPersonController {
   canPlay: () => boolean = () => true
   onPlayingChange: (playing: boolean) => void = () => {}
   lookSensitivity: () => number = () => 1
+  /** Drag-to-look for good: no Pointer Lock API (automation also forces it). */
   private fallback = false
+  /** The browser refused the last lock request (too soon after a release, window refocus). Drag to look until a retry succeeds. */
+  private lockRefused = false
+  private get dragLook() { return this.fallback || this.lockRefused }
   private dragging = false
   private started = false
   private walkRotation = new THREE.Quaternion()
   private pressed = new Set<string>()
+  /** C toggles crouching and Z toggles lying prone; each switches straight from the other, and Space stands up. */
+  private chosenStance: Stance = 'stand'
+  get stance(): Stance { return this.actions.traversing ? 'stand' : this.chosenStance }
+  /** Stand up, for respawns and checkpoint restores. */
+  resetStance() { this.chosenStance = 'stand'; this.body.stance = 'stand'; this.body.eyeHeight = STANCES.stand.eye }
   private abort = new AbortController()
   private direction = new THREE.Vector3()
   private forward = new THREE.Vector3()
@@ -50,18 +59,19 @@ export class FirstPersonController {
     document.querySelector('#inspect-mode')!.addEventListener('click', () => camera.setView('overview'), options)
     canvas.addEventListener('pointerdown', event => {
       if (!this.enabled || this.immersive || event.button !== 0) return
-      if (!this.playing) this.requestControl()
+      // Any click on the game while the mouse is free asks for it again.
+      if (!this.playing || this.lockRefused) this.requestControl()
       this.dragging = true
-      if (this.fallback) canvas.setPointerCapture(event.pointerId)
+      if (this.dragLook) canvas.setPointerCapture(event.pointerId)
     }, options)
     window.addEventListener('pointerup', () => { this.dragging = false }, options)
     window.addEventListener('pointercancel', () => { this.dragging = false }, options)
     document.addEventListener('mousemove', this.look, options)
     document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement === canvas && this.enabled) this.resume()
-      else if (this.playing && !this.fallback) this.pause()
+      if (document.pointerLockElement === canvas && this.enabled) { this.lockRefused = false; this.resume() }
+      else if (this.playing && !this.dragLook) this.pause()
     }, options)
-    document.addEventListener('pointerlockerror', this.useFallback, options)
+    document.addEventListener('pointerlockerror', this.refuseLock, options)
     window.addEventListener('keydown', this.keyDown, options)
     window.addEventListener('keyup', event => { this.pressed.delete(event.code) }, options)
     window.addEventListener('blur', this.pause, options)
@@ -83,6 +93,7 @@ export class FirstPersonController {
   }
 
   respawn() {
+    this.resetStance()
     this.actions.reset()
     const ladder = this.actions.ladders.find(object => object.name.includes('west exterior')) ?? this.actions.ladders[0]
     const spawn = ladder ? this.actions.ladderPoint(ladder, false) : new THREE.Vector3(-39, 0.1, 4)
@@ -108,8 +119,15 @@ export class FirstPersonController {
     if (!this.canvas.requestPointerLock || this.fallback) { this.useFallback(); return }
     try {
       const request = this.canvas.requestPointerLock() as Promise<void> | undefined
-      request?.catch(this.useFallback)
-    } catch { this.useFallback() }
+      request?.catch(this.refuseLock)
+    } catch { this.refuseLock() }
+  }
+
+  /** A refusal is temporary: keep playing with drag-to-look, and the next click or resume asks for the lock again. */
+  private refuseLock = () => {
+    if (!this.enabled || this.immersive || document.pointerLockElement === this.canvas) return
+    this.lockRefused = true
+    this.resume()
   }
 
   private useFallback = () => {
@@ -146,7 +164,7 @@ export class FirstPersonController {
   }
 
   private look = (event: MouseEvent) => {
-    if (!this.enabled || !this.playing || (document.pointerLockElement !== this.canvas && !(this.fallback && this.dragging))) return
+    if (!this.enabled || !this.playing || (document.pointerLockElement !== this.canvas && !(this.dragLook && this.dragging))) return
     this.rotation.setFromQuaternion(this.camera.active.quaternion, 'YXZ')
     const sensitivity = 0.0022 * this.lookSensitivity()
     this.rotation.y -= event.movementX * sensitivity
@@ -164,7 +182,17 @@ export class FirstPersonController {
     if (movementKeys.includes(event.code)) {
       event.preventDefault()
       this.pressed.add(event.code)
-      if (event.code === 'Space' && !event.repeat && !this.actions.traversing) this.body.jump()
+      // On a ladder, a fresh press of up or down turns the climb around; it carries on by itself otherwise.
+      // Keys already held when the climb began (walking up to it) do not count.
+      if (!event.repeat) this.actions.steerClimb(Number(event.code === 'KeyW' || event.code === 'ArrowUp') - Number(event.code === 'KeyS' || event.code === 'ArrowDown'))
+      // Space on a ladder jumps off it. Otherwise it stands up from a crouch or prone; standing, it jumps.
+      if (event.code === 'Space' && !event.repeat && this.actions.climbing) this.actions.jumpOffLadder()
+      else if (event.code === 'Space' && !event.repeat && !this.actions.traversing) { if (this.chosenStance !== 'stand') this.chosenStance = 'stand'; else this.body.jump() }
+    }
+    if ((event.code === 'KeyC' || event.code === 'KeyZ') && !event.repeat && !this.actions.traversing) {
+      event.preventDefault()
+      const stance: Stance = event.code === 'KeyC' ? 'crouch' : 'prone'
+      this.chosenStance = this.chosenStance === stance ? 'stand' : stance
     }
     if (event.code === 'KeyF' && !event.repeat) { event.preventDefault(); this.actions.activate(this.camera.active) }
     if (event.code === 'KeyR' && !event.repeat && !this.missionMode) { event.preventDefault(); this.respawn() }
@@ -185,7 +213,7 @@ export class FirstPersonController {
       this.forward.y = 0
       this.forward.normalize()
       this.direction.set(-this.forward.z, 0, this.forward.x).multiplyScalar(x).addScaledVector(this.forward, z).normalize()
-      this.body.update(dt, this.direction, this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'), this.pressed.has('KeyC'))
+      this.body.update(dt, this.direction, this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'), this.stance)
     }
     if (this.body.position.y < -20 || Math.max(Math.abs(this.body.position.x), Math.abs(this.body.position.z)) > 1150) this.respawn()
     this.actions.syncCamera(this.camera.active, dt)
@@ -205,8 +233,9 @@ export class FirstPersonController {
     const state = ride ? `Riding to ${ride.destination} · ${Math.round((1 - ride.remaining / ride.distance) * 100)}%` :
       this.actions.climbing ? (this.actions.climbing.descending ? 'Climbing down' : 'Climbing up') :
       !this.body.grounded ? 'In the air' : this.direction.lengthSq() > 0 ?
-        (this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') ? 'Sprinting' : this.pressed.has('KeyC') ? 'Sneaking' : 'Walking') : 'On foot'
-    this.status.textContent = this.fallback ? `${state} · drag to look` : state
+        (this.stance === 'prone' ? 'Crawling' : this.stance === 'crouch' ? 'Crouching' : this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') ? 'Sprinting' : 'Walking') :
+        this.stance === 'prone' ? 'Prone' : this.stance === 'crouch' ? 'Crouched' : 'On foot'
+    this.status.textContent = this.dragLook ? `${state} · drag to look` : state
     return true
   }
 

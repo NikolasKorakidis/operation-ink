@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { Draft, wallText } from '../render/ink'
+import { Draft, SIGN_BLUE, wallText } from '../render/ink'
 import { crates, steps, groundOutline, WALL_THICKNESS, interiorRoomOutline, piercedWall } from '../world/architecture'
 import { createDoor } from '../world/doors'
 import { createFenceGate } from '../world/fenceGate'
@@ -12,6 +12,8 @@ import { createCellLock } from './cell-lock'
 import { SIGNALS_COMPUTER_ID } from './mission'
 import { CAMERA_LIGHTS } from './security'
 import { createMissionControl as control } from './mission-controls'
+import { cageLamp, darkRoom, daylightOpening, doorwayLight, LAMP_AMBER } from '../world/lights'
+import { Furnishing } from '../world/interiors'
 
 const FLOOR = 0.12
 const DOOR_WIDTH = 2.1
@@ -26,7 +28,7 @@ function house({ name, x, z, width: w, depth: d, role }: HouseSpec) {
   root.name = name
   root.position.set(x, 0, z)
   root.userData = {
-    environment: true, kind: 'mission-house', role, enterable: true, floor: FLOOR,
+    environment: true, kind: 'mission-house', role, enterable: true, floor: FLOOR, missionSite: role === 'dispatch',
     footprint: [w, d], roofHeight: ROOF, roofWalkable: role === 'maintenance',
     entrances: [{ x: 0, z: d / 2 + 0.05, width: DOOR_WIDTH, floor: FLOOR },
       { x: 0, z: -d / 2 - 0.05, width: DOOR_WIDTH, floor: FLOOR }],
@@ -44,8 +46,10 @@ function house({ name, x, z, width: w, depth: d, role }: HouseSpec) {
       [{ centre: 0, width: DOOR_WIDTH, bottom: 0, height: DOOR_HEIGHT }])
     const door = createDoor({ name: `${name} · ${side > 0 ? 'south' : 'north'} door`,
       x: 0, z: side * (d / 2 + 0.035), floor: FLOOR, width: DOOR_WIDTH,
-      height: DOOR_HEIGHT, angle: side > 0 ? 0 : Math.PI, open: false })
+      height: DOOR_HEIGHT, angle: side > 0 ? 0 : Math.PI, open: false, exit: true })
     root.add(door)
+    // The security cabin is dark inside: only its camera monitor and daylight through an open door light it.
+    if (role === 'dispatch') doorwayLight(door)
     // Small windows beside the doors are indicated as filled glazing, so sight
     // and bullets follow the same solid wall geometry they visibly belong to.
     for (const direction of [-1, 1]) {
@@ -63,6 +67,8 @@ function house({ name, x, z, width: w, depth: d, role }: HouseSpec) {
   }
   interiorRoomOutline(walls, w - WALL_THICKNESS, d - WALL_THICKNESS, FLOOR, ROOF - 0.2)
   root.add(walls.finish())
+  // Walls on the box's faces; its top halfway through the roof slab.
+  if (role === 'dispatch') root.add(darkRoom(name, [0, (FLOOR - 0.3 + ROOF - 0.1) / 2, 0], [w / 2, (ROOF - 0.1 - FLOOR + 0.3) / 2, d / 2]))
   const roof = new Draft(`${name} · flat roof`)
   roof.userData.cutaway = true
   roof.box(w + 0.45, 0.2, d + 0.45, 0, ROOF - 0.1, 0, 'roof')
@@ -104,8 +110,10 @@ function house({ name, x, z, width: w, depth: d, role }: HouseSpec) {
   root.add(interior.finish())
   const names = { relay: 'DETENTION', dispatch: 'SECURITY', crew: 'CREW', maintenance: 'MAINTENANCE' }
   const letteringFace = d / 2 + WALL_THICKNESS / 2 + 0.006
-  root.add(wallText(names[role], [0, 3.38, letteringFace]))
-  root.add(wallText(names[role], [0, 3.38, -letteringFace], 0.6, Math.PI))
+  // The camera-control cabin's SECURITY label is blue so it can be spotted; the other houses stay ink black.
+  const color = role === 'dispatch' ? SIGN_BLUE : undefined
+  root.add(wallText(names[role], [0, 3.38, letteringFace], 0.6, 0, color))
+  root.add(wallText(names[role], [0, 3.38, -letteringFace], 0.6, Math.PI, color))
   return root
 }
 
@@ -213,7 +221,7 @@ function detentionBlock() {
   }
   root.add(shell.finish())
   const entrance = createDoor({ name: 'Detention entrance', x: 117, z: -4.96,
-    floor: FLOOR, width: 3.5, height: 2.8, open: true })
+    floor: FLOOR, width: 3.5, height: 2.8, open: true, exit: true })
   root.add(entrance)
   const cells = new Draft('Holding cells bars, partitions and bunks')
   for (const x of [110.5, 123.5]) {
@@ -257,11 +265,58 @@ function detentionBlock() {
   accents.userData.noCollision = true
   for (const x of [115.48, 118.52]) accents.beam([x, -3.05, -19.8], [x, 1.27, -9], 0.07, 'green', 'detail')
   root.add(accents.finish())
+  // The guardroom above the cells is furnished around its walls, leaving the aisle from the stairs to the door,
+  // the entrance guard's beat (x 117-121) and the watch post by the west window (x 111-112.5) clear.
+  const guardroom = new Furnishing('Detention guardroom')
+  // West: the duty desk facing the door, lockers and the supply shelf along the wall.
+  guardroom.desk(110.3, -10.6, FLOOR, Math.PI)
+  guardroom.chair(110.3, -11.55, FLOOR)
+  guardroom.lockers(108.4, -14.6, FLOOR, 4, Math.PI / 2)
+  guardroom.shelf(108.6, -19.2, FLOOR, Math.PI / 2)
+  // Back: a briefing table with its chairs, under the operations map.
+  guardroom.table(111.9, -24.4, FLOOR, 3)
+  for (const x of [110.9, 112.9]) { guardroom.chair(x, -25.6, FLOOR); guardroom.chair(x, -23.2, FLOOR, Math.PI) }
+  guardroom.wallMap(111.9, -28.88, FLOOR)
+  // East: two bunks for the night shift, a records desk, stacked supplies and lockers by the door.
+  guardroom.bunk(125.3, -26.7, FLOOR)
+  guardroom.bunk(125.3, -24.0, FLOOR)
+  guardroom.desk(124.9, -14.2, FLOOR, -Math.PI / 2)
+  guardroom.chair(123.95, -14.2, FLOOR, Math.PI / 2)
+  guardroom.pallet(124.8, -18.7, FLOOR, true)
+  guardroom.pallet(123.2, -20.6, FLOOR)
+  guardroom.lockers(125.62, -9.4, FLOOR, 3, -Math.PI / 2)
+  root.add(guardroom.finish())
+  // The cell block's front half, either side of the stairs, holds the jailers' kit: an interrogation table,
+  // a filing desk and lockers to the west; stores, a workbench and stacked supplies to the east. The corridor
+  // between the cells (x 113-121) and the foot of the stairs stay clear for the escort.
+  const cellBlock = new Furnishing('Detention cell block')
+  const low = -4.2
+  cellBlock.table(111.4, -12.6, low, 2.2)
+  cellBlock.chair(111.4, -13.9, low)
+  cellBlock.chair(111.4, -11.3, low, Math.PI)
+  cellBlock.lockers(108.4, -8.2, low, 3, Math.PI / 2)
+  cellBlock.desk(110.6, -16.9, low, Math.PI)
+  cellBlock.chair(110.6, -16.0, low, Math.PI)
+  cellBlock.wallMap(111.4, -5.12, low)
+  cellBlock.shelf(125.6, -8.3, low, -Math.PI / 2)
+  cellBlock.shelf(125.6, -12.9, low, -Math.PI / 2)
+  cellBlock.workbench(122.8, -16.9, low)
+  cellBlock.pallet(121.4, -9.6, low, true)
+  cellBlock.pallet(121.4, -12.8, low)
+  root.add(cellBlock.finish())
+  // Caged work lamps hang in the cell block: down the corridor, and one over the hostage's cell.
+  root.add(cageLamp('Cell corridor north', [117, -0.05, -22.5]), cageLamp('Cell corridor south', [117, -0.05, -26.8]),
+    cageLamp('Hostage cell', [RESCUE_LAYOUT.hostageSpawns[0][0], -0.05, RESCUE_LAYOUT.hostageSpawns[0][2]], LAMP_AMBER, 0.6),
+    cageLamp('Interrogation table', [111.4, -0.05, -12.6], LAMP_AMBER, 0.9), cageLamp('Cell block stores', [122.6, -0.05, -12.4], LAMP_AMBER, 0.7))
   const stairMetadata = new THREE.Group()
   stairMetadata.name = 'Detention stairs camera support'
   stairMetadata.userData = { kind: 'stairs', bottom: [117, -4.2, -19.8], top: [117, 0.12, -9], width: 3.2 }
   root.add(stairMetadata)
-  root.userData = { kind: 'detention', footprint: [18, 24], floor: FLOOR, floors: [-4.2, FLOOR], enterable: true }
+  // The hostage is held here, so it keeps its EXIT sign and has its own lamps.
+  root.userData = { kind: 'detention', footprint: [18, 24], floor: FLOOR, floors: [-4.2, FLOOR], enterable: true, missionSite: true }
+  // The cell block is dark: the caged lamps light it, and daylight falls down the stairwell from the floor above.
+  root.add(darkRoom('Detention cell block', [117, (-4.5 + 0.06) / 2, -17], [9, (0.06 + 4.5) / 2, 12]),
+    daylightOpening('Detention stairwell', [117, 0.06, (h.minZ + h.maxZ) / 2], [0, -1, 0], [0, 0, 1], h.maxZ - h.minZ))
   for (const child of root.children) { child.position.x -= 117; child.position.z += 17 }
   root.position.set(117, 0, -17)
   return { root, cellDoors }
@@ -309,6 +364,12 @@ export function createMissionWorld(compound?: THREE.Group): MissionWorld {
   exitGate.userData.missionLocked = true
   exitGate.userData.swingSeconds = 3
   root.add(exitGate)
+  // A gantry over the way out carries its EXIT sign, high enough for the jeep to pass under.
+  const gantry = new Draft('Secure compound exit gate · sign gantry', 164, 11, Math.PI / 2)
+  for (const side of [-1, 1]) gantry.box(0.2, 1.5, 0.2, side * 4, 3.3 + 0.75, 0, 'paper', 'detail')
+  gantry.box(8.4, 0.36, 0.22, 0, 4.4, 0, 'paper', 'detail')
+  root.add(gantry.finish())
+  exitGate.userData.exit = { capHeight: 0.6, lift: 4.4 - 3.1, always: true }
 
   const apron = new Draft('East rail annex · concrete aprons')
   const h = DETENTION_STAIR_HOLE
@@ -375,7 +436,14 @@ export function createMissionWorld(compound?: THREE.Group): MissionWorld {
   compound?.traverse(object => {
     if (!object.userData.cameraTerminal) return
     const point = object.localToWorld(new THREE.Vector3(...object.userData.interactionPoint as Vec3))
-    stations.push({ id: SIGNALS_COMPUTER_ID, kind: 'cameras', object, point, label: 'Disable cameras for 60 seconds' })
+    stations.push({ id: SIGNALS_COMPUTER_ID, kind: 'cameras', object, point, label: 'Disable cameras' })
+  })
+  // Every enemy field radio can be switched off at its front panel, or shot apart (game/radios.ts). It collides
+  // dynamically so a destroyed one can leave the collision world.
+  compound?.traverse(object => {
+    if (object.userData.questItem !== 'radio') return
+    object.userData.dynamicCollision = true
+    stations.push({ id: object.name, kind: 'radio', object, point: object.localToWorld(new THREE.Vector3(0, 0.2, 0.3)), label: 'Switch off radio' })
   })
 
   // The mess hall is west of the tank, so this post must use the west catwalk
@@ -413,10 +481,9 @@ export function createMissionWorld(compound?: THREE.Group): MissionWorld {
     // Occupied rooms reward checking corners. Short interior routes stay off the
     // entry aisles, roof stairs, office furniture and the reserve muster points.
     enemy('mess-kitchen', 'Mess kitchen watch', [[-34.2, 0.28, -56.4], [-32.9, 0.28, -56.4]], 'pistol'),
-    // Two AK lookouts on the mess-hall roof face out over the yard (south, +Z), their backs to the
-    // ladder and the stair door: the opening knife approach. Kept 7 m apart so one body is outside the other's view.
-    { ...enemy('roof-lookout-west', 'Roof lookout (west)', [[-37.5, 6.38, -38.6]]), facing: 0 },
-    { ...enemy('roof-lookout-east', 'Roof lookout (east)', [[-30.5, 6.38, -38.6]]), facing: 0 },
+    // One AK lookout on the mess-hall roof faces out over the yard (south, +Z), his back to the
+    // ladder and the stair door: the opening knife approach.
+    { ...enemy('roof-lookout', 'Roof lookout', [[-34.2, 6.38, -38.6]]), facing: 0 },
     enemy('mess-east-aisle', 'Mess east-aisle guard', [[-29, 0.28, -42.15], [-29, 0.28, -39.65]], 'smg'),
     enemy('mess-vestibule', 'Vestibule duty guard', [[-22.6, 0.28, -54.95], [-21.4, 0.28, -54.95]], 'pistol'),
     enemy('relay-backroom', 'Detention corridor guard', [[117, -4.2, -26], [117, -4.2, -21]], 'pistol'),

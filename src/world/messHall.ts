@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 import { Draft, type Point } from '../render/ink'
+import { neonSign } from '../render/neon-sign'
 import { interiorRoomOutline, WALL_THICKNESS, wallOutline, type BuildingSpec } from './architecture'
 import { createDoor } from './doors'
+import { darkRoom, doorwayLight, screenLight } from './lights'
 import { pipe, pipeLadder } from './ladders'
 
 interface Opening { center: number; width: number; bottom: number; height: number; window?: boolean }
@@ -81,6 +83,44 @@ function diningTable(index: number, x: number, z: number, floor: number) {
   return g.finish()
 }
 
+const SCREEN_GREEN = 0x3dff8c
+
+/**
+ * Four camera feeds in green phosphor, glowing on their own (the dark room does not dim them). Drawn once on a
+ * canvas: horizon, a building and a fence in each view, camera labels, a timestamp and scanlines.
+ */
+function surveillanceScreen() {
+  const material = Object.assign(new THREE.MeshBasicMaterial({ color: SCREEN_GREEN, toneMapped: false }), { defines: { NEON_UNLIT: '' } })
+  if (typeof document === 'undefined') return material
+  const canvas = document.createElement('canvas')
+  canvas.width = 512; canvas.height = 276
+  const c = canvas.getContext('2d')
+  if (!c) return material
+  c.fillStyle = '#04200f'
+  c.fillRect(0, 0, canvas.width, canvas.height)
+  c.strokeStyle = '#7dffb4'; c.fillStyle = '#7dffb4'; c.lineWidth = 2
+  c.font = '14px monospace'
+  const [w, h] = [canvas.width / 2, canvas.height / 2]
+  for (let i = 0; i < 4; i++) {
+    const x = (i % 2) * w, y = Math.floor(i / 2) * h
+    c.strokeRect(x + 3, y + 3, w - 6, h - 6)
+    c.beginPath()
+    c.moveTo(x + 6, y + h * (0.55 + 0.05 * i)); c.lineTo(x + w - 6, y + h * (0.5 + 0.04 * i))
+    c.rect(x + 30 + i * 22, y + h * 0.3, 60, h * 0.28)
+    for (let post = 0; post < 6; post++) { c.moveTo(x + 14 + post * 40, y + h * 0.62); c.lineTo(x + 14 + post * 40, y + h * 0.84) }
+    c.stroke()
+    c.fillText(`CAM 0${i + 1}`, x + 10, y + 20)
+  }
+  c.fillText('REC ● 03:17:42', w * 2 - 138, h * 2 - 10)
+  c.fillStyle = 'rgba(0, 0, 0, 0.28)'
+  for (let row = 0; row < canvas.height; row += 3) c.fillRect(0, row, canvas.width, 1)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  material.color.set(0xffffff)
+  material.map = texture
+  return material
+}
+
 function workstation(index: number, x: number, z: number, floor: number) {
   const station = new THREE.Group()
   station.name = `Signals office · workstation ${index}`
@@ -104,12 +144,14 @@ function workstation(index: number, x: number, z: number, floor: number) {
   monitor.box(0.94, 0.57, 0.075, 0, floor + 1.33, -0.25, 'paper', 'detail')
   monitor.box(0.84, 0.46, 0.008, 0, floor + 1.33, -0.207, 'glass', 'detail')
   if (index === 1) {
-    const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.82, 0.44),
-      new THREE.MeshBasicMaterial({ color: 0x146bff, toneMapped: false }))
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.82, 0.44), surveillanceScreen())
     screen.name = 'Signals office · powered surveillance screen'
     screen.position.set(0, floor + 1.33, -0.201)
     screen.userData.noCollision = true
-    monitor.add(screen)
+    // Shows the camera feeds: it goes dark when the camera network is shut down (see game/security.ts).
+    screen.userData.cameraScreen = true
+    // The screen is the dark office's main light: green phosphor on whatever is in front of it.
+    monitor.add(screen, screenLight('Signals office · surveillance', [0, floor + 1.33, -0.2], 0.82, SCREEN_GREEN))
     monitor.userData.cameraTerminal = true
     monitor.userData.interactionPoint = [0, floor + 1.33, -0.18]
   } else {
@@ -154,7 +196,8 @@ export function messHall(spec: BuildingSpec): THREE.Group {
   g.position.set(spec.x, 0, spec.z)
   g.rotation.y = spec.angle ?? 0
   g.userData = {
-    environment: true, kind: 'mess-hall', footprint: [w, d], floor, roofHeight: roofY,
+    // The camera room is here, so it is a mission site.
+    environment: true, kind: 'mess-hall', missionSite: true, footprint: [w, d], floor, roofHeight: roofY,
     accessible: true, flatRoof: true, roofWalkable: true, access: 'roof-and-yard', groundEntrances: 1,
     rooms: [
       { name: 'Main mess hall', kind: 'restaurant', min: [-7.28, floor, -halfD + 0.12], max: [6.48, eave, halfD - 0.12] },
@@ -187,37 +230,26 @@ export function messHall(spec: BuildingSpec): THREE.Group {
   // The central aisle leads south, beyond the service fence, into the compound.
   // The leaf swings outward over a landing flush with the interior floor.
   g.add(createDoor({ name: 'Mess hall yard exit', x: exitX, z: halfD, floor,
-    width: exitWidth, height: exitHeight }))
+    width: exitWidth, height: exitHeight, exit: true }))
   const exitLanding = new Draft('Mess hall · yard exit landing')
   exitLanding.box(2.4, floor, 2.1, exitX, floor / 2, halfD + 1.05, 'concrete')
   g.add(exitLanding.finish())
 
-  // Letter strokes keep the EXIT plaques in the scene's untextured ink style.
-  const exitLetters: [number, number][][] = [
-    [[-0.31, 0.13], [-0.51, 0.13], [-0.51, -0.13], [-0.31, -0.13]],
-    [[-0.51, 0], [-0.34, 0]],
-    [[-0.23, 0.13], [-0.03, -0.13]], [[-0.23, -0.13], [-0.03, 0.13]],
-    [[0.05, 0.13], [0.25, 0.13]], [[0.15, 0.13], [0.15, -0.13]], [[0.05, -0.13], [0.25, -0.13]],
-    [[0.33, 0.13], [0.53, 0.13]], [[0.43, 0.13], [0.43, -0.13]],
-  ]
-  for (const side of [-1, 1]) {
-    const sign = new Draft(`Mess hall · ${side < 0 ? 'interior' : 'exterior'} EXIT sign`,
-      exitX, halfD + side * 0.145, side < 0 ? Math.PI : 0)
-    sign.userData.cutaway = true
-    const y = floor + exitHeight + 0.42
-    sign.box(1.35, 0.5, 0.03, 0, y, 0, 'green', 'detail')
-    for (const stroke of exitLetters) sign.line(stroke.map(([x, dy]): Point => [x, y + dy, 0.025]))
-    g.add(sign.finish())
-  }
-
   // The left-hand office is a real enclosed room, with its door in the hall-facing wall.
   const officeWallX = -7.4, officeWidth = halfW + officeWallX
+  const officeDoor = createDoor({ name: 'Signals office door', x: officeWallX, z: 0, floor, width: 1.4, height: 2.4, angle: Math.PI / 2 })
+  doorwayLight(officeDoor)
   g.add(
     wall('Signals office · east partition', 8, h, officeWallX, 0, floor, Math.PI / 2,
       [{ center: 0, width: 1.4, bottom: 0, height: 2.4 }]),
     wall('Signals office · north partition', officeWidth, h, (-halfW + officeWallX) / 2, -4, floor),
     wall('Signals office · south partition', officeWidth, h, (-halfW + officeWallX) / 2, 4, floor),
-    createDoor({ name: 'Signals office door', x: officeWallX, z: 0, floor, width: 1.4, height: 2.4, angle: Math.PI / 2 }),
+    officeDoor,
+    // No lights in the office: it is lit only by the surveillance screen and by daylight through its door.
+    darkRoom('Signals office', [(-halfW + officeWallX) / 2, (floor - 0.3 + h + floor + 0.15) / 2, 0],
+      [officeWidth / 2, (h + 0.45) / 2, 4]),
+    // A blue neon SECURITY sign above the camera room's door. It is a real light on the hall side.
+    neonSign('SECURITY', [officeWallX + WALL_THICKNESS / 2, floor + 3.05, 0], Math.PI / 2, { capHeight: 0.36 }),
     workstation(1, -halfW + 1.05, -2.2, floor),
     workstation(2, -halfW + 1.05, 2.2, floor),
   )
@@ -230,6 +262,14 @@ export function messHall(spec: BuildingSpec): THREE.Group {
   office.box(2.25, 1.25, 0.06, -10.9, floor + 1.95, -3.84, 'green', 'detail')
   for (const sx of [-11.5, -10.8, -10.2]) office.box(0.42, 0.56, 0.015, sx, floor + 1.95, -3.80, 'paper', 'detail')
   g.add(office.finish())
+  // A sniper rifle stands in the office's south-east corner, beside the door, leaning into the corner and
+  // facing the room. The mission places the real pickup here (userData.weaponSpot).
+  const rifleSpot = new THREE.Object3D()
+  rifleSpot.name = 'Signals office · sniper rifle spot'
+  rifleSpot.position.set(officeWallX - WALL_THICKNESS / 2 - 0.3, floor, 4 - WALL_THICKNESS / 2 - 0.3)
+  rifleSpot.rotation.y = -Math.PI * 3 / 4
+  rifleSpot.userData.weaponSpot = { id: 'office-sniper', name: 'sniper', magazine: 5, reserve: 10 }
+  g.add(rifleSpot)
 
   // Ground arrival room and isolated stair lane. The vestibule door opens into a clear hall aisle.
   g.add(
@@ -339,7 +379,7 @@ export function messHall(spec: BuildingSpec): THREE.Group {
     wall('Rooftop stair enclosure · north wall', hutMaxX - hutMinX, hutH, hutX, hutMinZ, roofY),
     wall('Rooftop stair enclosure · doorway', hutMaxX - hutMinX, hutH, hutX, hutMaxZ, roofY, 0,
       [{ center: 0, width: 1.5, bottom: 0, height: 2.4 }]),
-    createDoor({ name: 'Rooftop access door', x: hutX, z: hutMaxZ, floor: roofY, width: 1.5, height: 2.4 }),
+    createDoor({ name: 'Rooftop access door', x: hutX, z: hutMaxZ, floor: roofY, width: 1.5, height: 2.4, exit: true }),
   )
   const hutRoof = new Draft('Rooftop stair enclosure · cap')
   hutRoof.box(hutMaxX - hutMinX + 0.25, 0.18, hutMaxZ - hutMinZ + 0.25, hutX, roofY + hutH + 0.09, hutZ, 'roof')

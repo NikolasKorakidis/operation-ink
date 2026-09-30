@@ -15,6 +15,24 @@ export function fallDamage(landingSpeed: number) {
 /** Call of Duty-style player health: every enemy bullet removes a quarter, so the fourth hit is lethal.
  * Each bullet hit grants a second of bullet immunity, so a burst cannot land all four at once.
  * After a short pause without damage, health refills to full. Landings keep energy-based damage. */
+/**
+ * Aim steadiness, in radians. Sway is a slow drift of the crosshair (shots follow it): small standing still,
+ * growing with speed, smaller crouched, smallest prone, and reduced while aiming down the sights. Spread is a
+ * random cone added while moving or in the air, scaled by the same stance factors. Every weapon uses these.
+ */
+export const AIM_STEADINESS = {
+  sway: { stand: 0.003, crouch: 0.0017, prone: 0.0007, perSpeed: 0.0015, airborne: 0.004 },
+  spread: { perSpeed: 0.0035, airborne: 0.03, unscopedSniper: 0.02 },
+  /** Firing without aiming: a base cone per weapon, plus bloom that builds with each hip shot and settles when you stop. */
+  hip: { pistol: 0.008, silenced: 0.008, smg: 0.011, ak: 0.012 } as Partial<Record<WeaponName, number>>,
+  bloom: { perShot: 0.0045, max: 0.02, settleDelay: 0.3, recoveryPerSecond: 0.06 },
+  stance: { stand: 1, crouch: 0.6, prone: 0.35 },
+  aimed: 0.6,
+} as const
+
+/** Guards never hear walking (or sneaking) feet; sprinting carries only this far, in metres. */
+export const SPRINT_FOOTSTEP_RADIUS = 6
+
 export const PLAYER_HEALTH = { max: 100, bulletHits: 4, bulletImmunity: 1, regenDelay: 5, regenPerSecond: 40 } as const
 export const PLAYER_BULLET_DAMAGE = PLAYER_HEALTH.max / PLAYER_HEALTH.bulletHits
 
@@ -42,7 +60,7 @@ export type KnifeAttack = 'slash' | 'stab'
 
 /** Aiming down the sights magnifies the view; the sniper uses its adjustable scope instead. */
 export const AIM_ZOOM: Partial<Record<WeaponName, number>> = { pistol: 1.25, silenced: 1.25, smg: 1.5, ak: 2 }
-/** A suppressed report only carries a few metres to the guards. */
+/** How far the shooter's own client plays a suppressed report. Guards never hear it (see EnemyDirector.hear). */
 export const SILENCED_REPORT_RADIUS = 5
 
 export const ENEMY_WEAPONS = {
@@ -52,6 +70,9 @@ export const ENEMY_WEAPONS = {
   shotgun: { magazine: 6, reload: 3.9, damage: 14, burst: 1, gap: 0.9, pause: [1.2, 1.6] },
   sniper: { magazine: 5, reload: 2.9, damage: 32, burst: 1, gap: 1.35, pause: [2.0, 2.6] },
 } as const
+
+/** Chance a player's head shot blows the guard's head apart (always lethal). Other weapons never do. */
+export const HEAD_BURST_CHANCE: Partial<Record<WeaponName, number>> = { pistol: 0.1, silenced: 0.1, smg: 0.1, ak: 0.25, sniper: 1 }
 
 /** Player sniper rounds are lethal on any confirmed hit. */
 export function hitDamage(weapon: WeaponName | undefined, zone: HitZone, baseDamage: number) {
@@ -91,16 +112,16 @@ export function shotgunDamageMultiplier(distance: number) {
   return 1 - travel * (1 - SHOTGUN_BALLISTICS.minimumDamageScale)
 }
 
-export const WEAPON_SLOTS = 5
+/** Three slots, one weapon each: 1 knife, 2 sidearm (a pistol or an SMG), 3 primary (an AK, sniper rifle or shotgun). */
+export const WEAPON_SLOTS = 3
+export const WEAPON_SLOT: Record<WeaponName, number> = { knife: 0, pistol: 1, silenced: 1, smg: 1, ak: 2, sniper: 2, shotgun: 2 }
 export const SNIPER_ZOOM = { min: 2, max: 8, initial: 4 } as const
-/** Counter-Strike layout: 1 primary (picked up in the field), 2 sidearm, 3 knife, 4–5 extra pickups. */
-export const STARTING_SLOT = 2
+/** Missions start with the knife out. */
+export const STARTING_SLOT = 0
 export function startingLoadout(): (WeaponItem | null)[] {
   return [
-    null,
-    { id: 'player-silenced', name: 'silenced', magazine: 12, reserve: 36 },
     { id: 'player-knife', name: 'knife', magazine: 0, reserve: 0 },
-    null,
+    { id: 'player-silenced', name: 'silenced', magazine: 12, reserve: 36 },
     null,
   ]
 }

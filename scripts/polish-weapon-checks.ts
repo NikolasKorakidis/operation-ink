@@ -89,7 +89,7 @@ function setup(initialFov = 75) {
   assert.equal(weapons.ammo, '4 / 10')
   assert(!weapons.scoped)
   step(2.2) // Includes the short lowering phase before the 2.9-second reload.
-  assert.equal(weapons.ammo, '5 / 9')
+  assert.equal(weapons.ammo, '5 / 5', 'The part-used magazine is thrown away; a full one comes from the reserve')
   assert(weapons.scoped, 'Held aim resumes after magazine is seated')
   assert.equal(shots.length, 1)
   weapons.dispose()

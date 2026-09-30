@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { FirstPersonWeapons } from '../src/game/weapons'
 import { EnemyDirector } from '../src/game/ai'
 import type { EnemyActor } from '../src/game/actors'
-import { AIM_ZOOM, KNIFE, SHOTGUN_PELLETS, WEAPON_RULES, shotgunDamageMultiplier } from '../src/game/balance'
+import { AIM_ZOOM, KNIFE, SHOTGUN_PELLETS, WEAPON_RULES, WEAPON_SLOT, shotgunDamageMultiplier } from '../src/game/balance'
 import { CollisionWorld } from '../src/player/collision'
 import { createCompound } from '../src/world/compound'
 import { createMissionWorld, prepareCompound } from '../src/game/world'
@@ -18,32 +18,44 @@ function fixture(wall = false) {
   const frame: WeaponFrame = { active: true, climbing: false, moving: 0, aiming: false, reducedMotion: false, feet: v() }
   const step = (seconds: number) => { for (let i = 0; i < Math.ceil(seconds * 60); i++) weapons.update(1 / 60, frame) }
   step(1 / 60)
-  // Put a gun in the primary slot and hold it.
-  const equip = (item: WeaponItem) => { const saved = weapons.snapshot(); saved.slots[0] = item; saved.selected = 0; weapons.restore(saved); step(0.3) }
+  // Put a weapon in its category slot and hold it.
+  const equip = (item: WeaponItem) => { const saved = weapons.snapshot(); saved.selected = WEAPON_SLOT[item.name]; saved.slots[saved.selected] = item; weapons.restore(saved); step(0.3) }
   return { scene, camera, world, weapons, shots, sounds, melee, frame, step, equip, dispose() { weapons.dispose(); world.dispose() } }
 }
 {
   const f = fixture()
   const fresh = f.weapons.snapshot()
-  assert.deepEqual(fresh.slots.map(w => w?.name ?? null), [null, 'silenced', 'knife', null, null], 'Counter-Strike layout: primary empty, sidearm, knife')
-  assert.equal(fresh.selected, 2)
+  assert.deepEqual(fresh.slots.map(w => w?.name ?? null), ['knife', 'silenced', null], 'Three slots: 1 knife, 2 sidearm, 3 rifle (found in the field)')
+  assert.equal(fresh.selected, 0)
   assert.equal(f.weapons.current?.name, 'knife', 'Fresh missions start with the knife out')
   assert.equal(f.weapons.ammo, '—')
   assert.equal(fresh.slots[1]?.magazine, 12); assert.equal(fresh.slots[1]?.reserve, 36)
-  assert(!f.weapons.switchSlot(0), 'Empty slots cannot be selected'); assert(!f.weapons.switchSlot(3))
+  assert(!f.weapons.switchSlot(2), 'The empty rifle slot cannot be selected'); assert(!f.weapons.switchSlot(3), 'There is no fourth slot')
   assert(f.weapons.switchSlot(1)); f.step(0.3); assert.equal(f.weapons.current?.name, 'silenced')
-  assert(!f.weapons.switchSlot(5)); assert(!f.weapons.switchSlot(-1)); assert(!f.weapons.switchSlot(1.5))
+  assert(!f.weapons.switchSlot(-1)); assert(!f.weapons.switchSlot(1.5))
   const snapshot = f.weapons.snapshot(); f.weapons.restore(snapshot); assert.deepEqual(f.weapons.snapshot(), snapshot)
   assert.equal(f.weapons.selected, 1)
   const second = fixture(); f.weapons.current!.magazine = 1
   assert.equal(second.weapons.slots[1]?.magazine, 12, 'starting inventories cannot share mutable ammo')
   f.weapons.restore(fresh)
   assert.equal(f.weapons.current?.name, 'knife', 'Restoring the insertion checkpoint returns to the knife')
-  assert(f.weapons.switchSlot(1)); f.step(0.3); assert(f.weapons.switchSlot(2)); f.step(0.3)
+  assert(f.weapons.switchSlot(1)); f.step(0.3); assert(f.weapons.switchSlot(0)); f.step(0.3)
   assert(!f.weapons.drop(f.frame.feet), 'The knife cannot be dropped'); assert.equal(f.weapons.current?.name, 'knife')
   f.dispose(); second.dispose()
 }
-console.log('PASS The kit is a silenced pistol and a knife in Counter-Strike slots; empty slots are skipped and the knife stays')
+console.log('PASS The kit is a knife (1) and a silenced pistol (2) with slot 3 free for a rifle; empty slots are skipped and the knife stays')
+{
+  const f = fixture()
+  const order: string[] = []
+  const spin = (direction: number) => { f.weapons.cycle(direction); f.step(0.3); order.push(f.weapons.current!.name) }
+  spin(1); spin(1); spin(-1)
+  assert.deepEqual(order, ['silenced', 'knife', 'silenced'], 'The wheel skips the empty rifle slot and wraps around')
+  f.equip({ id: 'ak', name: 'ak', magazine: 30, reserve: 90 })
+  order.length = 0; spin(1); spin(1); spin(1); spin(-1)
+  assert.deepEqual(order, ['knife', 'silenced', 'ak', 'silenced'], 'With a rifle: 3 → 1 → 2 → 3, and back')
+  f.dispose()
+}
+console.log('PASS The mouse wheel cycles through the weapons you carry, skipping empty slots')
 {
   const f = fixture()
   f.weapons.trigger(true); f.weapons.trigger(false); f.step(1 / 60)
@@ -66,6 +78,27 @@ console.log('PASS The kit is a silenced pistol and a knife in Counter-Strike slo
   wall.dispose()
 }
 console.log('PASS Knife slashes on left click and stabs on right click, connecting mid-swing with a quiet swish')
+{
+  // Drawing the knife sometimes plays a trick: pick each outcome by stubbing the roll.
+  const f = fixture(), random = Math.random
+  const draw = (roll: number) => {
+    Math.random = () => roll
+    try { assert(f.weapons.switchSlot(1)); f.step(0.3); assert(f.weapons.switchSlot(0)) } finally { Math.random = random }
+    return f.weapons.knifeTrick?.kind ?? null
+  }
+  assert.equal(draw(0.1), 'toss'); f.step(1); assert.equal(f.weapons.knifeTrick, null, 'A toss is over within a second')
+  assert.equal(draw(0.6), 'spin'); f.step(1); assert.equal(f.weapons.knifeTrick, null, 'A spin is over within a second')
+  assert.equal(draw(0.9), null, 'Some draws are plain')
+  f.step(0.3); assert.equal(draw(0.1), 'toss')
+  f.step(0.3); f.weapons.trigger(true); f.weapons.trigger(false); f.step(1 / 60)
+  assert.equal(f.weapons.knifeSwing?.kind, 'slash'); assert.equal(f.weapons.knifeTrick, null, 'Attacking cuts a trick short')
+  f.step(1)
+  assert(f.weapons.switchSlot(1)); f.step(0.3); assert.equal(f.weapons.knifeTrick, null, 'Guns never do knife tricks')
+  f.frame.reducedMotion = true; assert(f.weapons.switchSlot(0)); f.step(1)
+  assert.equal(draw(0.1), null, 'Reduced Motion always gets the plain draw')
+  f.dispose()
+}
+console.log('PASS Drawing the knife sometimes tosses or spins it; attacking cuts a trick short; Reduced Motion draws plainly')
 {
   const f = fixture()
   const fov = f.camera.fov
@@ -136,20 +169,23 @@ console.log('PASS Solid cover blocks the shotgun muzzle without spending a shell
     assert(f.weapons.pickup(item.id)); f.step(0.3)
   }
   take({ id: 'roof-ak', name: 'ak', magazine: 30, reserve: 30 })
-  assert.equal(f.weapons.selected, 0, 'A found rifle fills the empty primary slot and comes up ready')
-  take({ id: 'found-smg', name: 'smg', magazine: 24, reserve: 24 }); take({ id: 'found-shotgun', name: 'shotgun', magazine: 6, reserve: 6 })
-  assert.deepEqual(f.weapons.slots.map(w => w?.name), ['ak', 'silenced', 'knife', 'smg', 'shotgun'])
-  assert(f.weapons.switchSlot(2)); f.step(0.3)
+  assert.equal(f.weapons.selected, 2, 'A found rifle fills slot 3 and comes up ready')
+  take({ id: 'found-smg', name: 'smg', magazine: 24, reserve: 24 })
+  assert.deepEqual(f.weapons.slots.map(w => w?.name), ['knife', 'smg', 'ak'], 'An SMG swaps with the pistol in slot 2')
+  assert(f.weapons.switchSlot(0)); f.step(0.3)
+  take({ id: 'found-shotgun', name: 'shotgun', magazine: 6, reserve: 6 })
+  assert.deepEqual(f.weapons.slots.map(w => w?.name), ['knife', 'smg', 'shotgun'], 'A shotgun swaps with the AK in slot 3, even while holding the knife')
   take({ id: 'found-sniper', name: 'sniper', magazine: 5, reserve: 10 })
-  assert.deepEqual(f.weapons.slots.map(w => w?.name), ['sniper', 'silenced', 'knife', 'smg', 'shotgun'], 'Holding the knife with a full kit swaps the primary; the knife stays')
-  assert(f.weapons.snapshot().pickups.some(w => w.id === 'roof-ak' && w.magazine === 30 && w.reserve === 30))
+  assert.deepEqual(f.weapons.slots.map(w => w?.name), ['knife', 'smg', 'sniper'], 'Never more than three weapons')
+  const dropped = f.weapons.snapshot().pickups.map(w => `${w.id}:${w.magazine}/${w.reserve}`).sort()
+  assert.deepEqual(dropped, ['found-shotgun:6/6', 'player-silenced:12/36', 'roof-ak:30/30'], 'Every swapped weapon drops with its ammunition')
   f.frame.aiming = true; f.step(0.3)
   assert(f.weapons.scoped, 'A picked-up sniper can enter its scope')
   assert(f.weapons.adjustScopeZoom(1))
   assert.equal(f.weapons.scopeMagnification, 5)
   f.dispose()
 }
-console.log('PASS A picked-up sniper swaps only the selected gun, preserves ammunition and supports adjustable zoom')
+console.log('PASS Pickups go to their category slot and swap the weapon of the same kind; a picked-up sniper scopes and zooms')
 for (const distance of [3, 28]) {
   const scene = new THREE.Scene(), world = new CollisionWorld(scene)
   const ai = new EnemyDirector({ scene, world, doors: [], specs: [{ id: 'target', name: 'Target', position: [0, 0, -distance], patrol: [], weapon: 'pistol' }], emit() {}, damagePlayer() {}, dropWeapon() {} }, async () => {

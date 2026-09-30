@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { EnemyDirector } from '../src/game/ai'
 import type { EnemyActor } from '../src/game/actors'
-import { advanceMission, initialMission, useStation, SIGNALS_COMPUTER_ID } from '../src/game/mission'
+import { advanceMission, cameraOnline, initialMission, useStation, SIGNALS_COMPUTER_ID } from '../src/game/mission'
 import { RESCUE_LAYOUT } from '../src/game/rescue-layout'
 import { SecuritySystem, SECURITY_RULES, CAMERA_LIGHTS, CAMERA_PATROL, cameraPatrolYaw } from '../src/game/security'
 import { CollisionWorld } from '../src/player/collision'
@@ -86,7 +86,7 @@ console.log('PASS Camera dwell, wall occlusion, reacquisition, frozen last-known
   const f = await fixture()
   f.security.sync(f.state)
   assert.equal((f.lamp.material as THREE.MeshBasicMaterial).color.getHex(), CAMERA_LIGHTS.watching)
-  f.state.camerasActive = false
+  f.state.camerasOff.push(RESCUE_LAYOUT.cameras[0].terminal)
   const yaw = f.pivot.rotation.y
   f.step(3)
   assert.equal(f.state.alarm, 'inactive')
@@ -139,20 +139,27 @@ console.log('PASS Alarm panels preserve legitimate combat contact')
   assert.equal(yaw(segment * 4), yaw(0), 'The full patrol repeats without a jump')
   const f = await fixture()
   f.step(0.4)
-  useStation(f.state, 'cameras', SIGNALS_COMPUTER_ID)
-  f.security.sync(f.state)
-  f.step(59.5)
-  assert.equal(f.state.alarm, 'inactive', 'Disabled cameras cannot detect')
-  f.step(0.55)
-  assert(f.state.camerasActive)
-  assert.equal((f.lamp.material as THREE.MeshBasicMaterial).color.getHex(), CAMERA_LIGHTS.watching)
-  assert.equal(f.state.alarm, 'inactive', 'Reactivation clears the old partial detection')
   f.security.trigger(f.state, f.eye)
   f.state.alarm = 'silenced'; f.security.sync(f.state)
-  assert.equal((f.lamp.material as THREE.MeshBasicMaterial).color.getHex(), CAMERA_LIGHTS.watching)
+  assert.equal((f.lamp.material as THREE.MeshBasicMaterial).color.getHex(), CAMERA_LIGHTS.watching, 'Green again after silencing')
   f.dispose()
+  const off = await fixture()
+  off.step(0.4)
+  // The fixture camera is on the security cabin's network: the office terminal leaves it running.
+  useStation(off.state, 'cameras', SIGNALS_COMPUTER_ID)
+  off.security.sync(off.state)
+  assert.equal((off.lamp.material as THREE.MeshBasicMaterial).color.getHex(), CAMERA_LIGHTS.watching, 'Another network\'s terminal leaves this camera watching')
+  useStation(off.state, 'cameras', 'security-computer')
+  off.security.sync(off.state)
+  const stopped = off.pivot.rotation.y
+  off.step(600)
+  assert(!cameraOnline(off.state, RESCUE_LAYOUT.cameras[0].id), 'Its own terminal shuts it down for good')
+  assert.equal(off.state.alarm, 'inactive', 'Disabled cameras cannot detect')
+  assert.equal(off.pivot.rotation.y, stopped, 'Disabled cameras stay still')
+  assert.equal((off.lamp.material as THREE.MeshBasicMaterial).color.getHex(), 0xff2929, 'A disabled camera shows a red light')
+  off.dispose()
 }
-console.log('PASS Camera holds/turns, bounded patrol, timed recovery, fresh detection dwell and green light after silencing')
+console.log('PASS Camera holds/turns, bounded patrol, green after silencing; only its own terminal shuts it down, for good, still and red')
 
 {
   const scene = new THREE.Scene(), compound = createCompound(), mission = createMissionWorld()

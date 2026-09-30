@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { Draft, type Point } from '../render/ink'
 import { groundOutline } from '../world/architecture'
+import { screenLight } from '../world/lights'
 import type { Station, StationKind } from './types'
 
 /** The shape of a control identifies its job before the interaction prompt appears. */
@@ -24,11 +25,14 @@ export function createMissionControl(kind: StationKind, id: string, label: strin
     object.box(0.065, 0.2, 0.07, -0.12, 1.03, -0.23, 'paper', 'detail')
     object.box(1.04, 0.65, 0.1, -0.12, 1.38, -0.24, 'paper', 'detail')
     const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.91, 0.52),
-      new THREE.MeshBasicMaterial({ color: 0x146bff, toneMapped: false }))
+      // The screen glows on its own; in the dark cabin it is the light.
+      Object.assign(new THREE.MeshBasicMaterial({ color: 0x146bff, toneMapped: false }), { defines: { NEON_UNLIT: '' } }))
     screen.name = 'Security cabin · surveillance screen'
     screen.position.set(-0.12, 1.38, -0.184)
     screen.userData.noCollision = true
-    object.add(screen)
+    screen.userData.cameraScreen = true
+    // The camera monitor throws its cold CCTV glow over the desk and whoever sits at it.
+    object.add(screen, screenLight('Security cabin · surveillance', [-0.12, 1.38, -0.18], 0.91, 0x5aa0ff, { intensity: 2.4 }))
     // Four camera feeds, drawn directly on the monitor rather than on a signboard.
     object.line([[-0.12, 1.12, -0.178], [-0.12, 1.64, -0.178]], 'detail')
     object.line([[-0.575, 1.38, -0.178], [0.335, 1.38, -0.178]], 'detail')

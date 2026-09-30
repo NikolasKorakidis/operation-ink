@@ -23,13 +23,13 @@ let fatalKick = 0
 let worldTime = 0, effectTime = 0, trailTime = 0
 const body = { position: new THREE.Vector3(), velocity: new THREE.Vector3(), grounded: true,
   teleport(point: THREE.Vector3) { this.position.copy(point) } }
-const player = { enabled: true, immersive: false, playing: true, body, movementLocked: false,
+const player = { enabled: true, immersive: false, playing: true, body, movementLocked: false, resetStance: () => {},
   world: { floor: () => 0, fits: () => true, refresh: noop },
   actions: { traversing: false, climbing: false, doors: [], reset: noop, syncCamera: () => camera.position.copy(body.position).add(new THREE.Vector3(0, 1.68, 0)) },
   pause() { paused++; this.playing = false },
 }
 Object.assign(m, {
-  teammates: { update: () => {}, count: 0 }, coop: { active: false, send: () => {}, hub: { selfId: 0 } }, doorHold: new Map(), 
+  teammates: { update: () => {}, count: 0 }, coop: { active: false, send: () => {}, hub: { selfId: 0 } }, doorHold: new Map(), steadiness: { update: () => {}, sway: { yaw: 0, pitch: 0 }, spread: 0 }, lean: { update() {}, apply() {}, remove() {}, reset() {} }, leanKeys: new Set(), 
   state: initialMission(), ready: true, deaths: 0, camera: { perspective: camera }, player,
   world: { bounds: { minX: -100, maxX: 100, minZ: -100, maxZ: 100 } },
   death: new PlayerDeathSequence(), escape: new EscapeCinematic(), escapeDust: { clear: noop }, playerHits: new PlayerHitReactions(),
@@ -37,11 +37,11 @@ Object.assign(m, {
     update: () => weaponUpdates++, restore: noop },
   audio: { setActive: (active: boolean) => audioActive = active, play: ({ kind }: { kind: string }) => audioEvents.push(kind),
     beginDeath: () => audioEvents.push('death'), reset: () => audioEvents.push('reset'), update: noop, setAlarm: noop },
-  hud: { reducedMotion: false, hurt: () => hurtCues++, hitFrom: () => hitCues++, notify: noop, clearThreat: noop, setScoped: noop, setDeath: noop,
+  hud: { reducedMotion: false, setAimOffset: noop, hurt: () => hurtCues++, hitFrom: () => hitCues++, notify: noop, clearThreat: noop, setScoped: noop, setDeath: noop,
     update: noop, reset: () => hudCleared = true, clearDeath: () => hudCleared = true },
   ai: { update: (dt: number, sense: { alive: boolean }) => { worldTime += dt; if (sense.alive) m.damage(100, new THREE.Vector3(0, 1, -5)) }, bulletTrails: { clear: noop }, restore: noop },
   escort: { update: noop, sync: noop }, security: { update: noop, sync: noop, reset: noop },
-  blood: { update: (dt: number) => effectTime += dt, restore: noop }, impacts: { update: noop, clear: noop }, bulletTrails: { clear: noop, update: (dt: number) => trailTime += dt },
+  blood: { update: (dt: number) => effectTime += dt, restore: noop }, impacts: { update: noop, clear: noop }, crates: { sync: noop, update: noop, reset: noop, at: () => null }, intro: { play: noop, clear: noop }, radios: { sync: noop, update: () => false, reset: noop, at: () => null }, bulletTrails: { clear: noop, update: (dt: number) => trailTime += dt },
   safePosition: new THREE.Vector3(), safeQuaternion: new THREE.Quaternion(), active: false, wasVR: false,
   stepTime: 0, interactionTime: 0, gunfireUntil: 0, hitFlash: 0, invalidate: noop,
 })

@@ -62,24 +62,25 @@ const jeep = new THREE.Group(), wheel = new THREE.Group()
 jeep.userData = { wheels: [wheel], wheelRadius: .5, passengerDoor: new THREE.Group() }
 let worldTime = 0, hudFade = 0, hudMenu = false, audioActive = false, weaponVisible = true, updates = 0
 const player = {
+  resetStance: () => {},
   enabled: true, immersive: false, playing: true, movementLocked: false,
   body: { position: new THREE.Vector3(), velocity: new THREE.Vector3(), teleport(position: THREE.Vector3) { this.position.copy(position) } },
   actions: { reset: noop, doors: [], syncCamera: noop }, world: { refresh: noop },
   pause() { this.playing = false },
 }
 Object.assign(m, {
-  teammates: { update: () => {}, count: 0 }, coop: { active: false, send: () => {}, hub: { selfId: 0 } }, doorHold: new Map(), 
+  teammates: { update: () => {}, count: 0 }, coop: { active: false, send: () => {}, hub: { selfId: 0 } }, doorHold: new Map(), steadiness: { update: () => {}, sway: { yaw: 0, pitch: 0 }, spread: 0 }, lean: { update() {}, apply() {}, remove() {}, reset() {} }, leanKeys: new Set(), 
   state: initialMission(), escape: new EscapeCinematic(), escapeDust: new EscapeDust(new THREE.Scene()), playerHits: new PlayerHitReactions(), camera: { perspective: camera },
   player, ready: true, deaths: 0, invincible: false, aiming: false, invalidate: noop,
   world: { rescue: { jeep, gate: new THREE.Group(), cellDoors: [] } },
   weapons: { cancel: noop, update: () => weaponVisible = false, resetDeath: noop, restore: noop },
-  hud: { reducedMotion: false, setScoped: noop, clearThreat: noop, notify: noop, reset: noop,
+  hud: { reducedMotion: false, setAimOffset: noop, setScoped: noop, clearThreat: noop, notify: noop, reset: noop, briefObjectives: noop,
     clearEscape: noop, update: () => updates++, setEscape: (sequence: EscapeCinematic) => { hudFade = sequence.fade; hudMenu = sequence.menuVisible } },
   audio: { setAlarm: noop, update: noop, reset: noop, setActive: (active: boolean) => audioActive = active },
   ai: { update: (dt: number, sense: { alive: boolean }) => { assert(!sense.alive, 'Guards can target the cinematic camera'); worldTime += dt },
     bulletTrails: { clear: noop }, restore: noop },
   escort: { jeepOffset: new THREE.Vector3(), jeepRotation: new THREE.Quaternion(), update: noop, sync: noop },
-  blood: { update: noop, restore: noop }, impacts: { update: noop, clear: noop }, bulletTrails: { update: noop, clear: noop },
+  blood: { update: noop, restore: noop }, impacts: { update: noop, clear: noop }, crates: { sync: noop, update: noop, reset: noop, at: () => null }, intro: { play: noop, clear: noop }, radios: { sync: noop, update: () => false, reset: noop, at: () => null }, bulletTrails: { update: noop, clear: noop },
   security: { sync: noop, reset: noop }, death: { reset: noop }, safePosition: new THREE.Vector3(), safeQuaternion: new THREE.Quaternion(),
 })
 const initial = { mission: initialMission(), weapons: {}, enemies: [], doors: [], position: [1, 0, 2], quaternion: [0, 0, 0, 1] }

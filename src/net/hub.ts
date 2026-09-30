@@ -24,6 +24,8 @@ export type CoopMessage =
   | { t: 'shot'; id: number; origin: Vec3; end: Vec3; weapon: WeaponName }
   // Guest to host: requests the host's compound applies.
   | { t: 'hit'; id: number; hit: NetEnemyHit }
+  | { t: 'crate'; id: number; crate: string; damage: number }
+  | { t: 'radio'; id: number; radio: string }
   | { t: 'noise'; id: number; kind: string; position: Vec3; radius: number }
   | { t: 'door'; id: number; i: number; open: boolean }
   | { t: 'use'; id: number; kind: StationKind; station: string }
@@ -73,6 +75,12 @@ export function guestMessage(id: number, data: unknown): CoopMessage | null {
         !(hit.bone === undefined || text(hit.bone, 32))) return null
       return { t: 'hit', id, hit: hit as NetEnemyHit }
     }
+    case 'crate':
+      if (!text(message.crate, 120) || !finite(message.damage) || message.damage < 0 || message.damage > 1000) return null
+      return { t: 'crate', id, crate: message.crate, damage: message.damage }
+    case 'radio':
+      if (!text(message.radio, 120)) return null
+      return { t: 'radio', id, radio: message.radio }
     case 'noise':
       if (!text(message.kind, 32) || !vec(message.position) || !finite(message.radius) || message.radius < 0 || message.radius > 200) return null
       return { t: 'noise', id, kind: message.kind, position: message.position, radius: message.radius }

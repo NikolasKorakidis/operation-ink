@@ -137,10 +137,12 @@ for (const name of ['pistol', 'ak', 'smg', 'shotgun', 'sniper'] as WeaponName[])
         r.removeCamera()
       }
       if (reloading) {
+        // Box magazines are thrown away with their leftover rounds; a shotgun tube keeps its shells.
+        const leftover = name === 'shotgun' || !weapons.reloading ? 0 : weapons.current!.magazine
         const before = weapons.current!.magazine + weapons.current!.reserve
         for (let i = 0; i < 240; i++) weapons.update(1 / 60, frame)
         assert(!weapons.reloading)
-        assert.equal(weapons.current!.magazine + weapons.current!.reserve, before)
+        assert.equal(weapons.current!.magazine + weapons.current!.reserve, before - leftover)
       }
     }
   }
@@ -156,7 +158,7 @@ for (const name of ['pistol', 'ak', 'smg', 'shotgun', 'sniper'] as WeaponName[])
   r.removeCamera()
   r.clear(); weapons.dispose(); world.dispose()
 }
-console.log('PASS All five weapons keep connected fixed-length arms during overlapping hits, aim and reload; firing remains aligned and ammunition conserved')
+console.log('PASS All five weapons keep connected fixed-length arms during overlapping hits, aim and reload; firing remains aligned and only the discarded magazine is lost')
 
 {
   const scene = new THREE.Scene()

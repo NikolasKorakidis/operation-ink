@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js'
+import { darkenInkInDarkRooms } from './neon'
 
 /** Black pen scenery on white paper, with solid black characters. */
 export const penPalette = {
@@ -206,8 +207,9 @@ function createEdgeMaterial(distance: PenDistanceProfile) {
         clipEnd.xy += penNormal * instancePenOffset.y * penEndScale * 2.0 / resolution * clipEnd.w;
         // ndc space`)
       .replace('offset *= linewidth;', 'offset *= linewidth * instancePenWidth * penWidthScale;')
+    darkenInkInDarkRooms(shader)
   }
-  material.customProgramCacheKey = () => `ballpoint-foreground-edges-v4:${distance}`
+  material.customProgramCacheKey = () => `ballpoint-foreground-edges-v5:${distance}`
   return material
 }
 const edgeMaterials = { world: createEdgeMaterial('world'), weapon: createEdgeMaterial('weapon') }
