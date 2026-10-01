@@ -41,9 +41,13 @@ async function start() {
   const player = new Player(rig.root)
   // Registry (and the clip modules it globs) needs the rest pose, so it loads after the rig.
   const { actions, clips, updaters } = await import('./registry')
+  // The character picker (characters.ts) swaps ctx.rig and ctx.player, so everything below reads them from ctx.
+  const characters = await import('./characters')
+  actions.push(...characters.actions)
+  updaters.push(characters.update)
   const ctx: Ctx = { rig, player, scene, camera, fx: {}, weapons: {}, clips, time: 0 }
   const { mountPanel } = await import('./panel')
-  mountPanel(document.querySelector('#panel')!, ctx, controls)
+  mountPanel(document.querySelector('#panel')!, ctx, controls, renderer)
   player.play(clips.idle, { loop: true })
 
   window.addEventListener('keydown', event => {
@@ -58,7 +62,7 @@ async function start() {
     const dt = Math.min((now - last) / 1000, 0.05)
     last = now
     ctx.time += dt
-    player.update(dt)
+    ctx.player.update(dt)
     for (const update of updaters) update(dt, ctx)
     controls.update()
     renderer.render(scene, camera)

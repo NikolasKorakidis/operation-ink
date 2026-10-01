@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import { type MissionState, SIGNALS_COMPUTER_ID } from './mission'
+import type { MissionState } from './mission'
+import { fieldMap, readProjection, type MapProjection } from './field-map'
 import { WEAPON_RULES } from './balance'
 import type { MissionWorld, WeaponItem } from './types'
 import './game.css'
@@ -7,7 +8,7 @@ import { IncomingFire } from './incoming-fire'
 import { MissionMenu } from './menu'
 import type { PlayerDeathSequence } from './player-death'
 import type { EscapeCinematic } from './escape-cinematic'
-import { ObjectivesPanel, type ObjectiveTotals } from './objectives'
+import { ObjectivesPanel, type ObjectiveSource } from './objectives'
 
 const icons: Record<string, string> = {
   door: '<path d="M5 21V3h14v18M9 21V5l8 2v14M13 13h1"/>',
@@ -30,6 +31,7 @@ export class MissionHUD {
   private caption: HTMLElement
   private menu: MissionMenu
   private mapDot: SVGElement
+  private mapProjection: MapProjection | null = null
   private icon: HTMLElement
   private captionTimer = 0
   private start: HTMLButtonElement
@@ -44,21 +46,27 @@ export class MissionHUD {
   private threatLabel: HTMLElement
   private objectives = new ObjectivesPanel()
   private briefingDue = true
+  /** The tutorial level: its own lesson list replaces the mission objectives. */
+  private tutorial = false
   /** Set once the level is built (see setObjectiveTotals). */
-  private objectiveTotals: ObjectiveTotals = { crates: 0, radios: [] }
+  private objectiveSource: ObjectiveSource = { list: () => [], hint: () => '' }
   reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
 
-  constructor(world: MissionWorld, callbacks: { retry: () => void; restart: () => void; volume: (value: number) => void; mute: (value: boolean) => void; leaveWarning?: () => string | null }) {
+  constructor(world: MissionWorld, callbacks: { retry: () => void; restart: () => void; volume: (value: number) => void; mute: (value: boolean) => void; load?: (level: string) => void; leaveWarning?: () => string | null }) {
     document.body.dataset.mission = 'true'
     document.body.dataset.reducedMotion = String(this.reducedMotion)
     document.title = 'Stickman: Ghost Ink'
     const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!
     this.start = $<HTMLButtonElement>('#walk-start')
     this.start.textContent = 'Loading the compound…'; this.start.disabled = true
-    $('.walk-heading .walk-eyebrow').textContent = 'Stickman: Ghost Ink'
+    // Gone once a previous mode's menu has taken the card over (a mode switch in place).
+    const eyebrow = document.querySelector('.walk-heading .walk-eyebrow')
+    if (eyebrow) eyebrow.textContent = 'Stickman: Ghost Ink'
     $('#world').setAttribute('aria-label', 'Stickman: Ghost Ink tactical mission. Mouse to look, WASD move, left click fire, right click toggle aim, F interact, R reload, M field map, Escape pause.')
-    this.menu = new MissionMenu(this.start, this.buildMap(world), this.reducedMotion, callbacks)
+    const briefing = world.briefing ?? { title: 'The mission', premise: '', won: 'Mission complete.', outro: 'You made it out.', tips: [] }
+    this.menu = new MissionMenu(this.start, { ...briefing, map: briefing.map ?? fieldMap(world.root, world) }, this.reducedMotion, callbacks)
     this.mapDot = document.querySelector('#field-player')!
+    this.mapProjection = readProjection(this.mapDot.closest('svg'))
     this.root.id = 'mission-hud'
     this.root.innerHTML = `
       <div class="mission-wounds" id="mission-health" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"></div>
@@ -116,7 +124,7 @@ export class MissionHUD {
     $('#mission-mute').addEventListener('change', e => callbacks.mute((e.target as HTMLInputElement).checked), opts)
     // I opens and folds the mission list while playing.
     window.addEventListener('keydown', event => {
-      if (event.code !== 'KeyI' || event.repeat || event.ctrlKey || event.metaKey || event.altKey || this.root.hidden) return
+      if (this.tutorial || event.code !== 'KeyI' || event.repeat || event.ctrlKey || event.metaKey || event.altKey || this.root.hidden) return
       if (event.target instanceof HTMLElement && event.target.closest('button, input, textarea, select')) return
       event.preventDefault()
       this.objectives.toggle()
@@ -124,33 +132,10 @@ export class MissionHUD {
     $('#mission-motion').addEventListener('change', e => { this.reducedMotion = (e.target as HTMLInputElement).checked; document.body.dataset.reducedMotion = String(this.reducedMotion) }, opts)
   }
 
-  private buildMap(world: MissionWorld) {
-    const x = (v: number) => (v + 110) * 1.55 + 12, z = (v: number) => (v + 78) * 1.55 + 12
-    const point = (a: number, b: number) => `${x(a)},${z(b)}`
-    const buildings: [number, number, number, number][] = [[-34,-46,28,21],[25,-7,56,13],[16,36,20,14],[55,35,12,18],[-30,30,28,8],[83,-9,17,13],[117,-17,18,24],[146,-45,10,9],[143,3,14,10],[111,-45,12,10]]
-    const stationNames: Record<string,string> = { cameras: 'Security', gate: 'Exit gate', jeep: 'Jeep', hostage: 'Cells', alarm: 'Alarm', rally: 'Regroup', supply: 'Supplies', distraction: 'Bell' }
-    const buildingsInk = buildings.map(([bx,bz,w,d], i) => {
-      const left = x(bx-w/2), top = z(bz-d/2), width = w*1.55, height = d*1.55
-      return `<rect x="${left}" y="${top}" width="${width}" height="${height}" fill="url(#map-hatching)" stroke="var(--ink-light)"/>
-        <path d="M${left-0.5} ${top+1}l${width+1} -0.6 -0.7 ${height-0.2}${i%2 ? '' : ` -${width-1} 0.5`}" fill="none" stroke="var(--ink)" stroke-width="0.55"/>`
-    }).join('')
-    return `<svg viewBox="0 0 460 260" role="img" aria-label="Field map: north is up. Rail route via water tower; service route via warehouse and workshop. East annex holds underground detention, security, jeep and exit gate." stroke-linecap="round" stroke-linejoin="round">
-      <defs><pattern id="map-hatching" width="7" height="7" patternUnits="userSpaceOnUse"><rect width="7" height="7" fill="var(--paper)"/><path d="M-1 6L6 -1M1 8L8 1" stroke="var(--ink-light)" stroke-width="0.5" opacity="0.5"/></pattern></defs>
-      <path d="M6 6L454 5 455 254 5 255Z M7 8L452 7" fill="var(--paper)" stroke="var(--ink-rule)"/>
-      <path d="M18 32V15l-4 7m4-7 4 7" fill="none" stroke="var(--ink)"/><text x="16" y="45">N</text>
-      <path d="M${point(26,-32)} L${point(165,-32)}" stroke="var(--ink-light)" stroke-width="3"/>
-      <path d="M${point(-53,-51)} L${point(-48.665,-51)} L${point(-34,-51)} L${point(-34,-34)} L${point(-20,-29)} L${point(17,-28)} L${point(25,-34.2)} L${point(97,-34.2)} L${point(103,-34.2)} L${point(107,-35)} L${point(142,-35)}" stroke="var(--ink)" stroke-width="1.4" fill="none"/>
-      <path d="M${point(-40,-62.3)} L${point(-53,-62.3)} L${point(-61.8,-52)} L${point(-61.8,-44)} L${point(-53,-44)} L${point(-50,-30)} L${point(-50,4)} L${point(-20,4)} L${point(-20,20.1)} L${point(-11.75,20.1)} L${point(-11.75,14)} L${point(0,13)} L${point(55,16)} L${point(99,11)} L${point(110,5)} L${point(117,-2)} L${point(117,-9)}" stroke="var(--ink)" stroke-dasharray="4 3" stroke-width="1.4" fill="none"/>
-      ${buildingsInk}
-      <text x="${x(-43)}" y="${z(-59)}">Mess hall</text><text x="${x(-92)}" y="${z(-50)}">Service gate</text><text x="${x(7)}" y="${z(5)}">Warehouse</text><text x="${x(64)}" y="${z(3)}">Workshop</text><text x="${x(132)}" y="${z(15)}">Barracks</text><text x="${x(108)}" y="${z(-18)}">Detention</text>
-      ${world.stations.filter(s => ['cameras', 'gate', 'jeep'].includes(s.kind)).map(s => `<circle cx="${x(s.point.x)}" cy="${z(s.point.z)}" r="2.6" fill="var(--ink)"/><text text-anchor="${s.kind === 'gate' ? 'end' : 'start'}" x="${x(s.point.x)+(s.kind === 'gate' ? -5 : 5)}" y="${z(s.point.z)-5}">${s.id === SIGNALS_COMPUTER_ID ? 'Office terminal' : stationNames[s.kind]}</text>`).join('')}
-      <path id="field-player" d="M0 -5 3.5 4 0 2 -3.5 4Z" fill="var(--ink-deep)" stroke="var(--paper)" stroke-width="1"/>
-    </svg>`
-  }
-
   ready() { this.menu.ready() }
   showMap() { this.menu.showMap() }
   showCoop() { this.menu.showCoop() }
+  showLoad() { this.menu.showLoad() }
   /** Aim drift in normalized screen coordinates (as from Vector3.project), applied to the crosshair and scope reticle. */
   setAimOffset(ndcX: number, ndcY: number) {
     const x = ndcX * window.innerWidth / 2, y = -ndcY * window.innerHeight / 2
@@ -163,8 +148,17 @@ export class MissionHUD {
     // The first time a run is played, the mission list is shown in the middle of the screen before it docks.
     if (playing && this.briefingDue) { this.briefingDue = false; this.objectives.brief() }
   }
+  /** The tutorial level: no mission objectives, and the menu offers training instead of the mission. */
+  setTutorial() {
+    this.tutorial = true
+    this.briefingDue = false
+    this.objectives.root.hidden = true
+    this.menu.setTutorial()
+  }
   /** Brief the missions again when the next run starts (a full restart). */
-  briefObjectives() { this.briefingDue = true }
+  /** A level played on its own (see MissionMenu.setStandalone). */
+  setStandalone() { this.menu.setStandalone() }
+  briefObjectives() { this.briefingDue = !this.tutorial }
   error(message: string) { this.menu.error(message) }
   notify(message: string, duration = 5, visible = false) {
     this.caption.textContent = message
@@ -173,7 +167,8 @@ export class MissionHUD {
   }
   hurt() { this.damageTimer = 0.32 }
   /** How many crates and which radios the level holds, for the side-mission counts. */
-  setObjectiveTotals(totals: ObjectiveTotals) { this.objectiveTotals = totals }
+  /** The level's objectives (the runtime sets this once the level is built). */
+  setObjectiveSource(source: ObjectiveSource) { this.objectiveSource = source }
   hitFrom(intensity: number, direction: string) { this.incoming.pulse(intensity, direction) }
   clearThreat() { this.incoming.clear(); this.threat.hidden = true }
   reset() { this.damageTimer = 0; this.captionTimer = 0; this.root.classList.remove('hurt'); this.setScoped(false); this.clearThreat(); this.clearDeath(); this.clearEscape(); this.menu.reset() }
@@ -259,10 +254,11 @@ export class MissionHUD {
     const kind = document.querySelector<HTMLElement>('#action-prompt')!.dataset.kind ?? 'mission'
     if (this.icon.dataset.kind !== kind) { this.icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">${icons[kind] ?? icons.mission}</svg>`; this.icon.dataset.kind = kind }
     if (!data.playing) {
-      this.mapDot.setAttribute('transform', `translate(${(data.position.x+110)*1.55+12},${(data.position.z+78)*1.55+12}) rotate(${-data.yaw*180/Math.PI})`)
+      const map = this.mapProjection
+      if (map) this.mapDot.setAttribute('transform', `translate(${(data.position.x + map.originX) * map.scale + map.pad},${(data.position.z + map.originZ) * map.scale + map.pad}) rotate(${-data.yaw * 180 / Math.PI})`)
     }
-    this.objectives.update(state, this.objectiveTotals, data.playing ? dt : 0)
-    this.menu.update(state, data)
+    this.objectives.update(this.objectiveSource.list(state), data.playing ? dt : 0)
+    this.menu.update(state, data, this.objectiveSource.hint(state))
   }
   dispose() { this.menu.dispose(); this.abort.abort(); this.clearDeath(); this.clearEscape(); this.escape.remove(); this.death.remove(); this.setScoped(false); this.scope.remove(); this.root.remove(); this.icon.remove(); delete document.body.dataset.mission }
 }

@@ -441,7 +441,7 @@ function reload() {
 }
 
 /** ctx.weapons.guns — equip / unequip / fire / reload, plus observable state for the lab. */
-function api(c: Ctx) {
+export function api(c: Ctx) {
   ctx = c
   return (c.weapons.guns ??= {
     names: Object.keys(builders) as GunName[],

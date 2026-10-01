@@ -3,17 +3,20 @@ import { Capsule } from 'three/addons/math/Capsule.js'
 import { CollisionWorld } from './collision'
 
 export type Stance = 'stand' | 'crouch' | 'prone'
-/** Eye height (m) and walking speed (m/s) per stance. Only standing can sprint or jump. */
-export const STANCES: Record<Stance, { eye: number; speed: number }> = {
-  stand: { eye: 1.65, speed: 4.2 },
-  crouch: { eye: 1.12, speed: 1.9 },
-  prone: { eye: 0.42, speed: 0.75 },
+/**
+ * Eye height (m), walking speed (m/s) and body height (m, the collision capsule) per stance. Only standing can sprint
+ * or jump. Crouched you fit under 1.4 m, prone under about 0.65 m.
+ */
+export const STANCES: Record<Stance, { eye: number; speed: number; height: number }> = {
+  stand: { eye: 1.65, speed: 4.2, height: 1.8 },
+  crouch: { eye: 1.12, speed: 1.9, height: 1.35 },
+  prone: { eye: 0.42, speed: 0.75, height: 0.6 },
 }
+const LOWER: Record<Stance, Stance | null> = { stand: 'crouch', crouch: 'prone', prone: null }
 export const EYE_HEIGHT = STANCES.stand.eye
 const SPRINT_SPEED = 7.6
 /** How quickly the view glides to a new stance's eye height (per second). */
 const STANCE_BLEND = 10
-const HEIGHT = 1.8
 const RADIUS = 0.28
 const STEP_HEIGHT = 0.34
 const SUPPORT_RADIUS = RADIUS + 0.04
@@ -25,6 +28,7 @@ export class PlayerBody {
   grounded = false
   /** Downward speed at ground contact, retained across this frame's substeps. */
   landingSpeed = 0
+  /** The stance the body is in: the one asked for, or lower while there is no room overhead to rise into it. */
   stance: Stance = 'stand'
   /** Current eye height above the feet, easing toward the stance's height. */
   eyeHeight = EYE_HEIGHT
@@ -41,10 +45,18 @@ export class PlayerBody {
     this.landingSpeed = 0
   }
 
-  private placeCapsule(position = this.position) {
+  private placeCapsule(position = this.position, height = STANCES[this.stance].height) {
     this.capsule.start.copy(position).y += RADIUS
-    this.capsule.end.copy(position).y += HEIGHT - RADIUS
+    this.capsule.end.copy(position).y += height - RADIUS
     return this.capsule
+  }
+
+  /** Whether the body has room to be in `stance` where it stands (no ceiling, beam or barrier in the way). */
+  hasRoom(stance: Stance) {
+    if (STANCES[stance].height <= STANCES[this.stance].height) return true
+    const fits = this.world.fits(this.placeCapsule(this.position, STANCES[stance].height))
+    this.placeCapsule()
+    return fits
   }
 
   jump() {
@@ -57,7 +69,11 @@ export class PlayerBody {
   /** Sprinting only works standing; crouching and lying prone move at their own slower speeds. */
   update(dt: number, direction: THREE.Vector3, sprint: boolean, stance: Stance = 'stand') {
     this.landingSpeed = 0
-    this.stance = stance
+    // Rising needs room overhead: under something low, stay as low as it takes, and get up once clear.
+    let fitted: Stance | null = stance
+    while (fitted && !this.hasRoom(fitted)) fitted = LOWER[fitted]
+    this.stance = fitted ?? this.stance
+    stance = this.stance
     const blend = 1 - Math.exp(-STANCE_BLEND * Math.max(0, Math.min(dt, 0.1)))
     this.eyeHeight += (STANCES[stance].eye - this.eyeHeight) * blend
     const steps = Math.max(1, Math.ceil(Math.min(dt, 0.05) / (1 / 120)))

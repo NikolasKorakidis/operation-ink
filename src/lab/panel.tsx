@@ -3,25 +3,32 @@ import { useState } from 'preact/hooks'
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { poseQuat, type Pose, type BoneVal, type Vec3 } from './clip'
 import { actions, updaters, type Ctx } from './registry'
+import { CHARACTERS, COLORS, SLEDGE_MOVES, characterOf, colorOf, exportModel, exportSheet, frame, setColor, switchCharacter, type CharacterId } from './characters'
+import type * as THREE from 'three'
 import { BONE_NAMES, type BoneName } from './rig'
 
 export const views: Record<string, Vec3> = { front: [0, 1.1, 4], side: [4, 1.1, 0], '3/4': [2.8, 1.5, 2.8], top: [0, 5, 0.01] }
-const TARGET: Vec3 = [0, 0.9, 0]
 
 /** Inspector pose: rest * euler, written over the animation each frame for the bones it mentions. */
 const inspector: Pose = {}
 
-function Panel({ ctx, controls }: { ctx: Ctx; controls: OrbitControls }) {
+function Panel({ ctx, controls, renderer }: { ctx: Ctx; controls: OrbitControls; renderer: THREE.WebGLRenderer }) {
   const [, bump] = useState(0)
   const [speed, setSpeed] = useState(1)
   const [fade, setFade] = useState(ctx.player.fade)
+  const [loading, setLoading] = useState<CharacterId | null>(null)
+  const character = characterOf(ctx), color = colorOf(ctx)
+  const [exporting, setExporting] = useState(false)
+  const paint = (value: number) => { setColor(ctx, value); bump(n => n + 1) }
+  const hex = (value: number) => `#${value.toString(16).padStart(6, '0')}`
   const groups = new Map<string, typeof actions>()
+  // The Sledge's hands are on his hammer: the gun tools don't apply to him (his own moves are listed under Character).
   for (const a of actions) groups.set(a.group, [...(groups.get(a.group) ?? []), a])
 
-  const setView = (name: string) => {
-    ctx.camera.position.set(...views[name])
-    controls.target.set(...TARGET)
-    controls.update()
+  const setView = (name: string) => frame(ctx, controls, views[name])
+  const pick = async (id: CharacterId) => {
+    setLoading(id)
+    try { await switchCharacter(ctx, id, controls) } finally { setLoading(null) }
   }
   const setAxis = (bone: BoneName, axis: number, deg: number) => {
     const v = [...(inspector[bone] ?? [0, 0, 0])] as BoneVal
@@ -44,6 +51,29 @@ function Panel({ ctx, controls }: { ctx: Ctx; controls: OrbitControls }) {
   const blur = (e: Event) => (e.currentTarget as HTMLElement).blur()
 
   return <>
+    <h3>Character</h3>
+    <div class="characters">{CHARACTERS.map(c => <button key={c.id} class={c.id === character ? 'active' : ''} aria-pressed={c.id === character}
+      disabled={!!loading} title={c.note} onClick={e => { blur(e); void pick(c.id) }}>
+      <i class={`swatch ${c.id}`} />{loading === c.id ? 'Loading…' : c.label}</button>)}</div>
+    <div class="colors" role="group" aria-label="Body colour">
+      {COLORS.map(entry => <button key={entry.color} class={entry.color === color ? 'active' : ''} aria-pressed={entry.color === color} title={entry.label}
+        aria-label={entry.label} style={{ background: hex(entry.color) }} onClick={e => { blur(e); paint(entry.color) }} />)}
+      <label class="custom-color" title="Any other colour"><input type="color" value={hex(color)} onInput={e => paint(parseInt(e.currentTarget.value.slice(1), 16))} /></label>
+    </div>
+    <p class="color-name">{COLORS.find(entry => entry.color === color)?.label ?? `Custom ${hex(color)}`}</p>
+    <div class="exports">
+      <button disabled={exporting} title="A 3D model with its skeleton (.glb), for Blender and 3D or AI model tools"
+        onClick={e => { blur(e); setExporting(true); void exportModel(ctx).finally(() => setExporting(false)) }}>{exporting ? 'Exporting…' : 'Export 3D model (.glb)'}</button>
+      <button title="Front, three-quarter, side and back views in one picture (.png), to give an image AI like Grok"
+        onClick={e => { blur(e); exportSheet(ctx, renderer) }}>Export model sheet (.png)</button>
+    </div>
+
+    {character === 'sledge' && <div class="moves">
+      <h4>His moves</h4>
+      {SLEDGE_MOVES.map(move => <button key={move.label} title={move.note} onClick={e => { blur(e); move.run(ctx) }}>
+        <strong>{move.label}</strong><span>{move.note}</span></button>)}
+    </div>}
+
     <h3>Camera</h3>
     {Object.keys(views).map(name => <button key={name} onClick={e => { blur(e); setView(name) }}>{name}</button>)}
 
@@ -72,9 +102,9 @@ function Panel({ ctx, controls }: { ctx: Ctx; controls: OrbitControls }) {
   </>
 }
 
-export function mountPanel(el: HTMLElement, ctx: Ctx, controls: OrbitControls) {
+export function mountPanel(el: HTMLElement, ctx: Ctx, controls: OrbitControls, renderer: THREE.WebGLRenderer) {
   updaters.push((_, { rig }) => {
     for (const [bone, v] of Object.entries(inspector) as [BoneName, Vec3][]) poseQuat(bone, v, rig.bones[bone].quaternion)
   })
-  render(<Panel ctx={ctx} controls={controls} />, el)
+  render(<Panel ctx={ctx} controls={controls} renderer={renderer} />, el)
 }

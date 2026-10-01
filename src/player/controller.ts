@@ -30,7 +30,11 @@ export class FirstPersonController {
   private pressed = new Set<string>()
   /** C toggles crouching and Z toggles lying prone; each switches straight from the other, and Space stands up. */
   private chosenStance: Stance = 'stand'
-  get stance(): Stance { return this.actions.traversing ? 'stand' : this.chosenStance }
+  /** The stance the player is in: the one chosen, or lower while something overhead keeps them down. */
+  get stance(): Stance {
+    if (this.actions.traversing) return 'stand'
+    return STANCES[this.body.stance].height < STANCES[this.chosenStance].height ? this.body.stance : this.chosenStance
+  }
   /** Stand up, for respawns and checkpoint restores. */
   resetStance() { this.chosenStance = 'stand'; this.body.stance = 'stand'; this.body.eyeHeight = STANCES.stand.eye }
   private abort = new AbortController()
@@ -123,6 +127,15 @@ export class FirstPersonController {
     } catch { this.refuseLock() }
   }
 
+  /**
+   * Start play now if the pointer was already captured (a mode switched in place takes the lock on the menu click,
+   * while the level is still loading); otherwise ask for it as usual.
+   */
+  begin() {
+    if (document.pointerLockElement === this.canvas && this.enabled) { this.lockRefused = false; this.resume() }
+    else this.requestControl()
+  }
+
   /** A refusal is temporary: keep playing with drag-to-look, and the next click or resume asks for the lock again. */
   private refuseLock = () => {
     if (!this.enabled || this.immersive || document.pointerLockElement === this.canvas) return
@@ -213,7 +226,7 @@ export class FirstPersonController {
       this.forward.y = 0
       this.forward.normalize()
       this.direction.set(-this.forward.z, 0, this.forward.x).multiplyScalar(x).addScaledVector(this.forward, z).normalize()
-      this.body.update(dt, this.direction, this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'), this.stance)
+      this.body.update(dt, this.direction, this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'), this.actions.traversing ? 'stand' : this.chosenStance)
     }
     if (this.body.position.y < -20 || Math.max(Math.abs(this.body.position.x), Math.abs(this.body.position.z)) > 1150) this.respawn()
     this.actions.syncCamera(this.camera.active, dt)

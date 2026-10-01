@@ -1,5 +1,8 @@
-import { missionObjective, type MissionState } from './mission'
+import type { MissionState } from './mission'
+import { LEVELS, listSaves, type SaveInfo } from './saves'
+import { goTo } from '../modes'
 import type { ViewName } from '../camera'
+import type { Briefing } from './types'
 
 /** Every other way into the game. Links are relative, so they work on GitHub Pages' /<repository>/ path too. */
 export const MAP_VIEWS: { id: ViewName; label: string; note: string }[] = [
@@ -14,20 +17,35 @@ export const MAP_VIEWS: { id: ViewName; label: string; note: string }[] = [
   { id: 'rail', label: 'Rail siding', note: 'Down the tracks to the water tower' },
   { id: 'tanks', label: 'Fuel tanks', note: 'The west tank farm' },
 ]
-export type Destination = 'explore' | 'lab' | `view:${ViewName}`
-export function destinationUrl(destination: Destination) {
-  const path = destination === 'lab' ? 'lab.html' : destination === 'explore' ? './?explore=1' : `./?view=${destination.slice(5)}`
-  return new URL(path, location.href).toString()
+export type Destination = 'explore' | 'lab' | 'tutorial' | 'mission' | 'load' | `view:${ViewName}`
+/** Leave for another mode on this same address (see modes.ts); only the animation lab is a page of its own. */
+export function goToDestination(destination: Destination) {
+  if (destination === 'lab') location.assign(new URL('lab.html', location.href).toString())
+  else goTo(destination)
 }
 
-/** The title in blue neon, with one failing letter that stutters now and then (menu-neon.css). */
-const BRAND = 'Stickman: Ghost <span class="neon-broken">I</span>nk'
+const BRAND = 'Stickman: Ghost Ink'
 
-type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart' | 'coop' | 'views' | 'leave'
+type MenuPage = 'home' | 'campaign' | 'pause' | 'load' | 'gallery' | 'options' | 'mission' | 'controls' | 'settings' | 'restart' | 'coop' | 'views' | 'leave'
+/**
+ * Where each page lives. The main menu holds Campaign, Multiplayer, Gallery and Options; the pause page holds what a
+ * run in progress needs. Back normally returns along the way you came (`trail`); this is the fallback when you
+ * arrived some other way.
+ */
+const PARENT: Record<MenuPage, MenuPage> = {
+  home: 'home', campaign: 'home', coop: 'home', gallery: 'home', options: 'home', pause: 'home', leave: 'home',
+  load: 'campaign', views: 'gallery', settings: 'options', controls: 'options', mission: 'pause', restart: 'pause',
+}
+const back = '<button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>'
 /** `leaveWarning` names what leaving to another mode would lose, or null when nothing is at stake. */
-type MenuCallbacks = { retry: () => void; restart: () => void; leaveWarning?: () => string | null }
+type MenuCallbacks = { retry: () => void; restart: () => void; load?: (level: string) => void; leaveWarning?: () => string | null }
 
-/** One decision at a time; reference material never blocks entering the game. */
+/**
+ * Two kinds of page. The main menu picks what to do: Campaign (new game, load game, training), Multiplayer, Gallery
+ * (map views, free roam, the lab) and Options (settings, controls). Once a run has started, pausing, dying or
+ * finishing lands on the pause page instead: resume, try again or play again, the briefing, options, a restart,
+ * and the way out to the main menu. Each option appears in one place only.
+ */
 export class MissionMenu {
   private card = document.querySelector<HTMLElement>('.walk-card')!
   private pause = document.querySelector<HTMLElement>('#walk-pause')!
@@ -35,24 +53,67 @@ export class MissionMenu {
   private page: MenuPage = 'home'
   private phase: MissionState['phase'] = 'active'
   private hasPlayed = false
+  /** The tutorial level: the pause page runs training, and the Campaign page leads back to the mission. */
+  private tutorial = false
+  /** A level played on its own (any but the campaign's first, and not training): its pause page starts it. */
+  private standalone = false
   private wasPlaying = false
   private loaded = false
   private loadError = ''
-  private returnFocus: HTMLElement | null = null
-  private leaving: string | null = null
+  /** The pages behind the current one, each with the button that led on from it, so Back retraces your steps. */
+  private trail: { page: MenuPage; focus: HTMLElement | null }[] = []
+  private leaving: Destination | null = null
+  private campaignEntry: HTMLButtonElement
+  private coopEntry: HTMLButtonElement
   private title: HTMLElement
   private premise: HTMLElement
   private retry: HTMLButtonElement
   private restart: HTMLButtonElement
+  private briefing: HTMLButtonElement
+  private play: HTMLButtonElement
+  private loadEntry: HTMLButtonElement
+  private training: HTMLButtonElement
+  private coopPlay: HTMLButtonElement
+  private saves: SaveInfo[] = []
+  /** The run's current objective, kept from the last update for the Campaign page's Resume entry. */
+  private objective = ''
 
-  constructor(private start: HTMLButtonElement, map: string, reducedMotion: boolean, callbacks: MenuCallbacks) {
+  /** The mission's own page: title, premise, map and tips (MissionWorld.briefing). */
+  private briefingText: Briefing
+
+  constructor(private start: HTMLButtonElement, briefing: Briefing & { map: string }, reducedMotion: boolean, private callbacks: MenuCallbacks) {
+    this.briefingText = briefing
+    const escapeText = (text: string) => text.replace(/[&<>]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[char]!)
+    // Taken before the card is rewritten: on a mode switch in place it already lives inside the card.
+    const vrPanel = document.querySelector<HTMLElement>('#vr-panel')!
     this.card.dataset.page = 'home'
     this.card.setAttribute('role', 'dialog')
     this.card.setAttribute('aria-modal', 'true')
     this.card.setAttribute('aria-labelledby', 'mission-menu-title')
     this.card.innerHTML = `
       <section data-menu-page="home">
+        ${back.replace('data-menu-back', 'data-menu-back hidden')}
         <h1 id="mission-menu-title">${BRAND}</h1>
+        <p class="menu-premise">Find the hostage. Get out together.</p>
+        <nav class="main-menu" aria-label="Main menu">
+          <button class="main-entry" data-menu-open="campaign"><strong>Campaign</strong><span>New game, saved games and training</span></button>
+          <button class="main-entry" data-menu-open="coop"><strong>Multiplayer</strong><span>Co-op for up to 4 players</span></button>
+          <button class="main-entry" data-menu-open="gallery"><strong>Gallery</strong><span>Map views, free roam and the animation lab</span></button>
+          <button class="main-entry" data-menu-open="options"><strong>Options</strong><span>Settings and controls</span></button>
+        </nav>
+      </section>
+      <section data-menu-page="campaign" hidden>
+        ${back}
+        <h2 id="campaign-page-title">Campaign</h2>
+        <p>Find the hostage. Get out together.</p>
+        <nav class="main-menu" aria-label="Campaign">
+          <button id="campaign-play" class="main-entry"><strong>New game</strong><span>Start the mission</span></button>
+          <button id="campaign-load" class="main-entry"><strong>Load game</strong><span>Continue a saved mission</span></button>
+          <button id="campaign-training" class="main-entry"><strong>Training</strong><span>Learn every move, then fight the Sledge</span></button>
+        </nav>
+      </section>
+      <section data-menu-page="pause" hidden>
+        <h2 id="pause-page-title">Paused.</h2>
         <p id="mission-premise">Find the hostage. Get out together.</p>
         <p id="coop-status" hidden></p>
         <div id="mission-debrief" role="status" hidden></div>
@@ -61,26 +122,43 @@ export class MissionMenu {
           <button id="mission-retry" class="menu-primary" hidden>Try again</button>
           <button id="mission-restart" class="menu-quiet" hidden>Restart mission</button>
         </div>
-        <nav class="main-menu" aria-label="Main menu">
-          <button class="main-entry" data-menu-open="coop"><strong>Play with friends</strong><span>Co-op for up to 4 players</span></button>
-          <button class="main-entry" data-menu-go="explore"><strong>Free roam</strong><span>Walk the compound with no guards</span></button>
+        <nav class="main-menu" aria-label="Paused">
+          <button id="mission-briefing" class="main-entry" data-menu-open="mission" hidden><strong>Briefing</strong><span>Map, objective and route tips</span></button>
+          <button class="main-entry" data-menu-open="options"><strong>Options</strong><span>Settings and controls</span></button>
+          <button id="pause-home" class="main-entry" data-menu-open="home"><strong>Main menu</strong><span>Campaign, multiplayer and the gallery</span></button>
+        </nav>
+      </section>
+      <section data-menu-page="load" hidden>
+        ${back}
+        <h2 id="load-page-title">Load game</h2>
+        <p>Pick up where you left off. A mission saves itself whenever you pause or leave it.</p>
+        <nav class="main-menu save-list" aria-label="Saved missions"></nav>
+      </section>
+      <section data-menu-page="gallery" hidden>
+        ${back}
+        <h2 id="gallery-page-title">Gallery</h2>
+        <nav class="main-menu" aria-label="Gallery">
           <button class="main-entry" data-menu-open="views"><strong>Map views</strong><span>Fly-over cameras around the camp</span></button>
+          <button class="main-entry" data-menu-go="explore"><strong>Free roam</strong><span>Walk the compound with no guards</span></button>
           <button class="main-entry" data-menu-go="lab"><strong>Animation lab</strong><span>Characters, moves and weapons</span></button>
         </nav>
-        <nav class="mission-menu-links" aria-label="Mission menu">
-          <button data-menu-open="mission">Briefing</button>
-          <button data-menu-open="controls">Controls</button>
-          <button data-menu-open="settings">Settings</button>
+      </section>
+      <section data-menu-page="options" hidden>
+        ${back}
+        <h2 id="options-page-title">Options</h2>
+        <nav class="main-menu" aria-label="Options">
+          <button class="main-entry" data-menu-open="settings"><strong>Settings</strong><span>Volume, mute and reduced motion</span></button>
+          <button class="main-entry" data-menu-open="controls"><strong>Controls</strong><span>Every key and mouse button</span></button>
         </nav>
       </section>
       <section data-menu-page="views" hidden>
-        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
+        ${back}
         <h2 id="views-page-title">Map views</h2>
         <p>Inspection cameras. Drag to orbit, scroll to zoom, and press <kbd>V</kbd> to fly freely.</p>
         <div class="view-grid">${MAP_VIEWS.map(view => `<button class="main-entry" data-menu-go="view:${view.id}"><strong>${view.label}</strong><span>${view.note}</span></button>`).join('')}</div>
       </section>
       <section data-menu-page="leave" hidden>
-        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
+        ${back}
         <h2 id="leave-page-title">Leave the mission?</h2>
         <p id="leave-warning"></p>
         <div class="mission-actions">
@@ -89,19 +167,15 @@ export class MissionMenu {
         </div>
       </section>
       <section data-menu-page="mission" hidden>
-        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
-        <h2 id="mission-page-title">The rescue</h2>
-        <p id="mission-current-objective">Find detention and reach the cells.</p>
-        <div class="field-map">${map}</div>
-        <p class="map-legend"><span>— Rail route</span><span>┄ Service route</span><span>▲ You</span></p>
-        <details class="mission-tips"><summary>Route tips</summary>
-          <p>Take the mess-hall roof to the rail line, or the west service gate to the covered lanes.</p>
-          <p>Each camera terminal shuts down its own cameras for good: the office terminal the west camera, the security computer the east ones. Open the exit gate before the rescue.</p>
-          <p>The jeep is southeast of detention. If the hostage falls behind, return to him and lead him onward. Alarms bring reinforcements; you don’t need to fight everyone.</p>
-        </details>
+        ${back}
+        <h2 id="mission-page-title">${escapeText(briefing.title)}</h2>
+        <p id="mission-current-objective"></p>
+        <div class="field-map">${briefing.map}</div>
+        <p class="map-legend">${(briefing.legend ?? ['▲ You']).map(entry => `<span>${escapeText(entry)}</span>`).join('')}</p>
+        ${briefing.tips.length ? `<details class="mission-tips"><summary>Route tips</summary>${briefing.tips.map(tip => `<p>${escapeText(tip)}</p>`).join('')}</details>` : ''}
       </section>
       <section data-menu-page="controls" hidden>
-        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
+        ${back}
         <h2 id="controls-page-title">Controls</h2>
         <dl class="mission-keys">
           <div><dt>Move</dt><dd><kbd>W A S D</kbd></dd></div>
@@ -124,7 +198,7 @@ export class MissionMenu {
         </dl>
       </section>
       <section data-menu-page="settings" hidden>
-        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
+        ${back}
         <h2 id="settings-page-title">Settings</h2>
         <div class="mission-settings">
           <label class="mission-volume-label" for="mission-volume">Volume <output id="mission-volume-value" for="mission-volume">55%</output></label>
@@ -133,37 +207,44 @@ export class MissionMenu {
           <label for="mission-motion">Reduced motion <input id="mission-motion" type="checkbox" ${reducedMotion ? 'checked' : ''} /></label>
         </div>
       </section>
-      <section data-menu-page="vr" hidden>
-        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
-        <h2 id="vr-page-title">Explore in VR</h2>
-        <p>Walk through the compound with your headset. Your mission stays paused.</p>
-        <div class="mission-vr-slot"></div>
-      </section>
       <section data-menu-page="coop" hidden>
-        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
-        <h2 id="coop-page-title">Play together</h2>
+        ${back}
+        <h2 id="coop-page-title">Multiplayer</h2>
         <div class="coop-slot"></div>
+        <div class="mission-actions"><button id="coop-play" class="menu-primary" hidden>Start the mission</button></div>
       </section>
       <section data-menu-page="restart" hidden>
-        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
+        ${back}
         <h2 id="restart-page-title">Start over?</h2>
         <p>Your current mission progress will be reset.</p>
         <div class="mission-actions">
           <button id="mission-cancel-restart" class="menu-primary">Cancel</button>
           <button id="mission-confirm-restart" class="menu-secondary">Restart mission</button>
         </div>
-      </section>`
+      </section>
+      <div class="mission-vr-slot" hidden></div>`
     this.card.querySelector('.mission-start-slot')!.append(start)
-    // Move the existing controls so the WebXR click handler keeps the browser's
-    // user activation and session lifecycle, inside the same menu.
-    this.card.querySelector('.mission-vr-slot')!.append(document.querySelector('#vr-panel')!)
-    this.title = this.element('#mission-menu-title')
+    // The game has no VR entry; the panel is parked out of sight so it never shows over the mission (free roam keeps it).
+    this.card.querySelector('.mission-vr-slot')!.append(vrPanel)
+    this.campaignEntry = this.element('[data-menu-page="home"] [data-menu-open="campaign"]')
+    this.coopEntry = this.element('[data-menu-page="home"] [data-menu-open="coop"]')
+    this.title = this.element('#pause-page-title')
     this.premise = this.element('#mission-premise')
     this.retry = this.element('#mission-retry')
     this.restart = this.element('#mission-restart')
+    this.briefing = this.element('#mission-briefing')
+    this.play = this.element('#campaign-play')
+    this.loadEntry = this.element('#campaign-load')
+    this.training = this.element('#campaign-training')
+    this.coopPlay = this.element('#coop-play')
+    // One button per saved level; the list is drawn each time the page opens.
+    this.element('.save-list').addEventListener('click', event => {
+      const level = (event.target as HTMLElement).closest<HTMLElement>('[data-save-level]')?.dataset.saveLevel
+      if (level) callbacks.load?.(level)
+    }, { signal: this.abort.signal })
     const options = { signal: this.abort.signal }
     this.card.querySelectorAll<HTMLElement>('[data-menu-open]').forEach(button => {
-      button.addEventListener('click', () => this.show(button.dataset.menuOpen as MenuPage, button), options)
+      button.addEventListener('click', () => this.open(button.dataset.menuOpen as MenuPage, button), options)
     })
     this.card.querySelectorAll('[data-menu-back]').forEach(button => {
       button.addEventListener('click', () => this.back(), options)
@@ -171,14 +252,22 @@ export class MissionMenu {
     this.retry.addEventListener('click', callbacks.retry, options)
     this.restart.addEventListener('click', () => {
       if (this.phase === 'complete') callbacks.restart()
-      else this.show('restart', this.restart)
+      else this.open('restart', this.restart)
     }, options)
     this.element('#mission-confirm-restart').addEventListener('click', callbacks.restart, options)
     this.card.querySelectorAll<HTMLElement>('[data-menu-go]').forEach(button => {
-      button.addEventListener('click', () => this.go(button.dataset.menuGo as Destination, button, callbacks.leaveWarning?.() ?? null), options)
+      button.addEventListener('click', () => this.go(button.dataset.menuGo as Destination, button), options)
     })
+    this.play.addEventListener('click', () => this.playCampaign(), options)
+    this.coopPlay.addEventListener('click', () => this.playCampaign(), options)
+    this.loadEntry.addEventListener('click', () => this.tutorial ? this.go('load', this.loadEntry) : this.open('load', this.loadEntry), options)
+    this.training.addEventListener('click', () => {
+      if (!this.tutorial) this.go('tutorial', this.training)
+      else if (this.phase === 'active') this.start.click()
+      else this.open('pause', this.training)
+    }, options)
     this.element('#mission-cancel-leave').addEventListener('click', () => this.back(), options)
-    this.element('#mission-confirm-leave').addEventListener('click', () => { if (this.leaving) location.assign(this.leaving) }, options)
+    this.element('#mission-confirm-leave').addEventListener('click', () => { if (this.leaving) goToDestination(this.leaving) }, options)
     this.element('#mission-cancel-restart').addEventListener('click', () => this.back(), options)
     this.element('#mission-volume').addEventListener('input', event => {
       this.element('#mission-volume-value').textContent = `${(event.target as HTMLInputElement).value}%`
@@ -188,61 +277,131 @@ export class MissionMenu {
 
   private element<T extends HTMLElement = HTMLElement>(selector: string) { return this.card.querySelector<T>(selector)! }
 
-  /** Other modes are separate pages. Ask first when leaving would end a mission or a co-op room. */
-  private go(destination: Destination, source: HTMLElement, warning: string | null) {
-    const url = destinationUrl(destination)
-    if (!warning) { location.assign(url); return }
-    this.leaving = url
+  /** Switch to another mode. Ask first when leaving would end a mission or a co-op room. */
+  private go(destination: Destination, source: HTMLElement) {
+    const warning = this.callbacks.leaveWarning?.() ?? null
+    if (!warning) { goToDestination(destination); return }
+    this.leaving = destination
     this.element('#leave-warning').textContent = warning
-    this.show('leave', source)
+    this.open('leave', source)
   }
 
-  private show(page: MenuPage, source?: HTMLElement, focus = true) {
-    if (source) this.returnFocus = source
+  /** The campaign's first entry: in the tutorial it leaves for the mission; otherwise it starts, resumes or starts over. */
+  private playCampaign() {
+    if (this.tutorial || this.standalone) this.go('mission', this.play)
+    else if (this.phase === 'active') this.start.click()
+    else this.callbacks.restart()
+  }
+
+  /** Resuming makes sense: a run is under way and paused. */
+  private get resumable() { return (this.hasPlayed || this.tutorial) && this.phase === 'active' }
+  /** The page the menu settles on: the main menu until a run starts, the pause page from then on (and in training). */
+  private get landing(): MenuPage { return this.tutorial || this.standalone || this.hasPlayed || this.phase !== 'active' ? 'pause' : 'home' }
+
+  /** Go on to a page from this one; Back returns here, to `source`. */
+  private open(page: MenuPage, source: HTMLElement | null = null) {
+    if (page === this.page) return
+    this.trail.push({ page: this.page, focus: source })
+    this.show(page)
+  }
+
+  /** Settle on the landing page, with nothing behind it. */
+  private land(focus = false) {
+    this.trail = []
+    this.show(this.landing, focus)
+  }
+
+  private show(page: MenuPage, focus = true) {
+    if (page === 'load') this.drawSaves()
+    if (page === 'campaign') this.drawCampaign()
     this.page = page
     this.card.dataset.page = page
     this.card.querySelectorAll<HTMLElement>('[data-menu-page]').forEach(section => { section.hidden = section.dataset.menuPage !== page })
+    // The main menu has a Back only when you came to it from somewhere, such as the pause page.
+    this.element('[data-menu-page="home"] [data-menu-back]').hidden = !this.trail.length
     this.card.setAttribute('aria-labelledby', page === 'home' ? 'mission-menu-title' : `${page}-page-title`)
     this.pause.scrollTop = 0
-    if (focus) {
-      if (page === 'home') this.focusPrimary()
-      else this.element<HTMLButtonElement>(`[data-menu-page="${page}"] ${page === 'restart' ? '#mission-cancel-restart' : page === 'leave' ? '#mission-cancel-leave' : '[data-menu-back]'}`).focus({ preventScroll: true })
-    }
+    if (!focus) return
+    if (page === 'home' || page === 'campaign' || page === 'pause') this.focusPrimary()
+    else this.element<HTMLButtonElement>(`[data-menu-page="${page}"] ${page === 'restart' ? '#mission-cancel-restart' : page === 'leave' ? '#mission-cancel-leave' : '[data-menu-back]'}`).focus({ preventScroll: true })
   }
 
   private back() {
-    this.show('home', undefined, false)
-    if (this.returnFocus && !this.returnFocus.hidden) this.returnFocus.focus({ preventScroll: true })
+    const step = this.trail.pop() ?? { page: PARENT[this.page], focus: null }
+    this.show(step.page, false)
+    if (step.focus && step.focus.getClientRects().length) step.focus.focus({ preventScroll: true })
     else this.focusPrimary()
-    this.returnFocus = null
   }
 
-  showMap() { this.returnFocus = null; this.show('mission') }
-  showCoop() { this.returnFocus = null; this.show('coop') }
+  showMap() { this.open('mission') }
+  showCoop() { this.trail = [{ page: 'home', focus: this.coopEntry }]; this.show('coop') }
   setPlaying(playing: boolean) {
     if (playing) {
       this.hasPlayed = true
-      this.returnFocus = null
-      this.show('home', undefined, false)
+      this.land()
     } else if (this.wasPlaying) {
-      this.show('home', undefined, false)
+      this.land()
       this.focusPrimary()
     }
     this.wasPlaying = playing
   }
-  focusPrimary() {
-    const primary = this.phase === 'dead' ? this.retry : this.phase === 'complete' ? this.restart : this.start
-    if (!this.pause.hidden && !this.pause.inert && !primary.hidden && !primary.disabled) primary.focus({ preventScroll: true })
+  private drawSaves() {
+    this.saves = listSaves()
+    const minutes = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
+    const when = (time: number) => new Date(time).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    this.element('.save-list').innerHTML = this.saves.map(save => `<button class="main-entry" data-save-level="${save.level}">
+      <strong>${LEVELS[save.level].name}</strong><span>${save.objective} · ${minutes(save.elapsed)} played · saved ${when(save.savedAt)}</span></button>`).join('')
+      || '<p>No saved games yet. A mission saves itself whenever you pause or leave it.</p>'
   }
-  ready() { this.loaded = true; this.start.disabled = false; this.start.textContent = 'Begin mission'; if (this.page === 'home') this.focusPrimary() }
-  error(message: string) { this.loadError = message; this.start.textContent = 'Unable to load'; this.start.disabled = true; this.show('home'); this.showError() }
-  private showError() { const debrief = this.element('#mission-debrief'); debrief.hidden = false; delete debrief.dataset.summary; debrief.textContent = this.loadError }
-  reset() { this.phase = 'active'; this.loadError = ''; this.show('home', undefined, false) }
+  /** The Campaign page names what each entry will do right now. */
+  private drawCampaign() {
+    const away = this.tutorial || this.standalone
+    const resume = !away && this.hasPlayed && this.phase === 'active'
+    this.setEntry(this.play, resume ? 'Resume mission' : 'New game', this.tutorial ? 'Leave training and start the mission'
+      : this.standalone ? 'Leave this level and start the campaign' : resume ? this.objective : 'Start the mission')
+    // A run under way is already saved by pausing, so loading is offered only when none is.
+    this.loadEntry.hidden = !away && (resume || !this.callbacks.load)
+    const saves = listSaves().length
+    this.setEntry(this.loadEntry, 'Load game', saves ? `${saves} saved ${saves === 1 ? 'mission' : 'missions'}` : 'No saved games yet')
+    this.setEntry(this.training, this.tutorial && this.hasPlayed ? 'Resume training' : 'Training',
+      this.tutorial ? 'Back to the training ground' : 'Learn every move, then fight the Sledge')
+  }
+  private setEntry(entry: HTMLElement, name: string, note: string) {
+    entry.querySelector('strong')!.textContent = name
+    entry.querySelector('span')!.textContent = note
+  }
 
-  update(state: MissionState, data: { playing: boolean; enabled: boolean; ready: boolean }) {
+  /** The main menu leads with Campaign, the Campaign page with its first entry, the pause page with what the run needs next. */
+  focusPrimary() {
+    const primary = this.page === 'home' ? this.campaignEntry : this.page === 'campaign' ? this.play : this.page !== 'pause' ? null
+      : this.phase === 'dead' ? this.retry : this.phase === 'complete' ? this.restart : this.start
+    if (primary && !this.pause.hidden && !this.pause.inert && !primary.hidden && !primary.disabled) primary.focus({ preventScroll: true })
+  }
+  /** The tutorial level: the pause page runs training, and it has no briefing. */
+  setTutorial() {
+    this.tutorial = true
+    this.land()
+  }
+  /** A level played on its own: the pause page starts it, under the level's own title. */
+  setStandalone() {
+    this.standalone = true
+    this.land()
+  }
+  /** Open on the saved games (arriving from the tutorial's Load game). */
+  showLoad() { this.trail = [{ page: 'home', focus: this.campaignEntry }, { page: 'campaign', focus: this.loadEntry }]; this.show('load') }
+  ready() { this.loaded = true; this.start.disabled = false; this.start.textContent = this.tutorial ? 'Begin training' : this.standalone ? 'Begin mission' : 'New game'; if (this.page === this.landing) this.focusPrimary() }
+  error(message: string) {
+    this.loadError = message; this.start.textContent = 'Unable to load'; this.start.disabled = true
+    this.trail = [{ page: 'home', focus: this.campaignEntry }]; this.show('pause'); this.showError()
+  }
+  private showError() { const debrief = this.element('#mission-debrief'); debrief.hidden = false; delete debrief.dataset.summary; debrief.textContent = this.loadError }
+  reset() { this.phase = 'active'; this.loadError = ''; this.land() }
+
+  update(state: MissionState, data: { playing: boolean; enabled: boolean; ready: boolean }, objective: string) {
+    this.objective = objective
     if (data.playing) {
       this.hasPlayed = true
-      if (!this.wasPlaying) this.show('home', undefined, false)
+      if (!this.wasPlaying) this.land()
       this.wasPlaying = true
       return
     }
@@ -250,22 +409,27 @@ export class MissionMenu {
     this.wasPlaying = false
     if (this.phase !== state.phase) {
       this.phase = state.phase
-      this.show('home', undefined, false)
+      this.land()
     }
     const dead = state.phase === 'dead', complete = state.phase === 'complete'
-    if (dead || complete || this.hasPlayed) this.title.textContent = dead ? 'No way through.' : complete ? 'Hostage safe.' : 'Paused.'
-    else if (this.title.textContent !== 'Stickman: Ghost Ink') this.title.innerHTML = BRAND
+    this.title.textContent = dead ? (this.tutorial ? 'Down, not out.' : 'No way through.') : complete ? this.briefingText.won : this.hasPlayed ? 'Paused.' : this.tutorial ? 'Training ground' : this.standalone ? this.briefingText.title : 'Campaign'
     this.premise.hidden = dead
-    this.premise.textContent = complete ? 'You both made it out.' : this.hasPlayed ? missionObjective(state) : 'Find the hostage. Get out together.'
+    this.premise.textContent = this.tutorial ? 'Learn every move, one lesson at a time, then take down the Sledge.'
+      : complete ? this.briefingText.outro : this.hasPlayed ? this.objective : this.briefingText.premise
     this.start.hidden = dead || complete
     this.start.disabled = !data.ready || !this.loaded
-    if (!this.loadError && this.loaded) this.start.textContent = this.hasPlayed ? 'Resume mission' : 'Begin mission'
+    if (!this.loadError && this.loaded) this.start.textContent = this.tutorial ? (this.hasPlayed ? 'Resume training' : 'Begin training') : this.hasPlayed ? 'Resume mission' : this.standalone ? 'Begin mission' : 'New game'
     this.retry.hidden = !dead
     this.retry.disabled = !data.ready
+    this.briefing.hidden = this.tutorial || dead || complete
     this.restart.hidden = dead || (!complete && !this.hasPlayed)
     this.restart.disabled = !data.ready
     this.restart.className = complete ? 'menu-primary' : 'menu-quiet'
-    this.restart.textContent = complete ? 'Play again' : 'Restart mission'
+    this.restart.textContent = complete ? 'Play again' : this.tutorial ? 'Restart training' : 'Restart mission'
+    this.play.disabled = this.training.disabled = this.coopPlay.disabled = !data.ready || !this.loaded
+    // Once you are in a co-op room, its page leads straight into the mission.
+    this.coopPlay.hidden = this.tutorial || (this.card.querySelector<HTMLElement>('.coop-session')?.hidden ?? true)
+    this.coopPlay.textContent = this.resumable ? 'Resume mission' : 'Start the mission'
     const debrief = this.element('#mission-debrief')
     debrief.hidden = !complete
     if (complete) {
@@ -282,8 +446,8 @@ export class MissionMenu {
       }
     }
     if (this.loadError) this.showError()
-    this.element('#mission-current-objective').textContent = missionObjective(state)
-    if (data.enabled && ((justPaused && !dead) || complete) && this.page === 'home' && !this.card.contains(document.activeElement)) this.focusPrimary()
+    this.element('#mission-current-objective').textContent = this.objective
+    if (data.enabled && ((justPaused && !dead) || complete) && this.page === this.landing && !this.card.contains(document.activeElement)) this.focusPrimary()
   }
 
   private keyDown = (event: KeyboardEvent) => {
@@ -291,15 +455,16 @@ export class MissionMenu {
     if (event.key === 'Escape') {
       event.preventDefault(); event.stopImmediatePropagation()
       if (event.repeat) return
-      if (this.page !== 'home') this.back()
-      else if (this.hasPlayed && this.phase === 'active') this.start.click()
+      // On the pause page Esc resumes; with nothing to resume it goes to the main menu. Anywhere else it goes back.
+      if (this.page === 'pause') { if (this.resumable && this.hasPlayed) this.start.click(); else this.open('home') }
+      else if (this.page !== 'home' || this.trail.length) this.back()
       return
     }
-    if (event.code === 'KeyM' && (this.page === 'home' || this.page === 'mission')) {
+    if (event.code === 'KeyM' && !this.tutorial && (this.page === 'home' || this.page === 'pause' || this.page === 'mission')) {
       event.preventDefault(); event.stopImmediatePropagation()
       if (event.repeat) return
-      if (this.page === 'home') this.showMap()
-      else if (this.hasPlayed && this.phase === 'active') this.start.click()
+      if (this.page !== 'mission') this.showMap()
+      else if (this.resumable && this.hasPlayed) this.start.click()
       else this.back()
       return
     }
@@ -309,7 +474,7 @@ export class MissionMenu {
       if (index === -1 || (event.shiftKey ? index === 0 : index === buttons.length - 1)) {
         event.preventDefault(); buttons[event.shiftKey ? buttons.length - 1 : 0]?.focus()
       }
-    } else if (['ArrowUp', 'ArrowDown'].includes(event.key) && (this.page === 'home' || this.page === 'restart' || this.page === 'leave' || this.page === 'views')) {
+    } else if (['ArrowUp', 'ArrowDown'].includes(event.key) && !['mission', 'settings', 'controls'].includes(this.page)) {
       event.preventDefault()
       buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus()
     }

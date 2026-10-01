@@ -71,6 +71,9 @@ export class InkSplashes {
     this.mesh.userData.noCollision = true
     this.mesh.frustumCulled = false
     this.mesh.renderOrder = 1
+    // Stains fade through their instance colours. Made now, the colour texture is part of the shader from the start,
+    // so the first blood doesn't compile a second variant of it mid-fight.
+    ;(this.mesh as unknown as { _initColorsTexture(): void })._initColorsTexture()
     scene.add(this.mesh)
   }
 

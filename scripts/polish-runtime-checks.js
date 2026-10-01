@@ -41,7 +41,7 @@
       assert('Death test starts through Resume click', p.playing);
       m.damage(200);
       await frames();
-      assert('Lethal damage ends play and displays recovery', m.state.phase === 'dead' && m.state.health === 0 && !p.playing && document.querySelector('.walk-card h1').textContent === 'No way through.');
+      assert('Lethal damage ends play and displays recovery', m.state.phase === 'dead' && m.state.health === 0 && !p.playing && document.querySelector('#pause-page-title').textContent === 'No way through.');
       assert('Death clears audio and scope', !m.audio.diagnostics.active && m.audio.diagnostics.sources === 0 && document.querySelector('.mission-scope').hidden);
       return results;
     },

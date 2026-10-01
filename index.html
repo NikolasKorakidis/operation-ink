@@ -13,24 +13,21 @@
       /* Until src/main.ts removes data-loading after the first ready frame, only the loading card shows. */
       html[data-loading] body > :not(#boot) { visibility: hidden; }
       html:not([data-loading]) #boot { display: none; }
-      /* The loading screen is the first neon sign: the menus' pink brush-script title, with the same failing letter. */
+      /* The loading screen is the first neon sign: the menus' pink typewritten title, with the same failing letter and cursor. */
       #boot { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; gap: 20px; padding: 24px; color: #f2fff8; text-align: center;
         background: radial-gradient(ellipse at 50% 42%, #061220 0%, #030507 72%); }
-      #boot h1 { margin: 0; font: 400 clamp(40px, 8vw, 64px)/1.05 "Brush Script MT", "Snell Roundhand", "Segoe Script", "Bradley Hand", cursive; letter-spacing: 0.01em;
-        color: #ffe9f8; text-shadow: 0 0 2px #fff, 0 0 7px #ff4fc8, 0 0 18px #ff4fc8cc, 0 0 38px #ff4fc877, 0 0 70px #ff2d9544; animation: boot-warm 2.4s ease-out 1 both; }
-      #boot h1 span { animation: boot-broken 6.3s linear 3s infinite; }
-      #boot p { margin: 0; font: 13px/1.5 "Trebuchet MS", "Segoe UI", sans-serif; color: #8fa3ad; letter-spacing: 0.08em; }
+      #boot h1 { margin: 0; font: 700 clamp(30px, 6vw, 48px)/1.08 "American Typewriter", "Courier Prime", "Courier New", Courier, monospace; letter-spacing: -0.01em;
+        color: #ffe9f8; text-shadow: 0 0 2px #fff, 0 0 7px #ff4fc8, 0 0 18px #ff4fc8cc, 0 0 38px #ff4fc877, 0 0 70px #ff2d9544; }
+      #boot p { margin: 0; font: 13px/1.5 "American Typewriter", "Courier New", Courier, monospace; color: #8fa3ad; letter-spacing: 0.12em; text-transform: uppercase; }
       #boot i { display: block; width: 150px; height: 2.4px; border-radius: 2px; background: #4db8ff; box-shadow: 0 0 6px #4db8ff, 0 0 16px #4db8ffaa;
         transform-origin: 0 50%; animation: boot-stroke 1.4s ease-in-out infinite; }
       @keyframes boot-stroke { 0% { transform: scaleX(0); } 60% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(1); opacity: 0; } }
-      @keyframes boot-warm { 0% { opacity: 0.15; } 6% { opacity: 0.9; } 9% { opacity: 0.25; } 16% { opacity: 1; } 19% { opacity: 0.55; } 26%, 100% { opacity: 1; } }
-      @keyframes boot-broken { 0%, 68% { opacity: 1; } 68.8% { opacity: 0.12; } 69.6% { opacity: 0.85; } 70.3% { opacity: 0.2; } 71.5%, 100% { opacity: 1; } }
-      @media (prefers-reduced-motion: reduce) { #boot i, #boot h1, #boot h1 span { animation: none; } }
+      @media (prefers-reduced-motion: reduce) { #boot i { animation: none; } }
     </style>
   </head>
   <body>
     <div id="boot" role="status">
-      <h1>Stickman: Ghost <span>I</span>nk</h1>
+      <h1>Stickman: Ghost Ink</h1>
       <i aria-hidden="true"></i>
       <p>Loading…</p>
     </div>

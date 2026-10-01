@@ -1,0 +1,95 @@
+/* The tutorial's HUD, in the game's paper-and-ink style: lesson card (left), lesson list (right), the marker to the
+   next lesson, the boss bar and banners. Damage numbers are styled too, though they are paused (TUTORIAL_FEEDBACK). */
+.tutorial-hud { position: fixed; inset: 0; z-index: 3; pointer-events: none; color: var(--ink); font: 12px/1.4 var(--notes); }
+.tutorial-hud kbd { display: inline-block; min-width: 18px; margin-right: 4px; padding: 3px 6px; border: 1px solid var(--ink); border-bottom-width: 2px; border-radius: 4px; background: #fff; font: 600 11px/1 var(--notes); text-align: center; }
+
+.tutorial-card { position: absolute; left: 24px; top: 22px; width: 300px; padding: 11px 15px 13px; border-left: 3px solid var(--ink); background: #ffffffeb; }
+.tutorial-card header { display: flex; justify-content: space-between; font: 600 10px/1 var(--notes); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-muted); }
+.tutorial-card h2 { margin: 7px 0 6px; font: 600 24px/1.1 var(--hand); }
+.tutorial-card p { margin: 0 0 6px; color: var(--ink-muted); }
+.tutorial-keys { display: flex; flex-wrap: wrap; gap: 2px; }
+.tutorial-skip kbd { min-width: 14px; padding: 1px 4px; font-size: 9px; }
+.tutorial-tick { position: absolute; right: 14px; top: 26px; font: 700 34px/1 var(--hand); opacity: 0; scale: .4; transition: opacity .2s ease, scale .3s cubic-bezier(.3,1.6,.5,1); }
+.tutorial-card.is-done .tutorial-tick { opacity: 1; scale: 1; }
+.tutorial-card.is-done h2 { text-decoration: line-through; text-decoration-thickness: 2px; }
+.tip-hit { color: #7d7d7d; } .tip-heavy { color: #c98a00; } .tip-crit { color: #d31d1d; }
+.tutorial-chances { width: 100%; margin: 4px 0 6px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.tutorial-chances th { font: 600 10px/1.6 var(--notes); text-align: left; color: var(--ink-muted); border-bottom: 1px solid var(--ink-rule, #ccc); }
+.tutorial-chances td { padding: 1px 0; }
+.tutorial-chances td + td, .tutorial-chances th + th { text-align: right; }
+.tutorial-note { font-size: 11px; }
+
+.tutorial-list { position: absolute; top: 22px; right: 24px; width: 196px; padding: 8px 12px 10px; border-left: 2px solid var(--ink); background: #ffffffe0; }
+.tutorial-tab { display: flex; justify-content: space-between; align-items: center; font: 600 11px/1 var(--notes); letter-spacing: 0.06em; text-transform: uppercase; }
+.tutorial-list ol { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 2px; }
+.tutorial-list li.done { color: var(--ink-muted); text-decoration: line-through; }
+.tutorial-list li.current { font-weight: 700; }
+.tutorial-list.is-collapsed { width: 120px; }
+.tutorial-list.is-collapsed ol { display: none; }
+
+/* Where the next lesson happens: a paper diamond with the distance under it. */
+.tutorial-marker { position: absolute; left: 0; top: 0; display: grid; justify-items: center; gap: 2px; margin: -14px 0 0 -10px; }
+.tutorial-marker i { width: 16px; height: 16px; rotate: 45deg; border: 2px solid var(--ink); background: transparent; }
+.tutorial-marker span { padding: 1px 5px; background: transparent; font: 600 11px/1.3 var(--notes); }
+
+/* Damage numbers (paused): grey for a light hit, gold for a heavy one, red for a critical. */
+.damage-layer { position: absolute; inset: 0; overflow: hidden; }
+.damage-number { position: absolute; left: 0; top: 0; display: grid; justify-items: center; translate: -999px -999px; transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)); white-space: nowrap; color: #7d7d7d;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 6px #fff; }
+.damage-number b { font: 700 var(--size, 22px)/1 var(--hand); }
+.damage-number small { font: 700 9px/1.2 var(--notes); letter-spacing: 0.1em; }
+.damage-number.is-heavy { color: #c98a00; }
+.damage-number.is-critical { color: #d31d1d; }
+
+/* The boss bar: his name, an armour strip over a health bar whose pale trail drains after each hit. */
+.boss-bar { position: absolute; top: 20px; left: 50%; width: min(560px, calc(100vw - 600px)); min-width: 300px; translate: -50% 0; }
+.boss-bar header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
+.boss-bar header b { font: 700 22px/1 var(--hand); letter-spacing: .02em; }
+.boss-note { font-size: 11px; color: var(--ink-muted); }
+.boss-armor, .boss-health { position: relative; border: 2px solid var(--ink); background: #fff; }
+.boss-armor { height: 13px; margin-bottom: 3px; border-width: 1.5px; }
+.boss-armor i { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(-45deg, #7d7d7d 0 4px, #a8a8a8 4px 8px); transition: width .15s linear; }
+.boss-armor span { position: absolute; inset: 0; display: grid; place-items: center; font: 700 9px/1 var(--notes); letter-spacing: .12em; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+.boss-health { height: 18px; }
+.boss-trail, .boss-fill { position: absolute; inset: 0 auto 0 0; }
+.boss-trail { background: #f3b7b7; }
+.boss-fill { background: #c41d1d; transition: width .1s linear; }
+.boss-health span { position: absolute; inset: 0; display: grid; place-items: center; font: 700 11px/1 var(--notes); color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; font-variant-numeric: tabular-nums; }
+.boss-bar.is-broken .boss-armor { border-style: dashed; opacity: .55; }
+.boss-bar.is-low .boss-fill { animation: boss-low .6s steps(1, end) infinite; }
+.boss-bar.is-defeated { opacity: .35; transition: opacity 1s ease; }
+@keyframes boss-low { 50% { background: #ff3b3b; } }
+body[data-reduced-motion="true"] .boss-bar.is-low .boss-fill { animation: none; }
+/* His flying hammer's own bar, smaller, under his. */
+.hammer-bar { width: 62%; margin: 9px auto 0; }
+.hammer-bar header { margin-bottom: 3px; }
+.hammer-bar header b { font-size: 15px; }
+.hammer-note { font-size: 10.5px; color: var(--ink-muted); }
+.hammer-health { position: relative; height: 11px; border: 1.5px solid var(--ink); background: #fff; }
+.hammer-health i { position: absolute; inset: 0 auto 0 0; background: #555; transition: width .1s linear; }
+.hammer-health span { position: absolute; inset: 0; display: grid; place-items: center; font: 700 8.5px/1 var(--notes); color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; font-variant-numeric: tabular-nums; }
+.hammer-bar.is-warning .hammer-note { color: #c41d1d; font-weight: 700; }
+.hammer-bar.is-warning .hammer-health { border-color: #c41d1d; }
+.hammer-bar.is-broken { opacity: .4; }
+
+.tutorial-banner { position: absolute; top: 31%; left: 50%; translate: -50% 0; padding: 8px 22px; border-top: 3px solid var(--ink); border-bottom: 3px solid var(--ink); background: #ffffffee; font: 700 30px/1.1 var(--hand); letter-spacing: .03em; white-space: nowrap; }
+.tutorial-banner.is-shown { animation: banner-in 2.6s ease both; }
+@keyframes banner-in { from { opacity: 0; scale: 1.4; } 12% { opacity: 1; scale: 1; } 80% { opacity: 1; } to { opacity: 0; } }
+body[data-reduced-motion="true"] .tutorial-banner.is-shown { animation: none; }
+
+.tutorial-finish { position: absolute; top: 50%; left: 50%; translate: -50% -50%; width: min(440px, calc(100vw - 32px)); padding: 22px 26px; border: 2px solid var(--ink); background: #fff; pointer-events: auto; }
+.tutorial-finish h2 { margin: 0 0 6px; font: 700 34px/1.1 var(--hand); }
+.tutorial-finish p { margin: 0 0 14px; color: var(--ink-muted); }
+.tutorial-finish dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 18px; margin: 0 0 18px; }
+.tutorial-finish dl div { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5e5; }
+.tutorial-finish dt { color: var(--ink-muted); }
+.tutorial-finish dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tutorial-actions { display: flex; gap: 12px; align-items: center; }
+.tutorial-actions button, .tutorial-actions a { padding: 9px 16px; border: 1.5px solid var(--ink); background: #fff; color: var(--ink); font: 600 13px var(--notes); text-decoration: none; cursor: pointer; }
+.tutorial-actions button { background: var(--ink); color: #fff; }
+
+@media (max-width: 800px) {
+  .tutorial-card { width: 230px; left: 16px; top: 16px; }
+  .tutorial-list { right: 16px; top: 16px; }
+  .boss-bar { top: auto; bottom: 110px; width: calc(100vw - 32px); }
+}

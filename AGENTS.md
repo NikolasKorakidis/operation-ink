@@ -29,11 +29,13 @@ npm run test:<area>  # focused suite, see table
 | `src/lab/` rig, clips, gait, deaths                         | `test:gait`, `test:deaths`, `test:combat-animations`, `test:npc-transitions` |
 | `src/world/` geometry                                       | `test:map`, `test:trees`, `test:player`, `test:expansion`                    |
 | `src/vr/`                                                   | `test:vr`                                                                    |
+| `src/levels/`, a level's world or mission, `game/goals.ts`  | `test:levels`, plus `test:map` for the compound                              |
 
 ## Layout
 
-- `index.html` → `src/main.ts`: the game. `/?explore=1` is free exploration + experimental Quest WebXR. `/?view=overview` (also `yard`, `rail`, `tanks`, `plan`, `roof`, `mess`, `office`, `water`, `watch`) are inspection camera bookmarks.
+- `index.html` → `src/main.ts`: the game. `/?explore=1` is free exploration + experimental Quest WebXR. `/?view=overview` (also `yard`, `rail`, `tanks`, `plan`, `roof`, `mess`, `office`, `water`, `watch`) are inspection camera bookmarks, and `/?tutorial=1` is the training level. The player never sees these: the menu switches modes on the same address (`src/modes.ts`; game ↔ tutorial in place without a reload), and a bookmark's parameter is cleared from the address bar once read. A refresh returns to the game.
 - `lab.html` → `src/lab/main.ts`: character/animation lab. **The lab rig, clips and postures are shared with the game's enemies and hostage — an animation change affects both.** Read `src/lab/README.md` first.
+- `src/levels/`: the level registry. `catalog.ts` lists every level (campaign, training, dev); `index.ts` builds one by id; `proving-ground.ts` is the template. **Read `src/levels/README.md` before building a level.** `/?level=<id>` plays any level in dev; a level's goals (`game/goals.ts`) drive its objectives, saves, co-op and the win.
 - `src/game/`: mission runtime (`runtime.ts`, `mission.ts`), AI, weapons, HUD/menu, audio, effects. Tunables live in `balance.ts`.
 - `src/world/`: compound geometry built in code from plan coordinates (0.15 m per reference pixel, north = −Z).
 - `src/player/`: capsule controller, collision trees, ladders. Physics substeps are ≤ 1/120 s.

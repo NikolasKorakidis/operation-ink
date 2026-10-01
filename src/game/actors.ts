@@ -10,6 +10,9 @@ import { createMissionGun } from './weapon-models'
 import { supportHand } from '../lab/weapons/support'
 import { AnimatedHitVolumes, mirrorReactionClip } from './hit-reactions'
 import { bloodPalette } from '../lab/fx/blood-stamps'
+import { createPenLines, createPenSilhouette } from '../render/ballpoint'
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import { BOSS_RULES } from './balance'
 import type { EnemyState, WeaponName } from './types'
 
 type Library = {
@@ -54,6 +57,9 @@ async function animations(rig: Rig): Promise<Library> {
   })
 }
 
+/** Ink-grey gear: his helmet, vest and pouches. Ignores light, like his body. */
+const bossGrey = () => Object.assign(new THREE.MeshBasicMaterial({ color: penPalette.light, toneMapped: false }), { defines: { NEON_UNLIT: '' } })
+
 /** A real independently loaded lab skeleton, with isolated solid black materials. */
 export class EnemyActor {
   readonly root: THREE.Group
@@ -89,6 +95,13 @@ export class EnemyActor {
   headless = false
   private stump: THREE.Mesh | null = null
   private readonly headUniforms = { headGone: { value: 0 }, headBone: { value: 0 } }
+  /**
+   * The boss's armour plates: where each one is worn, how it flies once knocked off, and `at`, the fraction of his
+   * armour left when it comes off (0: only when the armour breaks).
+   */
+  private plates: { object: THREE.Object3D; parent: THREE.Object3D; position: THREE.Vector3; quaternion: THREE.Quaternion; scale: THREE.Vector3; at: number; off: boolean }[] = []
+  private falling: { object: THREE.Object3D; velocity: THREE.Vector3; spin: THREE.Vector3; floor: number }[] = []
+  armorBroken = false
 
   private constructor(readonly rig: Rig, private lib: Library, readonly weapon: WeaponName, color: number) {
     this.root = rig.root
@@ -155,7 +168,114 @@ export class EnemyActor {
     return new EnemyActor(rig, await animations(rig), weapon, color)
   }
 
+  /**
+   * Turn this guard into the boss, the Sledge: a riot breacher, the same solid-black stickman as every guard at twice
+   * the size, with his own hands and feet, in ink-grey gear fitted to his body: a combat helmet, a plate vest and a row
+   * of pouches. He carries an AK like his guards; his sledgehammer flies on its own (see flying-hammer.ts). His gear
+   * is his armour: the pouches are shot off first, then the helmet, and the vest when it breaks (see armorLeft). Every part is built in the root's units and handed
+   * to its bone so it moves with him; all of it ignores light, like his body.
+   */
+  makeBoss() {
+    this.root.scale.setScalar(BOSS_RULES.scale)
+    this.hitVolumes.girth = 1.35
+    this.root.updateMatrixWorld(true)
+    const grey = bossGrey()
+    /** Hand a part built in the root's units to a bone, so it moves with him; `drops` makes it an armour plate. */
+    const wear = (bone: keyof Rig['bones'], object: THREE.Object3D, name: string, drops?: number) => {
+      object.name = `Boss ${name}`
+      object.userData.noCollision = true
+      this.root.add(object)
+      this.rig.bones[bone].attach(object)
+      if (drops !== undefined) this.plates.push({ object, parent: object.parent!, position: object.position.clone(), quaternion: object.quaternion.clone(),
+        scale: object.scale.clone(), at: drops, off: false })
+      return object
+    }
+    const outlined = (geometry: THREE.BufferGeometry, width = 2.2) => {
+      const part = new THREE.Mesh(geometry, grey)
+      part.add(createPenSilhouette(geometry, width))
+      return part
+    }
+    // A combat helmet fitted close over the top of his head (a ball about 0.24 round, centred 1.505 up), with a lip
+    // round its rim and a strap line down to the jaw. His black face shows below it.
+    const helmet = new THREE.Group()
+    helmet.position.set(0, 1.505, this.root.worldToLocal(this.rig.bones.head.getWorldPosition(new THREE.Vector3())).z)
+    const shell = outlined(new THREE.SphereGeometry(0.262, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.52), 2.3)
+    shell.position.y = 0.01
+    shell.scale.set(1, 0.92, 1.06)
+    const lip = outlined(new THREE.TorusGeometry(0.268, 0.014, 8, 36).rotateX(Math.PI / 2), 1.6)
+    lip.position.y = 0.0
+    lip.scale.set(1, 1, 1.06)
+    helmet.add(shell, lip)
+    for (const side of [-1, 1]) helmet.add(createPenLines([new THREE.Vector3(side * 0.25, 0, 0.06), new THREE.Vector3(side * 0.2, -0.12, 0.1), new THREE.Vector3(side * 0.12, -0.2, 0.13)], 4450 + side, 'detail', 1.3))
+    wear('head', helmet, 'helmet', 1 / 3)
+    // A plate vest fitted round his chest (his torso is about 0.25 wide and 0.23 deep), seamed down the sides.
+    const vest = new THREE.Group()
+    vest.position.set(0, 1.01, 0)
+    vest.add(outlined(new RoundedBoxGeometry(0.31, 0.37, 0.29, 4, 0.07), 2.4))
+    for (const side of [-1, 1]) vest.add(createPenLines([new THREE.Vector3(side * 0.156, 0.16, 0), new THREE.Vector3(side * 0.156, -0.16, 0)], 4460 + side, 'detail', 1.2))
+    vest.add(createPenLines([new THREE.Vector3(-0.1, 0.12, 0.147), new THREE.Vector3(0.1, 0.12, 0.147)], 4463, 'detail', 1.2))
+    wear('chest', vest, 'vest', 0)
+    // Three pouches across the front of the vest, the first gear to be shot off him.
+    const pouches = new THREE.Group()
+    pouches.position.set(0, 0.92, 0.158)
+    for (const x of [-0.088, 0, 0.088]) {
+      const pouch = outlined(new RoundedBoxGeometry(0.075, 0.09, 0.05, 2, 0.012), 1.6)
+      pouch.position.x = x
+      pouches.add(pouch, createPenLines([new THREE.Vector3(x - 0.036, 0.025, 0.026), new THREE.Vector3(x + 0.036, 0.025, 0.026)], 4470 + Math.round(x * 100), 'detail', 1))
+    }
+    wear('chest', pouches, 'pouches', 2 / 3)
+  }
+
+  /**
+   * The armour wears away: with `left` of it remaining (0 to 1), every plate due to come off by then flies off and
+   * clatters to the ground. `instant` lays them there at once (checkpoints).
+   */
+  armorLeft(left: number, instant = false) {
+    const world = this.root.parent ?? this.root
+    const floor = this.root.position.y + 0.04
+    for (const plate of this.plates) {
+      if (plate.off || left > plate.at) continue
+      plate.off = true
+      world.attach(plate.object)
+      const velocity = new THREE.Vector3((Math.random() - 0.5) * 3, 2.5 + Math.random() * 2, (Math.random() - 0.5) * 3)
+      const spin = new THREE.Vector3((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 9, (Math.random() - 0.5) * 9)
+      this.falling.push({ object: plate.object, velocity, spin, floor })
+    }
+    if (instant) for (let i = 0; i < 120; i++) this.dropPlates(1 / 30)
+  }
+
+  /** Knock the last of the armour off. `instant` lays the plates on the ground at once (checkpoints). */
+  breakArmor(instant = false) {
+    if (this.armorBroken || !this.plates.length) return
+    this.armorBroken = true
+    this.armorLeft(0, instant)
+  }
+
+  /** The knocked-off plates fall, spinning, and stay where they land. Public for the lab, which drives no update. */
+  dropPlates(dt: number) {
+    for (const plate of this.falling) {
+      if (plate.velocity.lengthSq() === 0) continue
+      plate.velocity.y -= 9.8 * dt
+      plate.object.position.addScaledVector(plate.velocity, dt)
+      plate.object.rotation.x += plate.spin.x * dt; plate.object.rotation.y += plate.spin.y * dt; plate.object.rotation.z += plate.spin.z * dt
+      if (plate.object.position.y <= plate.floor) { plate.object.position.y = plate.floor; plate.velocity.set(0, 0, 0) }
+    }
+  }
+
+  /** Every plate back on, as worn (checkpoint restore). */
+  private refitArmor() {
+    if (!this.plates.some(plate => plate.off)) return
+    this.armorBroken = false
+    this.falling = []
+    for (const plate of this.plates) {
+      plate.off = false
+      plate.parent.add(plate.object)
+      plate.object.position.copy(plate.position); plate.object.quaternion.copy(plate.quaternion); plate.object.scale.copy(plate.scale)
+    }
+  }
+
   update(dt: number, state: EnemyState, moving: boolean, aim?: THREE.Vector3, speed = moving ? 1.4 : 0) {
+    if (this.falling.length) this.dropPlates(Math.max(0, Math.min(dt, 0.05)))
     const aimOrigin = aim && this.bodyPosture !== 'stand' ? this.muzzle() : null
     const yawDelta = Math.atan2(Math.sin(this.root.rotation.y - this.previousYaw), Math.cos(this.root.rotation.y - this.previousYaw))
     this.previousYaw = this.root.rotation.y
@@ -481,6 +601,7 @@ export class EnemyActor {
   /** Set a corpse immediately during a checkpoint restore, without creating a second dropped item. */
   restore(state: EnemyState, animationTime = 0, deathClip = 'dieBody', posture?: ActorPostureSnapshot) {
     this.restoreHead()
+    this.refitArmor()
     // Parsed clips retain their UUIDs. Evict the previous actions before parsing a
     // checkpoint, or the mixer can return an old action for the new clip object.
     this.player.stop(0)
