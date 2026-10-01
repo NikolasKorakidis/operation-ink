@@ -83,7 +83,7 @@ export const criticalChance = (weapon: WeaponName | undefined, zone: HitZone) =>
   Math.min(1, (CRITICAL_HITS.chance[weapon ?? 'ak'] ?? 0) * (zone === 'head' ? CRITICAL_HITS.headBonus : 1))
 
 /**
- * The Sledge: a giant black riot breacher in an ink-grey helmet, plate vest and pouches, who fights with an AK like
+ * Bulky Boy: a giant black riot breacher in an ink-grey helmet, plate vest and pouches, who fights with an AK like
  * his guards (`damage` times their rounds). His gear is his armour: while it holds it soaks body hits from any side
  * and only `bleed` of the damage reaches him; the pouches are shot off at two thirds, the helmet at one third, the
  * vest when it breaks. Head shots go straight through. Sniper rounds hit him for `sniper` times their damage instead
@@ -91,24 +91,6 @@ export const criticalChance = (weapon: WeaponName | undefined, zone: HitZone) =>
  * `aimDelay` of their aiming time before his first round.
  */
 export const BOSS_RULES = { health: 1150, armor: 800, bleed: 0.3, sniper: 2.2, speed: 0.8, scale: 2.05, damage: 1.6, accuracy: 0.12, aimDelay: 0.5 } as const
-
-/**
- * The Sledge's flying sledgehammer, an enemy of its own (see flying-hammer.ts). It circles beside him, and every
- * `cooldown` seconds (plus up to `cooldownJitter`) rises for `windUp` seconds and flings itself at a player within
- * `range` it can see, spinning, at `speed` m/s. Passing within `reach` of the body (measured from its middle) takes half the player's health; a
- * miss into a wall sticks it there for `stuck` seconds. It has its own `health`, and falls when shot down or when he
- * dies. Its model is 1 m long; `scale` makes it a giant's hammer.
- */
-export const HAMMER_RULES = {
-  health: 350,
-  scale: 2.3,
-  orbit: { radius: 2.1, height: 3.6, rate: 0.7, bob: 0.25 },
-  range: 42, cooldown: 4.2, cooldownJitter: 1.6, firstAttack: 2.5,
-  windUp: 0.85, speed: 21, flight: 2.4, spin: 13, returnSpeed: 11,
-  stuck: 1.3,
-  reach: 1.1,
-  damage: PLAYER_HEALTH.max / 2,
-} as const
 
 /** Player sniper rounds are lethal on any confirmed hit (the boss excepted). */
 export function hitDamage(weapon: WeaponName | undefined, zone: HitZone, baseDamage: number, boss = false) {

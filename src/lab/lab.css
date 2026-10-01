@@ -28,7 +28,7 @@ body { display: flex; }
 #panel .swatch { width: 12px; height: 12px; flex: none; border: 1px solid var(--ink); border-radius: 50%; }
 #panel .swatch.guard { background: #000; }
 #panel .characters button.active .swatch { border-color: var(--paper); }
-#panel .swatch.sledge { border-radius: 2px; background: linear-gradient(#fff 0 45%, #d31d1d 45% 60%, #fff 60%); }
+#panel .swatch.bulky { border-radius: 2px; background: linear-gradient(#fff 0 45%, #d31d1d 45% 60%, #fff 60%); }
 /* Body colours: a row of swatches, then a free colour picker. */
 #panel .colors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 #panel .colors button, #panel .custom-color { width: 24px; height: 24px; margin: 0; padding: 0; border: 1px solid var(--ink); border-radius: 50%; }
@@ -38,7 +38,7 @@ body { display: flex; }
 #panel .color-name { margin: 4px 0 8px; color: var(--ink-muted); }
 #panel .exports { display: grid; gap: 4px; }
 #panel .exports button { margin: 0; text-align: left; }
-/* The Sledge's moves, listed under his character. */
+/* Bulky Boy's moves, listed under his character. */
 #panel .moves { display: grid; gap: 4px; margin: 10px 0 2px; padding: 8px 0 0; border-top: 1px dashed var(--ink-rule); }
 #panel .moves h4 { margin: 0 0 2px; font: 15px var(--hand); color: var(--ink-muted); }
 #panel .moves button { display: grid; gap: 1px; margin: 0; text-align: left; }

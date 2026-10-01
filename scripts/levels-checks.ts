@@ -89,6 +89,12 @@ for (const info of LEVEL_CATALOG) {
     assert(reachable(station.point, station.object), label(`station ${station.id} (${station.kind}) can be reached and seen from where a player stands`))
   }
 
+  // Captives sit at a chair and are freed at an 'objective' station that exists.
+  for (const captive of world.captives ?? []) {
+    assert(world.stations.some(station => station.id === captive.station && station.kind === 'objective'), label(`captive ${captive.id} is freed at an 'objective' station`))
+    assert(within(v(captive.position)), label(`captive ${captive.id} is inside the bounds`))
+  }
+
   // Goals: real targets, sensible order, and reachable areas.
   const goals = world.goals ?? []
   const goalIds = new Set(goals.map(goal => goal.id))

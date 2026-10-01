@@ -3,7 +3,7 @@ import { useState } from 'preact/hooks'
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { poseQuat, type Pose, type BoneVal, type Vec3 } from './clip'
 import { actions, updaters, type Ctx } from './registry'
-import { CHARACTERS, COLORS, SLEDGE_MOVES, characterOf, colorOf, exportModel, exportSheet, frame, setColor, switchCharacter, type CharacterId } from './characters'
+import { CHARACTERS, COLORS, BULKY_MOVES, characterOf, colorOf, exportModel, exportSheet, frame, setColor, switchCharacter, type CharacterId } from './characters'
 import type * as THREE from 'three'
 import { BONE_NAMES, type BoneName } from './rig'
 
@@ -22,7 +22,6 @@ function Panel({ ctx, controls, renderer }: { ctx: Ctx; controls: OrbitControls;
   const paint = (value: number) => { setColor(ctx, value); bump(n => n + 1) }
   const hex = (value: number) => `#${value.toString(16).padStart(6, '0')}`
   const groups = new Map<string, typeof actions>()
-  // The Sledge's hands are on his hammer: the gun tools don't apply to him (his own moves are listed under Character).
   for (const a of actions) groups.set(a.group, [...(groups.get(a.group) ?? []), a])
 
   const setView = (name: string) => frame(ctx, controls, views[name])
@@ -68,9 +67,9 @@ function Panel({ ctx, controls, renderer }: { ctx: Ctx; controls: OrbitControls;
         onClick={e => { blur(e); exportSheet(ctx, renderer) }}>Export model sheet (.png)</button>
     </div>
 
-    {character === 'sledge' && <div class="moves">
+    {character === 'bulky' && <div class="moves">
       <h4>His moves</h4>
-      {SLEDGE_MOVES.map(move => <button key={move.label} title={move.note} onClick={e => { blur(e); move.run(ctx) }}>
+      {BULKY_MOVES.map(move => <button key={move.label} title={move.note} onClick={e => { blur(e); move.run(ctx) }}>
         <strong>{move.label}</strong><span>{move.note}</span></button>)}
     </div>}
 

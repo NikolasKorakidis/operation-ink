@@ -10,7 +10,7 @@ import type { EnemySpec, Vec3 } from './types'
  * - breacher: shotgun, short range, hits hard.
  * - sidearm: pistol, officers, guards at desks.
  * - marksman: sniper rifle on a high post; holds it and never comes down to the alarm.
- * - sledge: the armoured boss, twice the size, with his flying hammer (see actors.makeBoss, flying-hammer.ts).
+ * - bulky: Bulky Boy, the armoured boss, twice the size, with an AK (see actors.makeBoss).
  * - dummy: a practice target that never fights back and gets up again.
  */
 export const ENEMY_TYPES = {
@@ -19,7 +19,7 @@ export const ENEMY_TYPES = {
   breacher: { weapon: 'shotgun' },
   sidearm: { weapon: 'pistol' },
   marksman: { weapon: 'sniper', role: 'sniper' },
-  sledge: { weapon: 'ak', boss: true, health: BOSS_RULES.health, armor: BOSS_RULES.armor },
+  bulky: { weapon: 'ak', boss: true, health: BOSS_RULES.health, armor: BOSS_RULES.armor },
   dummy: { weapon: 'pistol', dummy: true, respawn: 4 },
 } as const satisfies Record<string, Partial<EnemySpec> & Pick<EnemySpec, 'weapon'>>
 export type EnemyType = keyof typeof ENEMY_TYPES

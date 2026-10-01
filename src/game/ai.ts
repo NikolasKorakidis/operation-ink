@@ -283,7 +283,7 @@ export class EnemyDirector {
       this.context.world.visible(origin, player.feet.clone().add(new THREE.Vector3(0, Math.min(0.95, bodyHeight(player) * 0.58), 0)), ignore)
   }
 
-  /** How long a guard aims before the first round; the Sledge is quicker. */
+  /** How long a guard aims before the first round; Bulky Boy is quicker. */
   private aimDelay(enemy: Enemy) { return COMBAT.aimDelay * (enemy.spec.boss ? BOSS_RULES.aimDelay : 1) }
   private speed(enemy: Enemy, base: number) { return (enemy.woundLeg ? base * 0.6 : base) * (enemy.spec.boss ? BOSS_RULES.speed : 1) }
 
@@ -1057,9 +1057,10 @@ export class EnemyDirector {
   private bodyHit(enemy: Enemy, origin: THREE.Vector3, normalized: THREE.Vector3, maxDistance: number) {
     const volumes = enemy.actor.hitVolumes as EnemyActor['hitVolumes'] | undefined
     if (volumes) {
-      // Broad phase around the whole animated body before the per-capsule test.
-      const center = enemy.position.clone().add(new THREE.Vector3(0, 0.75, 0))
-      if (rayCapsuleDistance(origin, normalized, center, center, 1.9) > maxDistance) return null
+      // Broad phase around the whole animated body before the per-capsule test, as big as the body (the boss is twice it).
+      const size = enemy.actor.root.scale.y || 1
+      const center = enemy.position.clone().add(new THREE.Vector3(0, 0.75 * size, 0))
+      if (rayCapsuleDistance(origin, normalized, center, center, 1.9 * size) > maxDistance) return null
       const hit = volumes.raycast(origin, normalized, maxDistance)
       return hit && { distance: hit.distance, point: hit.point, zone: hit.zone, bone: hit.bone }
     }

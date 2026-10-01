@@ -15,17 +15,18 @@ import { CRATE_RULES, QuestCrates } from './crates'
 import { MissionIntro } from './mission-intro'
 import { deleteSave, readSave, writeSave } from './saves'
 import { FIRST_LEVEL, levelInfo } from '../levels/catalog'
+import { goTo } from '../modes'
 import { goalHint, goalObjectives, goalsComplete, goalUnlocked, updateGoals, type GoalSense } from './goals'
 import { missionObjectives } from './objectives'
 import { QuestRadios, RADIO_RULES } from './radios'
 import { TUTORIAL_FEEDBACK, TutorialMode } from './tutorial'
-import { FlyingHammer, type HammerSnapshot } from './flying-hammer'
 import { PlayerHitReactions, type PlayerBulletHit } from './player-hit-reactions'
 import { PlayerDeathSequence } from './player-death'
 import { EscapeCinematic } from './escape-cinematic'
 import { EscapeDust } from './escape-dust'
 import { advanceMission, applySharedMission, missionObjective, completeEscape, damageMission, sharedMission, shootMission, initialMission, loadedCount, stationLabel, useStation, type MissionState } from './mission'
 import { HostageEscort } from './hostages'
+import { Captives } from './captives'
 import { SecuritySystem } from './security'
 import { RESCUE_LAYOUT } from './rescue-layout'
 import { updateRescueJeepDoor } from './rescue-jeep'
@@ -40,8 +41,10 @@ import type { EnemyPuppet, EnemySnapshot, MeleeAttack, MissionWorld, PlayerSense
 /** `doors` holds 0 for closed, or the side an open leaf swung to (1 / -1). Older saves used booleans. */
 /** Scroll distance for one weapon change, and the shortest gap between changes. */
 const WHEEL_NOTCH = 40, WHEEL_REPEAT_MS = 140
+/** A save to load once its level has been built, when Load game picked another level's save. */
+const PENDING_LOAD = 'stickman-load-level'
 
-type Checkpoint = { mission: MissionState; weapons: WeaponSnapshot; enemies: EnemySnapshot[]; doors: (number | boolean)[]; position: Vec3; quaternion: [number,number,number,number]; blood?: BloodSnapshot; hammer?: HammerSnapshot }
+type Checkpoint = { mission: MissionState; weapons: WeaponSnapshot; enemies: EnemySnapshot[]; doors: (number | boolean)[]; position: Vec3; quaternion: [number,number,number,number]; blood?: BloodSnapshot }
 
 export class MissionRuntime {
   state: MissionState
@@ -58,8 +61,6 @@ export class MissionRuntime {
   readonly radios: QuestRadios
   /** The tutorial level's coach, damage numbers and boss bar; null in the mission. */
   readonly tutorial: TutorialMode | null
-  /** The boss's flying sledgehammer, an enemy of its own; null on a level without the boss. */
-  readonly hammer: FlyingHammer | null
   readonly bulletTrails: BulletTrails
   readonly playerHits = new PlayerHitReactions()
   readonly death = new PlayerDeathSequence()
@@ -68,6 +69,8 @@ export class MissionRuntime {
   readonly hud: MissionHUD
   /** The hostage and his escort: only on a level with a rescue. */
   readonly escort: HostageEscort | null
+  /** Prisoners a level holds, freed at their stations; null on a level without any. */
+  readonly captives: Captives | null
   readonly security: SecuritySystem
   readonly teammates: Teammates
   readonly coop: CoopSession
@@ -143,7 +146,8 @@ export class MissionRuntime {
       onReact: reaction => { if (this.role === 'host') this.coop.send({ t: 'ereact', r: reaction }) },
       onFire: (index, end) => { if (this.role === 'host') this.coop.send({ t: 'efire', i: index, end: end.toArray() as Vec3 }) } })
     this.hud = new MissionHUD(world, {
-      retry: () => { if (this.coop.active) this.respawn(); else this.restart(); void this.audio.unlock(); this.player.requestControl() },
+      // The mission starts over; training picks up at its last checkpoint (the boss line, once Bulky Boy is awake).
+      retry: () => { if (this.coop.active) this.respawn(); else if (this.tutorial) this.retry(); else this.restart(); void this.audio.unlock(); this.player.requestControl() },
       restart: () => {
         // In co-op the host restarts everyone; a guest's own restart only returns them to the insertion point.
         if (this.role !== 'guest') this.restart()
@@ -169,13 +173,8 @@ export class MissionRuntime {
     this.hud.setObjectiveSource(goals
       ? { list: state => goalObjectives(state, goals, this.goalSense()), hint: state => goalHint(state, goals) }
       : { list: state => missionObjectives(state, totals), hint: missionObjective })
-    this.hammer = world.enemies.some(spec => spec.boss) ? new FlyingHammer(scene, event => this.audio.play(event)) : null
-    if (this.hammer) this.hammer.onHitPlayer = (amount, from) => {
-      this.damage(amount, from)
-      if (this.state.phase !== 'dead') this.hud.notify('The hammer hit you. Watch it rise and step aside.', 2.5)
-    }
     this.tutorial = world.tutorial ? new TutorialMode({
-      camera: camera.perspective, enemies: () => this.ai.enemies, hammer: () => this.hammer,
+      camera: camera.perspective, enemies: () => this.ai.enemies,
       wake: (ids, toward) => this.ai.wake(ids, toward),
       checkpoint: () => { if (this.ready) this.checkpoint = this.snapshot() },
       restart: () => { this.restart(); this.player.requestControl() },
@@ -201,6 +200,7 @@ export class MissionRuntime {
     })
     this.coopPanel = new CoopPanel(document.querySelector('.coop-slot')!, document.querySelector('#coop-status')!, this.coop)
     this.escort = world.rescue ? new HostageEscort(scene, player.world, player.actions.doors) : null
+    this.captives = world.captives?.length ? new Captives(scene, world.captives) : null
     this.security = new SecuritySystem(player.world, world, this.ai, event => this.emit(event, false))
     this.syncWorld()
     player.actions.extraTargets = () => this.targets()
@@ -259,9 +259,11 @@ export class MissionRuntime {
     try {
       await this.ai.init()
       await this.escort?.init()
+      await this.captives?.init()
       if (this.disposed) return
       this.player.world.warm()
       this.escort?.sync(this.state)
+      this.captives?.sync(this.state)
       const supply = this.world.stations.find(s => s.kind === 'supply')
       if (supply) {
         const point = supply.point.clone().add(new THREE.Vector3(0.7, 0, 0.65))
@@ -283,6 +285,10 @@ export class MissionRuntime {
       this.initial = this.snapshot()
       this.checkpoint = structuredClone(this.initial)
       this.ready = true; this.hud.ready(); this.invalidate()
+      // Arriving from another level's Load game: load this level's save now.
+      let pending: string | null = null
+      try { pending = sessionStorage.getItem(PENDING_LOAD); sessionStorage.removeItem(PENDING_LOAD) } catch { /* no storage */ }
+      if (pending === this.world.level) this.loadSaved(pending)
       // An invite link (?join=ROOM) connects straight away and shows the room on the Co-op page.
       const room = new URLSearchParams(location.search).get('join')
       if (room) { this.hud.showCoop(); void this.coop.join(room) }
@@ -426,15 +432,7 @@ export class MissionRuntime {
     let distance = surface?.distance ?? shot.range
     this.impactPoint = null
     let hit = false
-    // The flying hammer, when it is nearer than any guard: the bullet rings off it.
-    const hammerAt = this.role !== 'guest' && this.hammer ? this.hammer.raycast(shot.origin, shot.direction, distance) : Infinity
-    if (hammerAt < Infinity && !this.ai.findHit(shot, hammerAt)) {
-      hit = true
-      distance = hammerAt; surface = null
-      this.impactPoint = shot.origin.clone().addScaledVector(shot.direction, hammerAt)
-      this.audio.play({ kind: 'knife-wall', position: this.impactPoint, radius: 18 })
-      this.hammer!.damage(shot.damage)
-    } else if (this.role === 'guest') {
+    if (this.role === 'guest') {
       // A guest aims at the guards it sees; the host applies the damage and replies with the reaction.
       const found = this.ai.findHit(shot, distance)
       if (found) {
@@ -528,7 +526,7 @@ export class MissionRuntime {
   private snapshot(): Checkpoint {
     return { mission:structuredClone(this.state),weapons:this.weapons.snapshot(),enemies:this.ai.snapshot(),
       doors:this.player.actions.doors.map(door=>door.userData.open?(door.userData.openSide===-1?-1:1):0),position:this.player.body.position.toArray() as Vec3,
-      quaternion:this.camera.perspective.quaternion.toArray() as [number,number,number,number], blood:this.blood.snapshot(), hammer:this.hammer?.snapshot() }
+      quaternion:this.camera.perspective.quaternion.toArray() as [number,number,number,number], blood:this.blood.snapshot() }
   }
 
   private restore(saved: Checkpoint) {
@@ -542,8 +540,6 @@ export class MissionRuntime {
     this.player.movementLocked = false; this.gunfireUntil = 0
     this.player.actions.doors.forEach((door,i)=>{ const saved_=saved.doors[i]; setDoorOpen(door,Boolean(saved_),true,saved_===-1?-1:1) })
     this.player.world.refresh(); this.ai.restore(structuredClone(saved.enemies)); this.weapons.restore(structuredClone(saved.weapons)); this.blood.restore(saved.blood)
-    const boss = this.hammer && this.ai.enemies.find(enemy => enemy.spec.boss)
-    if (boss) this.hammer!.restore(saved.hammer, boss.position)
     this.player.body.teleport(new THREE.Vector3(...saved.position)); this.player.actions.syncCamera(this.camera.perspective)
     this.camera.perspective.quaternion.fromArray(saved.quaternion)
     this.safePosition.copy(this.player.body.position); this.safeQuaternion.copy(this.camera.perspective.quaternion)
@@ -567,20 +563,6 @@ export class MissionRuntime {
     const position = this.radios.center(id)
     this.updateCrates(0)
     if (position) this.ai.hear({ kind: 'impact', position, radius: RADIO_RULES.noiseRadius })
-  }
-
-  /** The boss's flying hammer: it wakes and dies with him, and hunts the player while it can see them. */
-  private updateHammer(dt: number) {
-    const boss = this.hammer && this.ai.enemies.find(enemy => enemy.spec.boss)
-    if (!this.hammer || !boss) return
-    const world = this.player.world, eye = this.camera.perspective.position
-    this.hammer.update(dt, {
-      owner: { position: boss.position, awake: boss.state !== 'reserve', alive: boss.state !== 'dead' },
-      target: { eye, feet: this.player.body.position, alive: this.state.phase === 'active' },
-      rayDistance: (origin, direction, max) => world.rayDistance(origin, direction, max),
-      visible: (from, to) => { const to_ = to.clone().sub(from), length = to_.length(); return world.rayDistance(from, to_.normalize(), length) >= length - 0.1 },
-      reducedMotion: this.hud.reducedMotion,
-    })
   }
 
   /**
@@ -638,6 +620,13 @@ export class MissionRuntime {
 
   /** Continue a saved mission: its checkpoint becomes the current one and play resumes from it. */
   loadSaved(level: string) {
+    // Another mission's save: keep this one, switch to that level, and load it there once it's built.
+    if (level !== this.world.level && levelInfo(level)?.kind === 'campaign' && !this.coop.active) {
+      this.saveProgress()
+      try { sessionStorage.setItem(PENDING_LOAD, level) } catch { /* the level opens without its save */ }
+      goTo(`level:${level}`)
+      return
+    }
     const saved = level === this.world.level ? readSave<Checkpoint>(level) : null
     if (!saved || this.coop.active || !this.ready) { this.hud.notify('That saved mission could not be loaded.', 4); return }
     this.restore(saved)
@@ -649,7 +638,15 @@ export class MissionRuntime {
   /** Open the menu on the saved games (Load game from the tutorial). */
   showLoad() { this.hud.showLoad() }
 
-  retry() { if(this.checkpoint) { this.restore(this.checkpoint); this.hud.notify('Mission reset.',3) } }
+  retry() {
+    if (!this.checkpoint) return
+    this.restore(this.checkpoint)
+    if (!this.tutorial) { this.hud.notify('Mission reset.', 3); return }
+    // Training keeps its lessons, and you go back in at full health.
+    this.state.health = PLAYER_HEALTH.max
+    this.tutorial.retry()
+    this.hud.notify(this.tutorial.atBoss ? 'Back at Bulky Boy. Full health.' : 'Back at the last checkpoint.', 3)
+  }
   restart() {
     if(!this.initial) return
     this.checkpoint=structuredClone(this.initial); this.deaths=0; this.restore(this.initial)
@@ -678,7 +675,7 @@ export class MissionRuntime {
       }
       this.player.world.refresh()
     }
-    if (resetEscort) this.escort?.sync(this.state)
+    if (resetEscort) { this.escort?.sync(this.state); this.captives?.sync(this.state) }
     this.security.sync(this.state)
     if (this.state.alarm !== 'active') this.audio.setAlarm(false)
   }
@@ -803,12 +800,12 @@ export class MissionRuntime {
           yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y})
         const danger = this.gunfireUntil > this.state.elapsed
         this.escort?.update(dt, this.state, body.position, danger)
+        this.captives?.update(dt, this.state, danger)
         this.checkGoals([body.position])
         this.updateJeepDoor(dt)
         this.blood.update(dt)
         this.impacts.update(dt)
         this.updateCrates(dt)
-        this.updateHammer(dt)
         this.tutorial?.update(dt, { position: body.position, speed: Math.hypot(body.velocity.x, body.velocity.z), grounded: body.grounded,
           traversing: this.player.actions.traversing, stance: body.stance, lean: this.lean.amount, aiming: this.aiming,
           weapon: this.weapons.current?.name ?? null, slot: this.weapons.selected, slots: this.weapons.slots, reloading: this.weapons.reloading })
@@ -972,6 +969,7 @@ export class MissionRuntime {
     this.security.update(dt, this.state, players.filter(player => player.alive).map(player => player.eye), true)
     this.ai.update(dt, players)
     this.escort?.update(dt, this.state, this.escortLeader(players), this.gunfireUntil > this.state.elapsed)
+    this.captives?.update(dt, this.state, this.gunfireUntil > this.state.elapsed)
     this.checkGoals(players.filter(player => player.alive).map(player => player.feet))
     this.updateJeepDoor(dt)
     this.blood.update(dt); this.impacts.update(dt); this.updateCrates(dt)
@@ -992,6 +990,7 @@ export class MissionRuntime {
     if (this.state.phase === 'active') advanceMission(this.state, dt)
     this.ai.follow(dt, this.hostEnemies)
     this.escort?.follow(dt, this.state, this.hostCower)
+    this.captives?.update(dt, this.state, this.hostCower)
     this.updateJeepDoor(dt)
     this.blood.update(dt); this.impacts.update(dt); this.updateCrates(dt)
     this.security.sync(this.state)
@@ -1088,7 +1087,7 @@ export class MissionRuntime {
   }
 
   finishFrame() { this.playerHits.removeCamera(); this.lean.remove() }
-  dispose() { this.tutorial?.dispose();this.hammer?.dispose();this.coopPanel.dispose();this.coop.dispose();this.teammates.dispose();this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort?.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.crates.dispose();this.intro.clear();this.radios.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
+  dispose() { this.tutorial?.dispose();this.coopPanel.dispose();this.coop.dispose();this.teammates.dispose();this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort?.dispose();this.captives?.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.crates.dispose();this.intro.clear();this.radios.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
 }
 
 const netSound = (event: SoundEvent): NetSound => ({ kind: event.kind, position: event.position?.toArray() as Vec3 | undefined, radius: event.radius, text: event.text,

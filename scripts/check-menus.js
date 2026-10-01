@@ -41,12 +41,20 @@
       .find(rule => rule.selectorText?.includes(':hover:not(:disabled)') && rule.selectorText.includes('.main-entry') && !rule.selectorText.includes('::'))
     check(hoverRule && /var\(--glow-delay\)/.test(hoverRule.style.transition) && getComputedStyle(document.documentElement).getPropertyValue('--glow-delay').trim() === '2s', 'Hover neon only comes on after resting on a button for 2 s')
 
-    // Campaign: a new game, a saved game, or training. Nothing else, nothing twice.
+    // Campaign: a new game, a level of your choice, a saved game, or training. Nothing else, nothing twice.
     click(`${HOME} [data-menu-open="campaign"]`)
     const campaign = () => shown([...document.querySelectorAll(`${CAMPAIGN} .main-entry`)]).map(entry => entry.querySelector('strong').textContent)
-    check(page() === 'campaign' && singlePage() && document.activeElement.id === 'campaign-play' && JSON.stringify(campaign()) === '["New game","Load game","Training"]', `Campaign offers New game, Load game and Training: ${campaign()}`)
+    check(page() === 'campaign' && singlePage() && document.activeElement.id === 'campaign-play' && JSON.stringify(campaign()) === '["New game","Select level","Load game","Training"]', `Campaign offers New game, Select level, Load game and Training: ${campaign()}`)
     check($('#campaign-load span').textContent === 'No saved games yet', 'Load game is offered even with nothing saved, and says so')
     check(!visible('#walk-start') && !visible('#mission-briefing'), 'No mission buttons and no briefing before the mission')
+    // Select level: every campaign mission in order, the one this page runs marked as playing.
+    click('#campaign-levels')
+    const levels = [...document.querySelectorAll('.level-list [data-level]')]
+    check(page() === 'levels' && singlePage() && levels.length >= 2 && levels[0].querySelector('strong').textContent === 'Mission 1 · The compound'
+      && levels[1].querySelector('strong').textContent === 'Mission 2 · The town', `Select level lists the missions in order: ${levels.map(level => level.querySelector('strong').textContent)}`)
+    check(levels[0].getAttribute('aria-current') === 'true' && levels[0].textContent.includes('Playing now') && !levels[1].hasAttribute('aria-current'), 'The mission you are in is marked as playing now')
+    key('Escape')
+    check(page() === 'campaign' && document.activeElement.id === 'campaign-levels', 'Escape from Select level returns to the Campaign, on Select level')
     click('#campaign-load')
     check(page() === 'load' && $('.save-list').textContent.includes('No saved games yet'), 'Load game with nothing saved says so')
     key('Escape')
@@ -117,7 +125,7 @@
     click('#pause-home')
     check(page() === 'home' && visible(`${HOME} [data-menu-back]`), 'Main menu from the pause page has a Back to it')
     click(`${HOME} [data-menu-open="campaign"]`)
-    check(JSON.stringify(campaign()) === '["Resume mission","Training"]' && $('#campaign-play span').textContent.length > 0, `A paused mission's Campaign page resumes it, with no Load: ${campaign()}`)
+    check(JSON.stringify(campaign()) === '["Resume mission","Select level","Training"]' && $('#campaign-play span').textContent.length > 0, `A paused mission's Campaign page resumes it, with no Load: ${campaign()}`)
     key('Escape'); click(`${HOME} [data-menu-open="gallery"]`); click(`${GALLERY} [data-menu-go="explore"]`)
     check(page() === 'leave' && $('#leave-warning').textContent.includes('saved') && document.activeElement.id === 'mission-cancel-leave', 'Leaving mid-mission says the progress is saved and focuses Stay')
     click('#mission-cancel-leave')
@@ -178,7 +186,7 @@
     click('#walk-start'); draw(); m.damage(200)
     for (let i = 0; i < 260; i++) { m.update(1 / 60); m.finishFrame() }
     click('#pause-home'); click(`${HOME} [data-menu-open="campaign"]`)
-    check(m.state.phase === 'dead' && JSON.stringify(campaign()) === '["New game","Load game","Training"]' && $('#campaign-load span').textContent === '1 saved mission', `After dying, the Campaign page offers the saved mission: ${campaign()}`)
+    check(m.state.phase === 'dead' && JSON.stringify(campaign()) === '["New game","Select level","Load game","Training"]' && $('#campaign-load span').textContent === '1 saved mission', `After dying, the Campaign page offers the saved mission: ${campaign()}`)
     click('#campaign-load')
     const slots = shown([...document.querySelectorAll('.save-list [data-save-level]')])
     check(page() === 'load' && slots.length === 1 && slots[0].textContent.includes('The compound') && slots[0].textContent.includes('0:33'), 'Load game lists the saved compound mission with its time')

@@ -27,13 +27,15 @@ The compound (`src/world/compound.ts` and `src/game/world.ts`) and the training 
 | Builder | From | Gives you |
 | --- | --- | --- |
 | `building({ name, x, z, width, depth, height, type, angle })` | `world/architecture.ts` | A walkable building: walls, windows, roof, entry door, steps and furnished interior. Also its dark room, window daylight, door daylight and caged lamps. `type`: barracks, warehouse, utility, service. The name picks the interior: "administration" (desks with radios, briefing table), "gatehouse" (radio post), "hut B" (medical); a warehouse gets two quest crates. |
+| `storeyed({ name, x, z, width, depth, floors, roof, door, stairs, balcony, roofLadder, base, furnish })` | `world/storeys.ts` | A building of several storeys: switchback stairs guards and players both climb, a gable or walkable flat roof (with `roofLadder`), a front balcony, furniture per floor through `furnish`, and every floor its own dark room with windows and lamps. `base` raises it onto a hill. |
+| `terrain(name, bounds, step, height)`, `waterSurface`, `bankBarrier`, `groundLine` | `world/terrain.ts` | Ground shaped by a height function (river channels, hills), water drawn in pen, invisible banks so water is crossed only where `open(x, z)` (a bridge), and inked lines along the ground (road edges, banks). Anything standing on shaped ground sits at `height(x, z)`. |
 | `container`, `truck`, `crates`, `platform` | `world/architecture.ts` | Cover and props. |
 | `fence(name, points, height)` | `world/industrial.ts` | Wire fence along a polyline. Blocks walking, not sight or shots. |
 | `pipeLadder({...}).finish()` | `world/ladders.ts` | A climbable ladder up to a landing. |
 | `createDoor({...})` | `world/doors.ts` | A door the player and guards open. |
 | `darkRoom`, `cageLamp`, `windowRow`, `doorwayLight`, `daylightOpening`, `screenLight` | `world/lights.ts` | Lighting for interiors built by hand. Every room you can walk into must be dark and lit by its own lights (the checks enforce this for `userData.enterable`). |
 | `Furnishing` (`desk(…, radio)`, `crate`, `bunk`, `table`, `shelf`, …) | `world/interiors.ts` | Furniture. A desk with `radio = true` holds a quest radio; `crate` is a breakable quest crate. |
-| `drawPine`, `Draft`, `wallText` | `world/vegetation.ts`, `render/ink.ts` | Trees, any custom geometry in the paper-and-ink style, and hand-lettered signs. Always use `Draft` and the shared fills; never make ad-hoc materials. |
+| `drawPine`, `drawOak`, `Draft`, `wallText` | `world/vegetation.ts`, `render/ink.ts` | Pines and broadleaf trees (both take a ground height), any custom geometry in the paper-and-ink style, and hand-lettered signs. Always use `Draft` and the shared fills; never make ad-hoc materials. |
 
 Marker conventions the game picks up anywhere in the scene:
 
@@ -42,6 +44,7 @@ Marker conventions the game picks up anywhere in the scene:
 - `userData.questItem = 'radio'` marks a radio.
 - `userData.kind = 'door'` marks a door.
 - `userData.footprint = [w, d]` puts a building on the generated field map.
+- `userData.mapLines = [{ kind: 'road' | 'water', points }]` draws roads and water on it.
 
 **World** (`MissionWorld`, in `game/types.ts`):
 
@@ -50,9 +53,10 @@ Marker conventions the game picks up anywhere in the scene:
 | `level` | The level's id. |
 | `spawn`, `lookAt` | The insertion point, and where the player looks when the run starts. |
 | `bounds` | The play area. Leaving it puts the player back. |
-| `enemies` | Built with `enemy(type, id, position, options)` from `game/enemy-types.ts`. Types: `rifleman`, `gunner`, `breacher`, `sidearm`, `marksman`, `sledge` (boss with flying hammer), `dummy`. Give `patrol` (a loop of points, starting where he stands) to make him walk, `facing` to aim a post, and `reserve` (plus `alarmExit`) for alarm reinforcements. |
+| `enemies` | Built with `enemy(type, id, position, options)` from `game/enemy-types.ts`. Types: `rifleman`, `gunner`, `breacher`, `sidearm`, `marksman`, `bulky` (Bulky Boy, the armoured boss), `dummy`. Give `patrol` (a loop of points, starting where he stands) to make him walk, `facing` to aim a post, and `reserve` (plus `alarmExit`) for alarm reinforcements. |
 | `stations` | Things the player uses with F. For a goal, use kind `'objective'`; its `label` is the prompt. |
 | `goals` | The mission: see below. |
+| `captives` | Prisoners: `{ id, position, facing, station }`. The blue stickman sits tied to a chair (place one at `position`) until the station is used, then stands. Pair it with an `interact` goal on the same station. |
 | `briefing` | The pause page: title, premise, `won`/`outro` (the end page), route tips. Leave `map` out and one is drawn from the level. |
 
 ## Goals (`game/goals.ts`)
@@ -90,4 +94,4 @@ Each failure names the level and the thing at fault.
 
 - **Guard route length.** Guards plan routes on a 0.8 m grid within a window around the start and goal, and give up past about 2,200 cells. A guard asked to cross a very large level in one go may not find the way. Give long patrols intermediate points.
 - **Single-floor goal areas.** Reach and extract areas are cylinders (3 m tall by default). For an upper floor or a roof, set `center[1]` to that height.
-- **One body model.** Every character is the one stickman rig. New enemy looks are made by fitting gear to it, as the Sledge's armour does (`actors.makeBoss`), and are shared with the animation lab.
+- **One body model.** Every character is the one stickman rig. New enemy looks are made by fitting gear to it, as Bulky Boy's armour does (`actors.makeBoss`), and are shared with the animation lab.

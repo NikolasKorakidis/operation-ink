@@ -169,9 +169,9 @@ export class EnemyActor {
   }
 
   /**
-   * Turn this guard into the boss, the Sledge: a riot breacher, the same solid-black stickman as every guard at twice
+   * Turn this guard into the boss, Bulky Boy: a riot breacher, the same solid-black stickman as every guard at twice
    * the size, with his own hands and feet, in ink-grey gear fitted to his body: a combat helmet, a plate vest and a row
-   * of pouches. He carries an AK like his guards; his sledgehammer flies on its own (see flying-hammer.ts). His gear
+   * of pouches. He carries an AK like his guards. His gear
    * is his armour: the pouches are shot off first, then the helmet, and the vest when it breaks (see armorLeft). Every part is built in the root's units and handed
    * to its bone so it moves with him; all of it ignores light, like his body.
    */

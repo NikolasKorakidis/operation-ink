@@ -3,6 +3,7 @@ import { LEVELS, listSaves, type SaveInfo } from './saves'
 import { goTo } from '../modes'
 import type { ViewName } from '../camera'
 import type { Briefing } from './types'
+import { campaignLevels } from '../levels/catalog'
 
 /** Every other way into the game. Links are relative, so they work on GitHub Pages' /<repository>/ path too. */
 export const MAP_VIEWS: { id: ViewName; label: string; note: string }[] = [
@@ -17,7 +18,7 @@ export const MAP_VIEWS: { id: ViewName; label: string; note: string }[] = [
   { id: 'rail', label: 'Rail siding', note: 'Down the tracks to the water tower' },
   { id: 'tanks', label: 'Fuel tanks', note: 'The west tank farm' },
 ]
-export type Destination = 'explore' | 'lab' | 'tutorial' | 'mission' | 'load' | `view:${ViewName}`
+export type Destination = 'explore' | 'lab' | 'tutorial' | 'mission' | 'load' | `view:${ViewName}` | `level:${string}`
 /** Leave for another mode on this same address (see modes.ts); only the animation lab is a page of its own. */
 export function goToDestination(destination: Destination) {
   if (destination === 'lab') location.assign(new URL('lab.html', location.href).toString())
@@ -26,7 +27,7 @@ export function goToDestination(destination: Destination) {
 
 const BRAND = 'Stickman: Ghost Ink'
 
-type MenuPage = 'home' | 'campaign' | 'pause' | 'load' | 'gallery' | 'options' | 'mission' | 'controls' | 'settings' | 'restart' | 'coop' | 'views' | 'leave'
+type MenuPage = 'home' | 'campaign' | 'pause' | 'load' | 'levels' | 'gallery' | 'options' | 'mission' | 'controls' | 'settings' | 'restart' | 'coop' | 'views' | 'leave'
 /**
  * Where each page lives. The main menu holds Campaign, Multiplayer, Gallery and Options; the pause page holds what a
  * run in progress needs. Back normally returns along the way you came (`trail`); this is the fallback when you
@@ -34,7 +35,7 @@ type MenuPage = 'home' | 'campaign' | 'pause' | 'load' | 'gallery' | 'options' |
  */
 const PARENT: Record<MenuPage, MenuPage> = {
   home: 'home', campaign: 'home', coop: 'home', gallery: 'home', options: 'home', pause: 'home', leave: 'home',
-  load: 'campaign', views: 'gallery', settings: 'options', controls: 'options', mission: 'pause', restart: 'pause',
+  load: 'campaign', levels: 'campaign', views: 'gallery', settings: 'options', controls: 'options', mission: 'pause', restart: 'pause',
 }
 const back = '<button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>'
 /** `leaveWarning` names what leaving to another mode would lose, or null when nothing is at stake. */
@@ -73,6 +74,8 @@ export class MissionMenu {
   private play: HTMLButtonElement
   private loadEntry: HTMLButtonElement
   private training: HTMLButtonElement
+  /** The level this page is running (levels/catalog.ts), so the level select can mark it. */
+  private level = ''
   private coopPlay: HTMLButtonElement
   private saves: SaveInfo[] = []
   /** The run's current objective, kept from the last update for the Campaign page's Resume entry. */
@@ -108,8 +111,9 @@ export class MissionMenu {
         <p>Find the hostage. Get out together.</p>
         <nav class="main-menu" aria-label="Campaign">
           <button id="campaign-play" class="main-entry"><strong>New game</strong><span>Start the mission</span></button>
+          <button id="campaign-levels" class="main-entry" data-menu-open="levels"><strong>Select level</strong><span>Play any mission</span></button>
           <button id="campaign-load" class="main-entry"><strong>Load game</strong><span>Continue a saved mission</span></button>
-          <button id="campaign-training" class="main-entry"><strong>Training</strong><span>Learn every move, then fight the Sledge</span></button>
+          <button id="campaign-training" class="main-entry"><strong>Training</strong><span>Learn every move, then fight Bulky Boy</span></button>
         </nav>
       </section>
       <section data-menu-page="pause" hidden>
@@ -133,6 +137,12 @@ export class MissionMenu {
         <h2 id="load-page-title">Load game</h2>
         <p>Pick up where you left off. A mission saves itself whenever you pause or leave it.</p>
         <nav class="main-menu save-list" aria-label="Saved missions"></nav>
+      </section>
+      <section data-menu-page="levels" hidden>
+        ${back}
+        <h2 id="levels-page-title">Select level</h2>
+        <p>Play any mission, in any order.</p>
+        <nav class="main-menu level-list" aria-label="Levels"></nav>
       </section>
       <section data-menu-page="gallery" hidden>
         ${back}
@@ -242,6 +252,13 @@ export class MissionMenu {
       const level = (event.target as HTMLElement).closest<HTMLElement>('[data-save-level]')?.dataset.saveLevel
       if (level) callbacks.load?.(level)
     }, { signal: this.abort.signal })
+    // One button per campaign level; picking the one you're in plays it, any other switches to it.
+    this.element('.level-list').addEventListener('click', event => {
+      const button = (event.target as HTMLElement).closest<HTMLElement>('[data-level]')
+      if (!button) return
+      if (button.dataset.level === this.level && !this.tutorial) this.playCampaign()
+      else this.go(`level:${button.dataset.level}`, button)
+    }, { signal: this.abort.signal })
     const options = { signal: this.abort.signal }
     this.card.querySelectorAll<HTMLElement>('[data-menu-open]').forEach(button => {
       button.addEventListener('click', () => this.open(button.dataset.menuOpen as MenuPage, button), options)
@@ -314,6 +331,7 @@ export class MissionMenu {
   private show(page: MenuPage, focus = true) {
     if (page === 'load') this.drawSaves()
     if (page === 'campaign') this.drawCampaign()
+    if (page === 'levels') this.drawLevels()
     this.page = page
     this.card.dataset.page = page
     this.card.querySelectorAll<HTMLElement>('[data-menu-page]').forEach(section => { section.hidden = section.dataset.menuPage !== page })
@@ -353,6 +371,12 @@ export class MissionMenu {
       <strong>${LEVELS[save.level].name}</strong><span>${save.objective} · ${minutes(save.elapsed)} played · saved ${when(save.savedAt)}</span></button>`).join('')
       || '<p>No saved games yet. A mission saves itself whenever you pause or leave it.</p>'
   }
+  /** The level select: every campaign mission in order, the one you're in marked. */
+  private drawLevels() {
+    const here = (id: string) => id === this.level && !this.tutorial
+    this.element('.level-list').innerHTML = campaignLevels().map((level, index) => `<button class="main-entry" data-level="${level.id}"${here(level.id) ? ' aria-current="true"' : ''}>
+      <strong>Mission ${index + 1} · ${level.name}</strong><span>${here(level.id) ? `${this.hasPlayed && this.phase === 'active' ? 'Playing now · resume' : 'Playing now'} · ` : ''}${level.summary}</span></button>`).join('')
+  }
   /** The Campaign page names what each entry will do right now. */
   private drawCampaign() {
     const away = this.tutorial || this.standalone
@@ -364,7 +388,7 @@ export class MissionMenu {
     const saves = listSaves().length
     this.setEntry(this.loadEntry, 'Load game', saves ? `${saves} saved ${saves === 1 ? 'mission' : 'missions'}` : 'No saved games yet')
     this.setEntry(this.training, this.tutorial && this.hasPlayed ? 'Resume training' : 'Training',
-      this.tutorial ? 'Back to the training ground' : 'Learn every move, then fight the Sledge')
+      this.tutorial ? 'Back to the training ground' : 'Learn every move, then fight Bulky Boy')
   }
   private setEntry(entry: HTMLElement, name: string, note: string) {
     entry.querySelector('strong')!.textContent = name
@@ -383,6 +407,8 @@ export class MissionMenu {
     this.land()
   }
   /** A level played on its own: the pause page starts it, under the level's own title. */
+  /** Which level this is (its id in levels/catalog.ts). */
+  setLevel(id: string) { this.level = id }
   setStandalone() {
     this.standalone = true
     this.land()
@@ -414,7 +440,7 @@ export class MissionMenu {
     const dead = state.phase === 'dead', complete = state.phase === 'complete'
     this.title.textContent = dead ? (this.tutorial ? 'Down, not out.' : 'No way through.') : complete ? this.briefingText.won : this.hasPlayed ? 'Paused.' : this.tutorial ? 'Training ground' : this.standalone ? this.briefingText.title : 'Campaign'
     this.premise.hidden = dead
-    this.premise.textContent = this.tutorial ? 'Learn every move, one lesson at a time, then take down the Sledge.'
+    this.premise.textContent = this.tutorial ? 'Learn every move, one lesson at a time, then take down Bulky Boy.'
       : complete ? this.briefingText.outro : this.hasPlayed ? this.objective : this.briefingText.premise
     this.start.hidden = dead || complete
     this.start.disabled = !data.ready || !this.loaded

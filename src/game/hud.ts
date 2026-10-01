@@ -65,6 +65,7 @@ export class MissionHUD {
     $('#world').setAttribute('aria-label', 'Stickman: Ghost Ink tactical mission. Mouse to look, WASD move, left click fire, right click toggle aim, F interact, R reload, M field map, Escape pause.')
     const briefing = world.briefing ?? { title: 'The mission', premise: '', won: 'Mission complete.', outro: 'You made it out.', tips: [] }
     this.menu = new MissionMenu(this.start, { ...briefing, map: briefing.map ?? fieldMap(world.root, world) }, this.reducedMotion, callbacks)
+    this.menu.setLevel(world.level)
     this.mapDot = document.querySelector('#field-player')!
     this.mapProjection = readProjection(this.mapDot.closest('svg'))
     this.root.id = 'mission-hud'

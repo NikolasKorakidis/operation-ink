@@ -14,10 +14,10 @@ export const TUTORIAL_ENEMIES = {
   dummies: ['dummy-1', 'dummy-2', 'dummy-3', 'dummy-4', 'dummy-5', 'dummy-6'],
   knife: 'dummy-knife',
   soldiers: ['live-1', 'live-2', 'live-3'],
-  boss: 'sledge',
+  boss: 'bulky',
 } as const
 
-/** The tutorial: the training ground, its practice soldiers, the live-fire squad and the Sledge. */
+/** The tutorial: the training ground, its practice soldiers, the live-fire squad and Bulky Boy. */
 export function createTutorialWorld(): MissionWorld {
   const root = new THREE.Group()
   root.name = 'Tutorial'
@@ -27,7 +27,7 @@ export function createTutorialWorld(): MissionWorld {
     // Standing in the knife booth, his back to the range.
     { ...dummy('dummy-knife', [10.5, 0, -50.4], Math.PI), name: 'Practice soldier (knife)' },
     soldier('live-1', [-6, 0, -134], 'ak'), soldier('live-2', [5.5, 0, -138], 'smg'), soldier('live-3', [0, 0, -147], 'pistol'),
-    { id: 'sledge', name: 'The Sledge', position: [0, 0, -205], patrol: [[0, 0, -205]], weapon: 'ak', facing: 0,
+    { id: 'bulky', name: 'Bulky Boy', position: [0, 0, -205], patrol: [[0, 0, -205]], weapon: 'ak', facing: 0,
       reserve: true, held: true, boss: true, health: BOSS_RULES.health, armor: BOSS_RULES.armor },
   ]
   return { level: 'training', root, stations: [], enemies, spawn: TRAINING.spawn, lookAt: TRAINING.lookAt, bounds: TRAINING.bounds, tutorial: true }

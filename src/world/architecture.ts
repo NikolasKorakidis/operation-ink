@@ -43,7 +43,7 @@ export function interiorRoomOutline(g: Draft, clearWidth: number, clearDepth: nu
   for (const [cx, , cz] of corners) g.line([[cx, floor + WALL_INK_OFFSET, cz], [cx, top, cz]], 'edge')
 }
 
-function windowFrame(g: Draft, x: number, y: number, z: number, w = 1.4, h = 1.35, side = false) {
+export function windowFrame(g: Draft, x: number, y: number, z: number, w = 1.4, h = 1.35, side = false) {
   const point = (u: number, v: number, out = 0): Point => side ? [x + out, v, z + u] : [x + u, v, z + out]
   const a = -w / 2, b = w / 2
   g.face([point(a, y), point(b, y), point(b, y + h), point(a, y + h)], 'glass', 'detail')

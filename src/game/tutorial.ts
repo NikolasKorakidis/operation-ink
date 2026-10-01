@@ -1,8 +1,7 @@
 import * as THREE from 'three'
 import type { Stance } from '../player/body'
-import { BOSS_RULES, CRITICAL_HITS, HAMMER_RULES, HEAD_BURST_CHANCE, WEAPON_RULES } from './balance'
+import { BOSS_RULES, CRITICAL_HITS, HEAD_BURST_CHANCE, WEAPON_RULES } from './balance'
 import type { HitReaction } from './hit-reactions'
-import type { HammerState } from './flying-hammer'
 import { TUTORIAL_ENEMIES } from './tutorial-world'
 import type { EnemySpec, EnemyState, WeaponItem, WeaponName } from './types'
 import { TRAINING } from '../world/training-ground'
@@ -23,8 +22,6 @@ export type TutorialHooks = {
   checkpoint: () => void
   restart: () => void
   reducedMotion: () => boolean
-  /** The Sledge's flying hammer, if the level has one: its health and what it is doing. */
-  hammer?: () => { health: number; state: HammerState } | null
 }
 
 type Progress = {
@@ -49,7 +46,7 @@ const CHANCE_ROWS: [string, WeaponName][] = [['Pistol', 'silenced'], ['SMG', 'sm
 /**
  * The tutorial level: a coach that teaches every move one lesson at a time and waits until the player has actually
  * done it, a marker pointing to where the next lesson happens, floating damage numbers on every hit (critical hits
- * and head shots stand out), the live-fire squad, and the boss fight against the Sledge with his health and
+ * and head shots stand out), the live-fire squad, and the boss fight against Bulky Boy with his health and
  * armour bar. Only the tutorial has any of this; the mission is untouched.
  */
 export class TutorialMode {
@@ -72,7 +69,6 @@ export class TutorialMode {
   private lastHealth = 1
   private bannerTimer = 0
   private bossDownFor = -1
-  private hammerDown = false
   private finished = false
   private elapsed = 0
   private stats = { hits: 0, criticals: 0, heads: 0, bursts: 0, damage: 0, best: 0 }
@@ -102,7 +98,7 @@ export class TutorialMode {
       { id: 'live', title: 'Live fire', keys: [], where: TRAINING.marks.liveGate, text: 'Three soldiers hold the yard, and these ones shoot back. Use cover, crouch, lean out, and clear the yard.',
         enter: () => { this.hooks.wake([...TUTORIAL_ENEMIES.soldiers]); this.hooks.checkpoint() },
         done: (_, __, guards) => guards.filter(guard => (TUTORIAL_ENEMIES.soldiers as readonly string[]).includes(guard.spec.id)).every(guard => guard.state === 'dead') },
-      { id: 'boss', title: 'Boss: the Sledge', keys: [], where: TRAINING.marks.bossGate, text: 'Go through the gate into the field. He fights with an AK. His helmet, vest and pouches soak body hits and get shot off piece by piece; head shots go straight through. His sledgehammer flies on its own: when it rises, step out of its line. One hit takes half your health. Shoot it down, or drop him and it falls too.',
+      { id: 'boss', title: 'Boss: Bulky Boy', keys: [], where: TRAINING.marks.bossGate, text: 'Go through the gate into the field. He fights with an AK. His helmet, vest and pouches soak body hits and get shot off piece by piece; head shots go straight through. Strip his armour, then put him down.',
         done: (_, __, guards) => guards.some(guard => guard.spec.id === TUTORIAL_ENEMIES.boss && guard.state === 'dead') },
     ]
     this.root.className = 'tutorial-hud'
@@ -113,11 +109,9 @@ export class TutorialMode {
     this.numbers.className = 'damage-layer'
     this.bossBar.className = 'boss-bar'
     this.bossBar.hidden = true
-    this.bossBar.innerHTML = `<header><b>The Sledge</b><span class="boss-note">Armoured · head shots go through</span></header>
+    this.bossBar.innerHTML = `<header><b>Bulky Boy</b><span class="boss-note">Armoured · head shots go through</span></header>
       <div class="boss-armor" aria-label="Armour"><i></i><span>ARMOUR</span></div>
-      <div class="boss-health" aria-label="Health"><i class="boss-trail"></i><i class="boss-fill"></i><span></span></div>
-      <div class="hammer-bar" aria-label="His hammer"><header><b>The Sledgehammer</b><span class="hammer-note"></span></header>
-        <div class="hammer-health"><i></i><span></span></div></div>`
+      <div class="boss-health" aria-label="Health"><i class="boss-trail"></i><i class="boss-fill"></i><span></span></div>`
     this.banner.className = 'tutorial-banner'
     this.banner.hidden = true
     this.finish.className = 'tutorial-finish'
@@ -139,11 +133,23 @@ export class TutorialMode {
     this.stats = { hits: 0, criticals: 0, heads: 0, bursts: 0, damage: 0, best: 0 }
     for (const popup of this.popups) popup.element.remove()
     this.popups = []
-    this.trail = 1; this.lastHealth = 1; this.bossDownFor = -1; this.hammerDown = false; this.finished = false; this.elapsed = 0; this.celebrate = 0
+    this.trail = 1; this.lastHealth = 1; this.bossDownFor = -1; this.finished = false; this.elapsed = 0; this.celebrate = 0
     this.finish.hidden = true; this.banner.hidden = true; this.bossBar.hidden = true
     this.last.set(NaN, 0, 0)
     this.drawLesson(); this.drawList()
   }
+
+  /** Try again after dying: the lessons stay where they were; only what was on screen for the fight is cleared. */
+  retry() {
+    for (const popup of this.popups) popup.element.remove()
+    this.popups = []
+    this.trail = 1; this.trailHold = 0; this.lastHealth = 1; this.bossDownFor = -1; this.celebrate = 0
+    this.card.classList.remove('is-done'); this.banner.hidden = true; this.bannerTimer = 0
+    this.last.set(NaN, 0, 0)
+    this.drawLesson(); this.drawList()
+  }
+  /** The boss fight is under way: the checkpoint is at the boss line. */
+  get atBoss() { return this.lessons[this.index]?.id === 'boss' && this.progress.bossAwake }
 
   /** Every hit the player lands: floating damage, and lesson progress. */
   hit(hit: HitReaction) {
@@ -196,13 +202,13 @@ export class TutorialMode {
     if (probe.reloading && this.lessons[this.index]?.id === 'reload') p.reloaded = true
     // Ammunition never runs out on the training ground.
     for (const item of probe.slots) if (item && item.name !== 'knife') item.reserve = Math.max(item.reserve, WEAPON_RULES[item.name].capacity * 3)
-    // The Sledge wakes as the player crosses into his field.
+    // Bulky Boy wakes as the player crosses into his field.
     const guards = this.hooks.enemies()
     if (this.lessons[this.index]?.id === 'boss' && !p.bossAwake && probe.position.z < TRAINING.bossLine) {
       p.bossAwake = true
       this.hooks.wake([TUTORIAL_ENEMIES.boss], probe.position)
       this.hooks.checkpoint()
-      this.flash('BOSS FIGHT · THE SLEDGE')
+      this.flash('BOSS FIGHT · BULKY BOY')
     }
     const lesson = this.lessons[this.index]
     if (lesson && this.celebrate <= 0 && lesson.done(p, probe, guards)) {
@@ -231,7 +237,7 @@ export class TutorialMode {
     })
     // Where the current lesson happens.
     const where = this.lessons[this.index]?.where
-    // Once the Sledge is up, he is the target: no marker needed.
+    // Once Bulky Boy is up, he is the target: no marker needed.
     const show = where && !this.finished && !(this.lessons[this.index]?.id === 'boss' && this.progress.bossAwake) && camera.position.distanceTo(this.scratch.set(where[0], camera.position.y, where[2])) > 3.5
     this.marker.hidden = !show
     if (show) {
@@ -303,28 +309,11 @@ export class TutorialMode {
     this.bossBar.classList.toggle('is-broken', armor <= 0)
     this.bossBar.classList.toggle('is-low', health < 0.3)
     if (boss.state === 'dead') {
-      if (this.bossDownFor < 0) { this.bossDownFor = 0; this.flash('THE SLEDGE IS DOWN') }
+      if (this.bossDownFor < 0) { this.bossDownFor = 0; this.flash('BULKY BOY IS DOWN') }
       this.bossDownFor += dt
       this.bossBar.classList.add('is-defeated')
       if (this.bossDownFor > 3 && !this.finished) this.complete()
     } else { this.bossDownFor = -1; this.bossBar.classList.remove('is-defeated') }
-    this.drawHammer()
-  }
-
-  /** The hammer's own bar under his: its health, and a warning when it comes for you. */
-  private drawHammer() {
-    const hammer = this.hooks.hammer?.(), bar = this.bossBar.querySelector<HTMLElement>('.hammer-bar')!
-    bar.hidden = !hammer || hammer.state === 'idle'
-    if (!hammer || bar.hidden) return
-    const notes: Record<HammerState, string> = { idle: '', orbit: 'Flies on its own · shoot it down', windup: 'Rising · get out of its line!',
-      flying: 'Incoming!', stuck: 'Stuck · shoot it now', return: 'Flying back to him', broken: 'Shot down' }
-    bar.querySelector<HTMLElement>('.hammer-note')!.textContent = notes[hammer.state]
-    bar.querySelector<HTMLElement>('.hammer-health i')!.style.width = `${(hammer.health / HAMMER_RULES.health * 100).toFixed(2)}%`
-    bar.querySelector<HTMLElement>('.hammer-health span')!.textContent = hammer.state === 'broken' ? 'DOWN' : `${Math.ceil(hammer.health)} / ${HAMMER_RULES.health}`
-    bar.classList.toggle('is-warning', hammer.state === 'windup' || hammer.state === 'flying')
-    bar.classList.toggle('is-broken', hammer.state === 'broken')
-    if (hammer.state === 'broken' && !this.hammerDown) this.flash('HAMMER DOWN')
-    this.hammerDown = hammer.state === 'broken'
   }
 
   /** The end of training: a summary of how it went, and the way back. */
@@ -334,7 +323,7 @@ export class TutorialMode {
     this.drawLesson(); this.drawList()
     const minutes = Math.floor(this.elapsed / 60), seconds = Math.floor(this.elapsed % 60)
     const { hits, criticals, heads, bursts, damage, best } = this.stats
-    this.finish.innerHTML = `<h2>Training complete</h2><p>The Sledge is down. You know every move; the compound is waiting.</p>
+    this.finish.innerHTML = `<h2>Training complete</h2><p>Bulky Boy is down. You know every move; the compound is waiting.</p>
       <dl><div><dt>Time</dt><dd>${minutes}:${String(seconds).padStart(2, '0')}</dd></div><div><dt>Hits</dt><dd>${hits}</dd></div>
       ${TUTORIAL_FEEDBACK.criticals ? `<div><dt>Critical hits</dt><dd>${criticals}</dd></div>` : ''}<div><dt>Head shots</dt><dd>${heads}</dd></div><div><dt>Heads burst</dt><dd>${bursts}</dd></div>
       <div><dt>Damage dealt</dt><dd>${damage}</dd></div><div><dt>Biggest hit</dt><dd>${best}</dd></div></dl>

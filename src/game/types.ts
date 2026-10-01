@@ -34,7 +34,11 @@ export type MissionWorld = { level: string; root: THREE.Group; stations: Station
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number }; tutorial?: boolean
   goals?: import('./goals').GoalSpec[]
   briefing?: Briefing
+  /** Prisoners held on the level, freed by using a station (game/captives.ts). */
+  captives?: CaptiveSpec[]
   rescue?: { gate: THREE.Group; jeep: THREE.Group; cameras: { id: string; pivot: THREE.Group; lamp: THREE.Mesh }[]; cellDoors: THREE.Group[] } }
+/** A prisoner: where he sits (on a chair the level places there), which way he faces, and the station that frees him. */
+export type CaptiveSpec = { id: string; name?: string; position: Vec3; facing: number; station: string }
 /**
  * The mission's page in the menu. `premise` is the line under the title before play; `won` and `outro` the title
  * and line once the mission is complete; `tips` the route tips. `map` is the field map's SVG; without it one is drawn from the level's

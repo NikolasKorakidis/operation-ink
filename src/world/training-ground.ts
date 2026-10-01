@@ -10,7 +10,7 @@ import { drawPine } from './vegetation'
  *   2 Armory          z −34 … −42   a table of rifles to pick up
  *   3 Firing range    z −42 … −104  booths, practice soldiers at three distances, one turned away for the knife
  *   4 Live fire       z −108 … −152 a walled yard with cover, where soldiers shoot back
- *   5 Boss field      z −156 … −230 open ground with broken blocks, where the Sledge waits
+ *   5 Boss field      z −156 … −230 open ground with broken blocks, where Bulky Boy waits
  * Everything is built in code in the game's paper-and-ink style, like the compound.
  */
 export const TRAINING = {
@@ -24,7 +24,7 @@ export const TRAINING = {
   },
   /** The crawl tunnel through the wall before the armory: its span in x and z, and its clearance (m). */
   crawl: { x: 1.4, z0: -30.4, z1: -33.6, clearance: 0.72 },
-  /** Crossing this line (z) into the field wakes the Sledge. */
+  /** Crossing this line (z) into the field wakes Bulky Boy. */
   bossLine: -158,
 } as const
 
@@ -147,7 +147,7 @@ export function createTrainingGround() {
   signpost(root, '3 · FIRING RANGE', -11, -42.5, 0, 0.32)
   signpost(root, 'KNIFE', 13.8, -46.5, 0)
   signpost(root, '4 · LIVE FIRE', -5, -105.6, 0, 0.36)
-  signpost(root, '5 · THE SLEDGE', -5.5, -153.3, 0, 0.32)
+  signpost(root, '5 · BULKY BOY', -5.5, -153.3, 0, 0.32)
 
   // Pines around the outside of the fence.
   const trees = new Draft('Training ground · pines')

@@ -10,7 +10,8 @@ export type LevelInfo = { id: string; name: string; kind: LevelKind; summary: st
 
 export const LEVEL_CATALOG = [
   { id: 'compound', name: 'The compound', kind: 'campaign', summary: 'Find the hostage in the detention cells and get him out by jeep.' },
-  { id: 'training', name: 'Training ground', kind: 'training', summary: 'Every move, one lesson at a time, then the Sledge.' },
+  { id: 'town', name: 'The town', kind: 'campaign', summary: 'Free the prisoner, defeat Bulky Boy in the town hall, and escape by the north road.' },
+  { id: 'training', name: 'Training ground', kind: 'training', summary: 'Every move, one lesson at a time, then Bulky Boy.' },
   { id: 'proving-ground', name: 'Proving ground', kind: 'dev', summary: 'Template level: take the intel, eliminate the officer, get to the extraction point.' },
 ] as const satisfies readonly LevelInfo[]
 

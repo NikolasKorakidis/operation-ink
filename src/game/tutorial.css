@@ -60,17 +60,6 @@
 .boss-bar.is-defeated { opacity: .35; transition: opacity 1s ease; }
 @keyframes boss-low { 50% { background: #ff3b3b; } }
 body[data-reduced-motion="true"] .boss-bar.is-low .boss-fill { animation: none; }
-/* His flying hammer's own bar, smaller, under his. */
-.hammer-bar { width: 62%; margin: 9px auto 0; }
-.hammer-bar header { margin-bottom: 3px; }
-.hammer-bar header b { font-size: 15px; }
-.hammer-note { font-size: 10.5px; color: var(--ink-muted); }
-.hammer-health { position: relative; height: 11px; border: 1.5px solid var(--ink); background: #fff; }
-.hammer-health i { position: absolute; inset: 0 auto 0 0; background: #555; transition: width .1s linear; }
-.hammer-health span { position: absolute; inset: 0; display: grid; place-items: center; font: 700 8.5px/1 var(--notes); color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; font-variant-numeric: tabular-nums; }
-.hammer-bar.is-warning .hammer-note { color: #c41d1d; font-weight: 700; }
-.hammer-bar.is-warning .hammer-health { border-color: #c41d1d; }
-.hammer-bar.is-broken { opacity: .4; }
 
 .tutorial-banner { position: absolute; top: 31%; left: 50%; translate: -50% 0; padding: 8px 22px; border-top: 3px solid var(--ink); border-bottom: 3px solid var(--ink); background: #ffffffee; font: 700 30px/1.1 var(--hand); letter-spacing: .03em; white-space: nowrap; }
 .tutorial-banner.is-shown { animation: banner-in 2.6s ease both; }
