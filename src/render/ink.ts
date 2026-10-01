@@ -34,6 +34,8 @@ const fills = Object.fromEntries(
     }),
   ]),
 ) as Record<Fill, THREE.MeshBasicMaterial>
+// Window glass is bright daylight seen from inside: it ignores dark rooms and lamps, so a window always reads white.
+fills.glass.defines = { ...fills.glass.defines, NEON_UNLIT: '' }
 
 // Every role shares one material; its width rides in instancePenWidth so a Draft's ink is a single draw call.
 const strokeWidths: Record<Stroke, number> = { edge: 2.2, detail: 1.35, mesh: 0.72, landscape: 1.3 }

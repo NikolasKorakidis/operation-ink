@@ -4,7 +4,7 @@ import { Capsule } from 'three/addons/math/Capsule.js'
 import { EnemyActor, type ActorPostureSnapshot } from './actors'
 import type { Posture } from '../lab/postures'
 import { EnemyNavigation } from './navigation'
-import { ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as COMBAT, HEAD_BURST_CHANCE, WEAPON_RULES, hitDamage, shotgunDamageMultiplier } from './balance'
+import { BOSS_RULES, CRITICAL_HITS, ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as COMBAT, HEAD_BURST_CHANCE, WEAPON_RULES, criticalChance, hitDamage, shotgunDamageMultiplier } from './balance'
 import { rayCapsuleDistance, reactionClipName, type HitReaction, type HitZone } from './hit-reactions'
 import { playerHitTarget, type PlayerBulletHit } from './player-hit-reactions'
 import type { AIContext, EnemyPuppet, EnemyReaction, EnemySnapshot, EnemySpec, EnemyState, PlayerSense, Shot, SoundEvent, Vec3, WeaponName } from './types'
@@ -110,6 +110,10 @@ export type Enemy = {
   deathClip: string
   /** Killed by a head shot that blew the head apart. */
   headless: boolean
+  /** Armour left (the boss); body hits wear it down first. */
+  armor: number
+  /** Seconds a respawning training target has been down. */
+  respawnTimer: number
   speaker: number
   noticedBodies: string[]
   scanTimer: number
@@ -126,7 +130,7 @@ const vector = (value: unknown) => Array.isArray(value) && value.length === 3 &&
 const number = (value: unknown, fallback = 0) => typeof value === 'number' && Number.isFinite(value) ? value : fallback
 const NUMBERS = ['repath', 'stuck', 'senseTimer', 'lostFor', 'shotTimer', 'shots', 'magazine', 'reloadTimer', 'calloutTimer', 'communicationTimer', 'wait',
   'patrolStop', 'visitedWaypoints', 'distanceWalked', 'footstepDistance', 'pathFailures', 'tacticTimer', 'burst', 'aimTime', 'blockedFor', 'contactMemory', 'suppress', 'settledFor', 'hitPause', 'moveSpeed', 'searchIndex',
-  'scanTimer', 'scanDuration', 'scanCooldown', 'scanYaw', 'defensiveTimer'] as const
+  'scanTimer', 'scanDuration', 'scanCooldown', 'scanYaw', 'defensiveTimer', 'armor', 'respawnTimer'] as const
 
 export class EnemyDirector {
   readonly enemies: Enemy[] = []
@@ -161,7 +165,7 @@ export class EnemyDirector {
       actor.root.name = spec.name
       actor.root.visible = !spec.reserve
       const enemy: Enemy = {
-        spec, actor, position, yaw: spec.facing ?? 0, health: ENEMY_HEALTH,
+        spec, actor, position, yaw: spec.facing ?? 0, health: spec.health ?? ENEMY_HEALTH, armor: spec.armor ?? 0, respawnTimer: 0,
         state: spec.reserve ? 'reserve' : spec.patrol.length > 1 ? 'patrol' : 'guard',
         suspicion: 0, lastKnown: null, timer: 0, waypoint: spec.patrol.length > 1 ? 1 : 0, patrolStop: 0,
         path: [], pathTarget: null, repath: 0, stuck: 0, senseTimer: (i % 6) * 0.016,
@@ -172,6 +176,9 @@ export class EnemyDirector {
         searchPoints: [], searchIndex: 0, woundArm: false, woundLeg: false, deathClip: 'dieBody', headless: false, speaker: i % 4, noticedBodies: [],
         scanTimer: 0, scanDuration: 0, scanCooldown: 0, scanYaw: 0, defensiveTimer: 0,
       }
+      if (spec.boss) actor.makeBoss?.()
+      // Training targets carry no weapon to drop.
+      if (spec.dummy) enemy.dropped = true
       if (spec.patrolMode === 'perimeter') {
         enemy.wait = 2 + this.random(enemy) * 2
         this.nextPatrolStop(enemy, 0)
@@ -203,6 +210,8 @@ export class EnemyDirector {
 
   private enter(enemy: Enemy, state: EnemyState) {
     if (enemy.state === state) return
+    // A training target never becomes alert; it only stands or falls.
+    if (enemy.spec.dummy && state !== 'dead' && state !== 'guard') return
     const previous = enemy.state
     enemy.state = state
     if (state === 'combat' || state === 'search') enemy.alarmExit = null
@@ -274,7 +283,31 @@ export class EnemyDirector {
       this.context.world.visible(origin, player.feet.clone().add(new THREE.Vector3(0, Math.min(0.95, bodyHeight(player) * 0.58), 0)), ignore)
   }
 
-  private speed(enemy: Enemy, base: number) { return enemy.woundLeg ? base * 0.6 : base }
+  /** How long a guard aims before the first round; the Sledge is quicker. */
+  private aimDelay(enemy: Enemy) { return COMBAT.aimDelay * (enemy.spec.boss ? BOSS_RULES.aimDelay : 1) }
+  private speed(enemy: Enemy, base: number) { return (enemy.woundLeg ? base * 0.6 : base) * (enemy.spec.boss ? BOSS_RULES.speed : 1) }
+
+  /** A training target stands back up where it was posted, whole. */
+  private revive(enemy: Enemy) {
+    enemy.position.fromArray(enemy.spec.position)
+    const floor = this.navigation.floor(enemy.position)
+    if (floor) enemy.position.copy(floor)
+    Object.assign(enemy, { health: enemy.spec.health ?? ENEMY_HEALTH, armor: enemy.spec.armor ?? 0, respawnTimer: 0, headless: false,
+      yaw: enemy.spec.facing ?? 0, state: 'guard', hitPause: 0, deathClip: 'dieBody' })
+    enemy.actor.root.position.copy(enemy.position)
+    enemy.actor.root.rotation.y = enemy.yaw
+    enemy.actor.restore('guard')
+  }
+
+  /** Wake held guards (a script, never the alarm): they take their posts, or come hunting for `toward`. */
+  wake(ids: string[], toward?: THREE.Vector3) {
+    for (const enemy of this.enemies) {
+      if (!ids.includes(enemy.spec.id) || enemy.state !== 'reserve') continue
+      enemy.actor.root.visible = true
+      enemy.state = enemy.spec.patrol.length > 1 ? 'patrol' : 'guard'
+      if (toward) { enemy.lastKnown = toward.clone(); enemy.suspicion = 1; this.enter(enemy, 'investigate') }
+    }
+  }
 
   private eye(enemy: Enemy) { return enemy.actor.eye?.() ?? enemy.position.clone().add(eyeOffset) }
 
@@ -373,7 +406,19 @@ export class EnemyDirector {
     this.bulletTrails.update(dt)
     for (const enemy of this.enemies) {
       if (enemy.state === 'reserve') continue
-      if (enemy.state === 'dead') { enemy.actor.update(dt, 'dead', false); continue }
+      if (enemy.state === 'dead') {
+        enemy.actor.update(dt, 'dead', false)
+        if (enemy.spec.respawn && (enemy.respawnTimer += dt) >= enemy.spec.respawn) this.revive(enemy)
+        continue
+      }
+      // A training target just stands at its post, facing its way, and takes hits.
+      if (enemy.spec.dummy) {
+        enemy.hitPause = Math.max(0, enemy.hitPause - dt)
+        enemy.actor.root.position.copy(enemy.position)
+        enemy.actor.root.rotation.y = enemy.yaw
+        enemy.actor.update(dt, 'guard', false)
+        continue
+      }
       let player = this.target(enemy)
       if (!player.alive) enemy.canSee = false
       enemy.timer += dt
@@ -705,7 +750,7 @@ export class EnemyDirector {
     enemy.settledFor = moving || !aligned || positioning || this.transitioning(enemy) ? 0 : enemy.settledFor + dt
     if (enemy.canSee) {
       this.communicate(enemy)
-      if (enemy.settledFor >= COMBAT.settle && enemy.aimTime >= COMBAT.aimDelay && enemy.shotTimer <= 0) {
+      if (enemy.settledFor >= COMBAT.settle && enemy.aimTime >= this.aimDelay(enemy) && enemy.shotTimer <= 0) {
         if (this.shoot(enemy, player)) enemy.blockedFor = 0
         else enemy.blockedFor += Math.max(dt, COMBAT.blockedRetry)
       }
@@ -862,10 +907,11 @@ export class EnemyDirector {
   }
 
   private advancePlans() {
-    const started = performance.now(), deadline = started + 3
+    const started = performance.now(), deadline = started + 3, steps = this.context.planningSteps
+    this.navigation.syncDoors()
     const pending = [...this.plans.entries()]
     let index = 0
-    while (pending.length && performance.now() < deadline) {
+    for (let step = 0; pending.length && (steps ? step < steps : performance.now() < deadline); step++) {
       index %= pending.length
       const [enemy, plan] = pending[index]
       if (this.plans.get(enemy) !== plan) { pending.splice(index, 1); continue }
@@ -888,7 +934,7 @@ export class EnemyDirector {
   /** One round of a burst. Blind rounds go to the last contact and cannot damage: pressure, not punishment. */
   private shoot(enemy: Enemy, player: PlayerSense, blind = false) {
     if (!player.alive) return false
-    if (enemy.moveSpeed > 0 || enemy.hitPause > 0 || enemy.actor.reactionRemaining > 0 || this.transitioning(enemy) || enemy.settledFor < COMBAT.settle || enemy.aimTime < COMBAT.aimDelay) return false
+    if (enemy.moveSpeed > 0 || enemy.hitPause > 0 || enemy.actor.reactionRemaining > 0 || this.transitioning(enemy) || enemy.settledFor < COMBAT.settle || enemy.aimTime < this.aimDelay(enemy)) return false
     const weapon = WEAPON[enemy.spec.weapon]
     if (enemy.reloadTimer > 0) return false
     if (enemy.magazine <= 0) {
@@ -916,7 +962,7 @@ export class EnemyDirector {
     const round = enemy.burst > 0 ? weapon.burst - enemy.burst : 0
     const recoil = round * 0.025
     const rangePenalty = enemy.spec.weapon === 'sniper' ? 0.004 : enemy.spec.weapon === 'smg' ? 0.017 : enemy.spec.weapon === 'pistol' ? 0.016 : 0.012
-    const hitChance = blind ? 0 : clamp(0.72 - distance * rangePenalty - Math.min(0.18, player.velocity.length() * 0.025) - recoil - (enemy.woundArm ? 0.16 : 0) + Math.min(enemy.aimTime, 1.5) * 0.06, 0.08, 0.8)
+    const hitChance = blind ? 0 : clamp(0.72 - distance * rangePenalty - Math.min(0.18, player.velocity.length() * 0.025) - recoil - (enemy.woundArm ? 0.16 : 0) + Math.min(enemy.aimTime, 1.5) * 0.06 + (enemy.spec.boss ? BOSS_RULES.accuracy : 0), 0.08, 0.8 + (enemy.spec.boss ? BOSS_RULES.accuracy : 0))
     const hit = this.random(enemy) < hitChance
     let bodyHit: Pick<PlayerBulletHit, 'region' | 'side' | 'point'> = {
       region: target.y - player.feet.y > bodyHeight(player) * 0.9 ? 'head' : 'torso', side: 0, point: target.clone(),
@@ -967,7 +1013,7 @@ export class EnemyDirector {
         this.context.emit({ kind: 'enemy-bullet-whiz', position: pass.point, source: muzzle.clone(), intensity: pass.intensity, radius: 5 })
       }
     } } : undefined, impact)
-    if (hitPlayer) this.context.damagePlayer(weapon.damage, enemy.position.clone(), {
+    if (hitPlayer) this.context.damagePlayer(weapon.damage * (enemy.spec.boss ? BOSS_RULES.damage : 1), enemy.position.clone(), {
       ...bodyHit, point: end.clone(), direction: direction.clone(), weapon: enemy.spec.weapon,
     }, player.id)
     return true
@@ -978,7 +1024,7 @@ export class EnemyDirector {
     // The suppressed pistol has no flash and a report only the shooter hears: no guard reacts to the shot itself.
     if (event.kind === 'shot-silenced') return
     for (const enemy of this.enemies) {
-      if (['dead', 'reserve', 'combat'].includes(enemy.state)) continue
+      if (['dead', 'reserve', 'combat'].includes(enemy.state) || enemy.spec.dummy) continue
       const from = this.eye(enemy)
       const source = event.position.clone().add(new THREE.Vector3(0, 0.5, 0))
       const distance = from.distanceTo(source)
@@ -1047,7 +1093,7 @@ export class EnemyDirector {
     const ray = new THREE.Ray(shot.origin, normalized)
     let count = 0
     for (const enemy of this.enemies) {
-      if (enemy === nearest || enemy.health <= 0 || ['dead', 'reserve'].includes(enemy.state) || enemy.scanCooldown > 0 ||
+      if (enemy === nearest || enemy.spec.dummy || enemy.health <= 0 || ['dead', 'reserve'].includes(enemy.state) || enemy.scanCooldown > 0 ||
         enemy.hitPause > 0 || enemy.actor.reactionRemaining > 0 || this.transitioning(enemy)) continue
       const bulletPoint = new THREE.Vector3(), bodyPoint = new THREE.Vector3()
       const volumes = enemy.actor.hitVolumes?.volumes() ?? [{ a: enemy.position.clone().add(new THREE.Vector3(0, 0.3, 0)),
@@ -1133,27 +1179,47 @@ export class EnemyDirector {
     const best = found, normalized = found.direction
     const falloff = shot.weapon === 'shotgun' ? shotgunDamageMultiplier(best.distance) : 1
     const fromBehind = normalized.x * Math.sin(nearest.yaw) + normalized.z * Math.cos(nearest.yaw) > 0.25
-    // A head shot can blow the head apart, by weapon (see HEAD_BURST_CHANCE); that always kills.
-    const burstChance = best.zone === 'head' ? HEAD_BURST_CHANCE[shot.weapon ?? 'ak'] ?? 0 : 0
+    const boss = !!nearest.spec.boss
+    // A head shot can blow the head apart, by weapon (see HEAD_BURST_CHANCE); that always kills. Not the boss's.
+    const burstChance = best.zone === 'head' && !boss ? HEAD_BURST_CHANCE[shot.weapon ?? 'ak'] ?? 0 : 0
     const headBurst = burstChance >= 1 || (burstChance > 0 && this.random(nearest) < burstChance)
-    // A blade in the back always kills.
-    const damage = headBurst || shot.weapon === 'knife' && fromBehind ? ENEMY_HEALTH : hitDamage(shot.weapon, best.zone, shot.damage) * falloff
+    const critChance = this.context.criticals && !headBurst ? criticalChance(shot.weapon, best.zone) : 0
+    const critical = critChance > 0 && this.random(nearest) < critChance
+    // A blade in the back always kills, except the boss.
+    let damage = headBurst || shot.weapon === 'knife' && fromBehind && !boss ? nearest.health
+      : hitDamage(shot.weapon, best.zone, shot.damage, boss) * falloff * (critical ? CRITICAL_HITS.multiplier : 1)
+    // Armour soaks body hits until it breaks; only a little of the hit gets through. Head shots ignore it.
+    let armorBroken = false, soaked = 0
+    // The boss's plate covers him all round; it sheds a piece at a time as it wears down.
+    if (nearest.armor > 0 && best.zone !== 'head' && !headBurst) {
+      soaked = Math.min(nearest.armor, damage)
+      nearest.armor -= soaked
+      damage = damage - soaked + soaked * BOSS_RULES.bleed
+      nearest.actor.armorLeft?.(nearest.armor / (nearest.spec.armor || 1))
+      if (nearest.armor <= 0) { armorBroken = true; nearest.actor.breakArmor?.() }
+    }
+    const before = nearest.health
     nearest.health = Math.max(0, nearest.health - damage)
     nearest.contactMemory = COMBAT.contactMemory
     nearest.canSee = false
     nearest.senseTimer = 0
     const lethal = nearest.health === 0
-    const reaction: HitReaction = { zone: best.zone, point: best.point, direction: normalized, lethal, bone: best.bone, weapon: shot.weapon, targetId: nearest.spec.id, by: shot.by, headBurst }
+    const reaction: HitReaction = { zone: best.zone, point: best.point, direction: normalized, lethal, bone: best.bone, weapon: shot.weapon, targetId: nearest.spec.id, by: shot.by, headBurst,
+      // The whole hit, even past the health that was left: a kill shows how hard it landed.
+      damage: Math.max(before - nearest.health, damage), armorDamage: soaked, critical, armorBroken }
     nearest.scanTimer = 0
     nearest.actor.root.userData.alertScan = undefined
     const clip = reactionClipName(reaction, fromBehind), travel = lethal && shot.weapon === 'shotgun' ? this.shotgunTravel(nearest, normalized) : 1
-    nearest.actor.react(clip, lethal, normalized, travel)
-    if (!lethal) { nearest.hitPause = nearest.actor.reactionRemaining || 0.6; nearest.settledFor = 0; nearest.moveSpeed = 0 }
+    // The boss shrugs off ordinary hits; only a critical one or losing his armour staggers him.
+    const staggers = !boss || lethal || critical || armorBroken
+    if (staggers) nearest.actor.react(clip, lethal, normalized, travel)
+    if (!lethal && staggers) { nearest.hitPause = nearest.actor.reactionRemaining || 0.6; nearest.settledFor = 0; nearest.moveSpeed = 0 }
     if (lethal) nearest.deathClip = nearest.actor.deathClip
     if (headBurst) { nearest.headless = true; nearest.actor.burstHead?.() }
     this.context.onHit?.(reaction)
     this.context.onReact?.({ index: found.index, clip, lethal, direction: tuple(normalized), travel, deathClip: nearest.deathClip,
-      hit: { zone: best.zone, point: tuple(best.point), bone: best.bone, weapon: shot.weapon, by: shot.by, ...(headBurst ? { burst: true } : {}) } })
+      hit: { zone: best.zone, point: tuple(best.point), bone: best.bone, weapon: shot.weapon, by: shot.by, ...(headBurst ? { burst: true } : {}),
+        damage: reaction.damage, critical, armorBroken } })
     this.context.emit({ kind: 'enemy-hit', position: best.point.clone(), radius: 14, zone: best.zone })
     this.context.emit({ kind: 'enemy-pain', position: nearest.position.clone().add(eyeOffset), radius: 38, speaker: nearest.speaker, zone: best.zone })
     if (lethal) {
@@ -1166,9 +1232,9 @@ export class EnemyDirector {
           magazine: nearest.magazine,
           reserve: WEAPON[nearest.spec.weapon].magazine, position: tuple(nearest.position) })
       }
-      // A witness knows the body location. Only a visible muzzle identifies the shooter.
-      for (const ally of this.enemies) {
-        if (ally === nearest || ['dead', 'reserve', 'combat'].includes(ally.state) || ally.position.distanceTo(nearest.position) > 18) continue
+      // A witness knows the body location. Only a visible muzzle identifies the shooter. Nobody mourns a training target.
+      for (const ally of nearest.spec.dummy ? [] : this.enemies) {
+        if (ally === nearest || ally.spec.dummy || ['dead', 'reserve', 'combat'].includes(ally.state) || ally.position.distanceTo(nearest.position) > 18) continue
         const body = nearest.position.clone().add(new THREE.Vector3(0, 0.9, 0))
         if (!this.context.world.visible(this.eye(ally), body, ignore)) continue
         // A knife or suppressed kill makes no report: only a guard actually looking at the body notices it.
@@ -1182,6 +1248,8 @@ export class EnemyDirector {
         this.enter(ally, 'investigate')
         this.say(ally, 'Man down! Man down!', 'down', true)
       }
+    } else if (nearest.spec.dummy) {
+      nearest.hitPause = 0
     } else {
       if (best.zone === 'arm') nearest.woundArm = true
       if (best.zone === 'leg') nearest.woundLeg = true
@@ -1204,7 +1272,7 @@ export class EnemyDirector {
     this.reserveDestination = destination.clone()
     let remaining = radioEnabled ? 4 : 2
     for (const enemy of this.enemies) {
-      if (enemy.state !== 'reserve' || remaining-- <= 0) continue
+      if (enemy.state !== 'reserve' || enemy.spec.held || remaining-- <= 0) continue
       enemy.actor.root.visible = true
       enemy.reserveRoute = true
       enemy.waypoint = 0
@@ -1220,7 +1288,7 @@ export class EnemyDirector {
     for (const enemy of this.enemies) {
       if (enemy.health <= 0 || enemy.state === 'dead') continue
       if (enemy.state === 'reserve') {
-        if (activated >= reserveCount) continue
+        if (activated >= reserveCount || enemy.spec.held) continue
         activated++
         enemy.actor.root.visible = true
         enemy.reserveRoute = false
@@ -1370,11 +1438,14 @@ export class EnemyDirector {
       enemy.actor.restore(enemy.state, number(saved.animationTime), enemy.deathClip, saved.actorPosture as ActorPostureSnapshot | undefined)
       enemy.headless = enemy.state === 'dead' && !!saved.headless
       if (enemy.headless) enemy.actor.burstHead?.()
+      if (enemy.spec.armor) enemy.actor.armorLeft?.(enemy.armor / enemy.spec.armor, true)
+      if (enemy.spec.armor && enemy.armor <= 0) enemy.actor.breakArmor?.(true)
       enemy.actor.root.userData.alertScan = enemy.scanTimer > 0 && enemy.scanDuration > 0 && this.posture(enemy) !== 'prone' && this.posture(enemy) !== 'kneel' ? 1 - enemy.scanTimer / enemy.scanDuration : undefined
       this.elapsed = number(saved.elapsed)
       this.reserveDestination = vector(saved.reserveDestination)
     }
-    this.navigation.clear()
+    // The ground samples and routes stay good: only doors change them, and restored doors are noticed here.
+    this.navigation.syncDoors()
   }
 
   private clearTraces() {

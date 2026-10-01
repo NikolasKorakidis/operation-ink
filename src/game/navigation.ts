@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { Capsule } from 'three/addons/math/Capsule.js'
 import type { CollisionWorld } from '../player/collision'
-import { setDoorOpen } from '../world/doors'
+import { openAngle, setDoorOpen } from '../world/doors'
 import type { EmitSound } from './types'
 
 export type GridPoint = { x: number; z: number }
@@ -78,8 +78,10 @@ export class EnemyNavigation {
   private capsule = new Capsule(new THREE.Vector3(), new THREE.Vector3(), 0.27)
   private samples = new Map<string, THREE.Vector3 | null>()
   private routes = new Map<string, THREE.Vector3[]>()
+  /** Whether a guard can step between two neighbouring cells, by cell pair and level. */
+  private edges = new Map<string, boolean>()
   private doorPositions: { door: THREE.Group; position: THREE.Vector3 }[]
-  private doorState = ''
+  private doorState: number[] = []
   private ignored: THREE.Object3D[] = []
   private operable: boolean[] = []
   private doorRevision = 0
@@ -109,10 +111,26 @@ export class EnemyNavigation {
     return this.ignored
   }
 
-  private refreshDoorState() {
-    const state = this.doors.map(door => `${!!door.userData.open}:${!!door.userData.missionLocked}:${door.children.find(child => child.userData.doorHinge)?.rotation.y}`).join('|')
-    if (state !== this.doorState) {
-      this.doorState = state
+  /**
+   * Each door's state as one number: open or shut, locked, which way it opened, and whether its leaf has finished
+   * swinging. A swinging leaf counts once, when it starts and when it settles, not every frame of the swing:
+   * otherwise every guard's half-made plan would start over each frame a door is moving.
+   */
+  private doorCode(door: THREE.Group) {
+    const hinge = door.children.find(child => child.userData.doorHinge)
+    const target = door.userData.open ? openAngle(door) : 0
+    const settled = !hinge || Math.abs(hinge.rotation.y - target) < 1e-3
+    return (door.userData.open ? 1 : 0) | (door.userData.missionLocked ? 2 : 0) | (door.userData.openSide === -1 ? 4 : 0) | (settled ? 8 : 0)
+  }
+
+  /** Notice doors that changed since last time: the samples and routes through them are no longer good. Cheap; call once a frame. */
+  syncDoors() {
+    let changed = this.doorState.length !== this.doors.length
+    for (let i = 0; i < this.doors.length; i++) {
+      const code = this.doorCode(this.doors[i])
+      if (code !== this.doorState[i]) { this.doorState[i] = code; changed = true }
+    }
+    if (changed) {
       this.doorRevision++
       this.clear()
     }
@@ -156,9 +174,10 @@ export class EnemyNavigation {
     // invalidate the shared samples. Restart BEFORE resuming the old search:
     // its accepted cells may now sample as null, including during string-pulling.
     while (true) {
-      const revision = this.refreshDoorState()
+      const revision = this.syncDoors()
       const job = this.buildPlan(from, to)
-      while (revision === this.refreshDoorState()) {
+      // The director checks the doors once a frame (syncDoors); a change there starts this plan over.
+      while (revision === this.doorRevision) {
         const result = job.next()
         if (result.done) return result.value
         yield
@@ -197,7 +216,13 @@ export class EnemyNavigation {
     const bounds = { minX: Math.min(start.x, goal.x) - 19, maxX: Math.max(start.x, goal.x) + 19,
       minZ: Math.min(start.z, goal.z) - 19, maxZ: Math.max(start.z, goal.z) + 19 }
     const route = yield* gridPathJob(start, goal, (x, z) => x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ && !!sample(x, z),
-      (a, b) => this.segment(sample(a.x, a.z)!, sample(b.x, b.z)!), 2200)
+      (a, b) => {
+        // By direction: the check follows the floor from `a`, so a→b and b→a can differ at a step.
+        const id = `${a.x},${a.z}>${b.x},${b.z},${level}`
+        let open = this.edges.get(id)
+        if (open === undefined) this.edges.set(id, open = this.segment(sample(a.x, a.z)!, sample(b.x, b.z)!))
+        return open
+      }, 2200)
     if (!route.length) { this.routes.set(routeKey, []); return [] }
     // String-pull only a few cells at a time, keeping all wall/door clearance checks.
     const points: THREE.Vector3[] = []
@@ -248,5 +273,5 @@ export class EnemyNavigation {
     return this.floor(next, false)
   }
 
-  clear() { this.samples.clear(); this.routes.clear() }
+  clear() { this.samples.clear(); this.routes.clear(); this.edges.clear() }
 }

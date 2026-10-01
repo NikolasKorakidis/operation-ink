@@ -1,7 +1,7 @@
 import { BoxGeometry, CylinderGeometry, Shape, ExtrudeGeometry } from 'three'
 import { Draft, type Fill, type Point } from '../render/ink'
 import { createDoor } from './doors'
-import { darkRoom, daylightWindow, doorwayLight } from './lights'
+import { cageLamp, darkRoom, doorwayLight, LAMP_AMBER, windowRow } from './lights'
 import { militaryInterior } from './interiors'
 
 export interface BuildingSpec {
@@ -251,7 +251,7 @@ export function building(spec: BuildingSpec) {
     windows[side > 0 ? 'right' : 'left'] = sideCount
   }
   interiorRoomOutline(walls, w - 2 * WALL_THICKNESS, d - 2 * WALL_THICKNESS, floor, floor + h, 0, 0, 'gable')
-  if (spec.daylightOnly) daylightInterior(g, spec.name, w, d, h, floor, backOpenings, sideOpenings, entryDoors)
+  interiorLighting(g, spec.name, w, d, h, floor, { front: frontOpenings, back: backOpenings, ends: sideOpenings }, entryDoors, !spec.daylightOnly)
   if (type !== 'warehouse') {
     const x = w * 0.29, z = -d * 0.19, y = floor + h + Math.min(2.15, d * 0.17) * 0.62
     covering.box(0.55, 1.25, 0.65, x, y + 0.5, z, 'paper', 'detail')
@@ -273,23 +273,48 @@ export function building(spec: BuildingSpec) {
 }
 
 /**
- * Make a building's inside a dim room lit only by daylight: through each back and end-wall window, and through
- * each entrance while its door is open. The dark room follows the walls and the pitched roof (see roof()).
+ * Every building is dark inside, lit by what really lights it: daylight and sunbeams through each wall's row of
+ * windows, daylight through each entrance while its door is open, and, unless `lamps` is false (warehouses keep
+ * natural light only), a row of yellow caged lamps hanging from the roof ridge like the cell-block lamps.
+ * The dark room follows the walls and the pitched roof (see roof()).
  */
-function daylightInterior(g: Draft, name: string, w: number, d: number, h: number, floor: number,
-  back: WallOpening[], ends: WallOpening[], doors: ReturnType<typeof createDoor>[]) {
+function interiorLighting(g: Draft, name: string, w: number, d: number, h: number, floor: number,
+  openings: { front: WallOpening[]; back: WallOpening[]; ends: WallOpening[] }, doors: ReturnType<typeof createDoor>[], lamps: boolean) {
   const eave = floor + h, rise = Math.min(2.15, d * 0.17), span = d / 2 + 0.4
   const top = eave + rise + 0.14, edge = eave - rise * 0.4 / (d / 2) + 0.14
   const middle = floor + h / 2
-  // Box walls on the wall centre lines; its top halfway through the roof slab, falling with the pitch.
-  g.add(darkRoom(name, [0, middle, 0], [w / 2 - WALL_THICKNESS / 2, middle - floor + 0.3, d / 2 - WALL_THICKNESS / 2],
-    { ambient: 0.16, pitch: { ridge: top - 0.07 - middle, slope: (top - edge) / span } }))
-  for (const o of back) g.add(daylightWindow(`${name} · back window`, [o.centre, floor + o.bottom + o.height / 2, -d / 2 + WALL_THICKNESS / 2], 0, o.width))
-  for (const side of [-1, 1]) for (const o of ends) {
-    g.add(daylightWindow(`${name} · ${side < 0 ? 'west' : 'east'} window`, [side * (w / 2 - WALL_THICKNESS / 2), floor + o.bottom + o.height / 2, o.centre],
-      side * -Math.PI / 2, o.width))
+  // The box takes in the whole thickness of the walls, so door and window reveals are dark inside like the rest
+  // (darkness is tested a little in front of each surface, so the outer wall faces stay in daylight); its top is
+  // halfway through the roof slab, falling with the pitch. Lamp-lit rooms are darker between lamps than a hall
+  // with high windows all along it.
+  g.add(darkRoom(name, [0, middle, 0], [w / 2 + 0.02, middle - floor + 0.3, d / 2 + 0.02],
+    { ambient: lamps ? 0.035 : 0.16, pitch: { ridge: top - 0.07 - middle, slope: (top - edge) / span } }))
+  // One light per wall: its row of panes (doors take no pane). Offsets run along each light's own local x.
+  const inside = d / 2 - WALL_THICKNESS / 2, sideways = w / 2 - WALL_THICKNESS / 2
+  const walls: { label: string; panes: WallOpening[]; at: (o: WallOpening) => Point; angle: number; offset: (o: WallOpening) => number }[] = [
+    { label: 'back', panes: openings.back, angle: 0, at: o => [0, floor + o.bottom + o.height / 2, -inside], offset: o => o.centre },
+    { label: 'front', panes: openings.front, angle: Math.PI, at: o => [0, floor + o.bottom + o.height / 2, inside], offset: o => -o.centre },
+    { label: 'west', panes: openings.ends, angle: Math.PI / 2, at: o => [-sideways, floor + o.bottom + o.height / 2, 0], offset: o => -o.centre },
+    { label: 'east', panes: openings.ends, angle: -Math.PI / 2, at: o => [sideways, floor + o.bottom + o.height / 2, 0], offset: o => o.centre },
+  ]
+  for (const wall of walls) {
+    const panes = wall.panes.filter(o => o.bottom > 0)
+    if (!panes.length) continue
+    g.add(windowRow(`${name} · ${wall.label} windows`, wall.at(panes[0]), wall.angle, panes.map(wall.offset), panes[0].width, panes[0].height))
   }
-  for (const door of doors) doorwayLight(door, -1, { intensity: 5, range: 16 })
+  for (const door of doors) doorwayLight(door, -1, lamps ? { bounce: 0.12 } : { intensity: 5, range: 16 })
+  if (!lamps) return
+  // Lamps hang from the ridge (or, in a deep room, two rows down the roof slope) to just under the wall tops.
+  const innerW = w - 2 * WALL_THICKNESS, count = Math.max(1, Math.round(innerW / 7.5))
+  const rows = d > 11 ? [-d * 0.22, d * 0.22] : [0]
+  const bulb = eave - 0.25
+  for (const z of rows) for (let i = 0; i < count; i++) {
+    const x = -innerW / 2 + innerW / count * (i + 0.5)
+    const ceiling = eave + rise * (1 - Math.abs(z) / (d / 2)) - 0.12
+    // A bare bulb lights a pool below it and fades into the dark between lamps; it lights the roof up to the ridge.
+    g.add(cageLamp(`${name} · ceiling lamp ${rows.length > 1 ? `${z < 0 ? 'north' : 'south'} ` : ''}${i + 1}`, [x, ceiling, z], LAMP_AMBER, ceiling - bulb,
+      { intensity: 3.4, range: Math.max(7, Math.min(10, d * 0.8)), above: top - bulb + 0.1 }))
+  }
 }
 
 export function steps(g: Draft, x: number, z: number, width: number, height: number, count: number) {

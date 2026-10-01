@@ -18,14 +18,17 @@ export type MissionState = {
   brokenCrates: string[]
   /** Enemy field radios switched off (F) and shot apart; either one takes a radio out of action. */
   disabledRadios: string[]; destroyedRadios: string[]
+  /** The level's goals that are done (see goals.ts), and the 'objective' stations used. */
+  goalsDone: string[]; usedStations: string[]
 }
-export const initialMission = (): MissionState => ({
+/** A fresh run. Only the compound has hostages; other levels pass none. */
+export const initialMission = (hostageSpawns: readonly Vec3[] = RESCUE_LAYOUT.hostageSpawns): MissionState => ({
   phase: 'active', camerasOff: [], alarm: 'inactive', alarmElapsed: 0, silencedElapsed: 0,
   alarmPosition: null, reservesDispatched: 0, gateOpen: false,
-  hostages: RESCUE_LAYOUT.hostageSpawns.map((position, index) => ({ id: `hostage-${index + 1}`, status: 'captive', position: [...position], routeIndex: index < 2 ? 1 : 0 })),
+  hostages: hostageSpawns.map((position, index) => ({ id: `hostage-${index + 1}`, status: 'captive', position: [...position], routeIndex: index < 2 ? 1 : 0 })),
   jeep: 'waiting', escapeProgress: 0, detentionFound: false, cellsReached: false,
   health: 100, lastDamageAt: 0, lastBulletAt: null, elapsed: 0, supplies: [], distractionUntil: 0, shots: 0, kills: 0, detections: 0,
-  brokenCrates: [], disabledRadios: [], destroyedRadios: [],
+  brokenCrates: [], disabledRadios: [], destroyedRadios: [], goalsDone: [], usedStations: [],
 })
 /** A radio is out of action once it is switched off or destroyed. */
 export const radioOut = (state: MissionState, id: string) => state.disabledRadios.includes(id) || state.destroyedRadios.includes(id)
@@ -49,6 +52,8 @@ export function stationLabel(state: MissionState, kind: StationKind, id: string)
     case 'supply': return state.supplies.includes(id) ? null : 'Heal'
     case 'distraction': return state.elapsed < state.distractionUntil ? null : 'Ring bell'
     case 'radio': return radioOut(state, id) ? null : 'Switch off radio'
+    // A level's own goal station: its label is the station's (the runtime supplies it).
+    case 'objective': return state.usedStations.includes(id) ? null : 'Use'
     default: return null
   }
 }
@@ -80,6 +85,7 @@ export function useStation(state: MissionState, kind: StationKind, id: string): 
       state.supplies.push(id); state.health = 100; return { changed: true, message: 'Field dressing used. Health restored.' }
     case 'distraction': state.distractionUntil = state.elapsed + 25; return { changed: true, message: 'Service bell ringing. Nearby guards will investigate.' }
     case 'radio': state.disabledRadios.push(id); return { changed: true, message: 'Radio switched off. It can\'t call for help now.' }
+    case 'objective': state.usedStations.push(id); return { changed: true, message: '' }
     default: return { changed: false, message: '' }
   }
 }
@@ -132,7 +138,7 @@ export function shootMission(state: MissionState, amount: number) {
 /** Mission fields the co-op host owns. Health, death, supplies and shot count stay with each player. */
 export const SHARED_MISSION_KEYS = ['camerasOff', 'alarm', 'alarmElapsed', 'silencedElapsed', 'alarmPosition',
   'reservesDispatched', 'gateOpen', 'hostages', 'jeep', 'escapeProgress', 'detentionFound', 'cellsReached', 'elapsed', 'distractionUntil',
-  'kills', 'detections', 'brokenCrates', 'disabledRadios', 'destroyedRadios'] as const satisfies readonly (keyof MissionState)[]
+  'kills', 'detections', 'brokenCrates', 'disabledRadios', 'destroyedRadios', 'goalsDone', 'usedStations'] as const satisfies readonly (keyof MissionState)[]
 export type SharedMission = Pick<MissionState, typeof SHARED_MISSION_KEYS[number]>
 
 export function sharedMission(state: MissionState): SharedMission {

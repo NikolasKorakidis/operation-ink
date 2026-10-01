@@ -4,6 +4,8 @@ import { CAMERA_TERMINALS } from './rescue-layout'
 export type Objective = { id: string; label: string; detail: string; done: boolean; main: boolean; progress?: [number, number] }
 /** How many of each side objective the level holds. */
 export type ObjectiveTotals = { crates: number; radios: string[] }
+/** Where the HUD gets the objectives: the list for the panel, and the one line for the pause page and saves. */
+export type ObjectiveSource = { list: (state: MissionState) => Objective[]; hint: (state: MissionState) => string }
 
 /** The main mission, then the optional side missions, as the mission state stands. */
 export function missionObjectives(state: MissionState, totals: ObjectiveTotals): Objective[] {
@@ -81,12 +83,12 @@ export class ObjectivesPanel {
   /** I: open or fold the list (it also ends the opening briefing). An opened list stays open. */
   toggle() { this.timer = 0; this.closeAt = null; this.setMode(this.mode === 'collapsed' ? 'open' : 'collapsed') }
 
-  update(state: MissionState, totals: ObjectiveTotals, dt = 0) {
+  /** Show `objectives` (the level's list as it stands; see MissionHUD.setObjectiveSource) and run the open/fold timing. */
+  update(objectives: Objective[], dt = 0) {
     this.timer += Math.max(0, dt)
     if (this.mode === 'intro' && this.timer >= OBJECTIVES_INTRO.hold) { this.timer = 0; this.setMode('moving') }
     else if (this.mode === 'moving' && this.timer >= OBJECTIVES_INTRO.move) { this.timer = 0; this.closeAt = OBJECTIVES_INTRO.open; this.mode = 'open' }
     else if (this.mode === 'open' && this.closeAt !== null && this.timer >= this.closeAt) { this.closeAt = null; this.setMode('collapsed') }
-    const objectives = missionObjectives(state, totals)
     const key = JSON.stringify(objectives)
     if (key === this.shownKey) return
     const { advanced, completed } = this.shown ? objectiveChanges(this.shown, objectives) : { advanced: [], completed: [] }
@@ -108,9 +110,9 @@ export class ObjectivesPanel {
       <span class="objective-text"><b>${objective.label}</b>${objective.progress ? `<em>${objective.progress[0]}/${objective.progress[1]}</em>` : ''}
         ${objective.done ? '' : `<small>${objective.detail}</small>`}</span></li>`
     }
-    const [main, ...side] = objectives
-    this.body.innerHTML = `<h2>Mission</h2><ol class="objective-main">${row(main)}</ol>
-      <h3>Side missions</h3><ol class="objective-side">${side.map(row).join('')}</ol>
+    const main = objectives.filter(objective => objective.main), side = objectives.filter(objective => !objective.main)
+    this.body.innerHTML = `<h2>Mission</h2><ol class="objective-main">${main.map(row).join('')}</ol>
+      ${side.length ? `<h3>Side missions</h3><ol class="objective-side">${side.map(row).join('')}</ol>` : ''}
       <p class="objectives-hint">Press <kbd>I</kbd> to see your missions</p>`
   }
 

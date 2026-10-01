@@ -20,3 +20,26 @@ body { display: flex; }
 #panel summary { cursor: pointer; color: var(--ink-muted); }
 #panel summary.active { color: var(--ink); text-decoration: underline; font-weight: 700; }
 #panel button:focus-visible, #panel summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* Character picker: one row per character, its colour as a swatch; the one on screen is filled in ink. */
+#panel .characters { display: grid; gap: 4px; }
+#panel .characters button { display: flex; align-items: center; gap: 8px; margin: 0; text-align: left; }
+#panel .characters button.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+#panel .characters button:disabled { cursor: wait; opacity: .7; }
+#panel .swatch { width: 12px; height: 12px; flex: none; border: 1px solid var(--ink); border-radius: 50%; }
+#panel .swatch.guard { background: #000; }
+#panel .characters button.active .swatch { border-color: var(--paper); }
+#panel .swatch.sledge { border-radius: 2px; background: linear-gradient(#fff 0 45%, #d31d1d 45% 60%, #fff 60%); }
+/* Body colours: a row of swatches, then a free colour picker. */
+#panel .colors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+#panel .colors button, #panel .custom-color { width: 24px; height: 24px; margin: 0; padding: 0; border: 1px solid var(--ink); border-radius: 50%; }
+#panel .colors button.active { outline: 2px solid var(--ink); outline-offset: 2px; }
+#panel .custom-color { display: grid; place-items: center; overflow: hidden; background: conic-gradient(#e33, #ec3, #3c5, #3ae, #73e, #e33); cursor: pointer; }
+#panel .custom-color input { opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+#panel .color-name { margin: 4px 0 8px; color: var(--ink-muted); }
+#panel .exports { display: grid; gap: 4px; }
+#panel .exports button { margin: 0; text-align: left; }
+/* The Sledge's moves, listed under his character. */
+#panel .moves { display: grid; gap: 4px; margin: 10px 0 2px; padding: 8px 0 0; border-top: 1px dashed var(--ink-rule); }
+#panel .moves h4 { margin: 0 0 2px; font: 15px var(--hand); color: var(--ink-muted); }
+#panel .moves button { display: grid; gap: 1px; margin: 0; text-align: left; }
+#panel .moves button span { font-size: 11px; color: var(--ink-muted); }

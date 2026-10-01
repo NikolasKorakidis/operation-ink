@@ -1,19 +1,21 @@
 /*
- * Neon menus. The world stays paper and ink; the menus are a dark glass sign over it, lit in blue neon. What you
- * choose turns green: a hovered button, the one selected from the keyboard, and one being pressed light up
- * green, flicker on and throw a glow behind them. The primary action is a blue sign that is always on. Like
- * old signs, a few tubes are failing and stutter now and then, each on its own uneven cycle. The big lettering
- * (titles and headline numbers) is hot-pink brush-script neon, Vice City style. Everything is
- * scoped to #walk-hud #walk-pause (two ids) so it outranks the paper menu rules in game.css without touching them.
+ * Neon menus, typed on an old typewriter. The world stays paper and ink; the menus are a dark typed sheet with
+ * neon in it: blue tubes at rest and pink typewritten titles. Nothing blinks or flickers. Pointing at a button
+ * brightens its text at once; rest on it for two seconds and it slowly lights up in green neon with a glow
+ * behind it, which fades again when the mouse leaves. Keyboard selection shows a dashed typed outline instead.
+ * Everything is scoped to #walk-hud #walk-pause (two ids) so it outranks the paper menu rules in game.css.
  */
 :root {
   --neon-green: #3dff8c;
   --neon-blue: #4db8ff;
   --neon-pink: #ff4fc8;
   --neon-glass: #080c11;
-  /* A slanted brush script for the big lettering; system fonts only, so nothing has to download. */
-  --vice: "Brush Script MT", "Snell Roundhand", "Segoe Script", "Bradley Hand", cursive;
-  --vice-glow: 0 0 2px #fff, 0 0 7px var(--neon-pink), 0 0 18px #ff4fc8cc, 0 0 38px #ff4fc877, 0 0 70px #ff2d9544;
+  /* An old typewriter face; system fonts only, so nothing has to download. */
+  --type: "American Typewriter", "Courier Prime", "Courier New", Courier, monospace;
+  --title-glow: 0 0 2px #fff, 0 0 7px var(--neon-pink), 0 0 18px #ff4fc8cc, 0 0 38px #ff4fc877, 0 0 70px #ff2d9544;
+  /* How long the mouse rests on a button before its neon comes on, and how slowly it comes on. */
+  --glow-delay: 2s;
+  --glow-in: 0.7s;
 }
 
 #walk-hud #walk-pause {
@@ -33,17 +35,26 @@
 /* The escape cinematic and the death fall keep an open view behind the menu, as before. */
 body[data-escape] #walk-hud #walk-pause, body[data-death] #walk-hud #walk-pause { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 
+/* Every letter in the menus is typed, with a little ink bleed. */
+#walk-hud #walk-pause, #walk-hud #walk-pause * { font-family: var(--type); }
+#walk-hud #walk-pause .walk-card :is(p, small, dt, dd, label, span, summary, li) { text-shadow: 0 0 0.6px currentColor; }
+
 #walk-hud #walk-pause .walk-card {
   position: relative;
   /* Its own stacking context, so each button's glow (z-index -1) sits above the card and behind the button. */
   isolation: isolate;
-  background: linear-gradient(180deg, #0c1219f2, #06090df5);
+  /* A typed sheet: faint ruled lines on the dark card, inside a dashed form border. */
+  background:
+    repeating-linear-gradient(180deg, transparent 0 27px, #ffffff07 27px 28px),
+    linear-gradient(180deg, #0c1219f2, #06090df5);
   border: 1px solid #ffffff14;
-  border-radius: 12px;
+  border-radius: 3px;
+  outline: 1px dashed #ffffff14;
+  outline-offset: -10px;
   box-shadow: 0 0 0 1px #000, 0 30px 90px #000000d9, 0 0 90px #4db8ff14;
   color: var(--ink);
 }
-/* A thin blue tube along the top edge of the card. It is one of the failing ones. */
+/* A thin blue tube along the top edge of the card, burning steady. */
 #walk-hud #walk-pause .walk-card::before {
   content: '';
   position: absolute;
@@ -53,25 +64,21 @@ body[data-escape] #walk-hud #walk-pause, body[data-death] #walk-hud #walk-pause 
   background: linear-gradient(90deg, transparent, var(--neon-blue) 15%, var(--neon-blue) 85%, transparent);
   box-shadow: 0 0 10px #4db8ffaa, 0 0 22px #4db8ff66;
   pointer-events: none;
-  animation: neon-broken 9.7s linear 2.1s infinite;
 }
 
-/* Titles: pink brush-script neon. One letter of the brand (.neon-broken) is on its last legs. */
+/* Titles: pink typewritten neon. */
 #walk-hud #walk-pause .walk-card :is(h1, h2) {
   color: #ffe9f8;
-  font-family: var(--vice);
-  font-weight: 400;
-  letter-spacing: 0.01em;
-  text-shadow: var(--vice-glow);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-shadow: var(--title-glow);
 }
-#walk-hud #walk-pause .walk-card h1 { font-size: 56px; line-height: 1.02; }
-#walk-hud #walk-pause .walk-card h2 { font-size: 46px; line-height: 1.05; }
+#walk-hud #walk-pause .walk-card h1 { font-size: 44px; line-height: 1.08; }
+#walk-hud #walk-pause .walk-card h2 { font-size: 34px; line-height: 1.12; }
 @media (max-width: 540px) {
-  #walk-hud #walk-pause .walk-card h1 { font-size: 46px; }
-  #walk-hud #walk-pause .walk-card h2 { font-size: 40px; }
+  #walk-hud #walk-pause .walk-card h1 { font-size: 36px; }
+  #walk-hud #walk-pause .walk-card h2 { font-size: 30px; }
 }
-#walk-hud #walk-pause .walk-card h1 { animation: neon-warm-up 2.4s ease-out 1 both; }
-#walk-hud #walk-pause .neon-broken { animation: neon-broken 6.3s linear 3s infinite; }
 #walk-hud #walk-pause .walk-card :is(p, small) { color: var(--ink-muted); }
 #walk-hud #walk-pause .walk-eyebrow { color: var(--neon-blue); text-shadow: 0 0 8px #4db8ff88; }
 
@@ -80,14 +87,17 @@ body[data-escape] #walk-hud #walk-pause, body[data-death] #walk-hud #walk-pause 
   --neon: var(--neon-blue);
   position: relative;
   border: 1px solid color-mix(in srgb, var(--neon) 38%, transparent);
-  border-radius: 8px;
+  border-radius: 2px;
   background: #0d141bcc;
   color: #dbe8ee;
   text-shadow: none;
   box-shadow: inset 0 0 0 0 transparent;
-  transition: border-color 0.15s, color 0.15s, background-color 0.15s, box-shadow 0.2s, text-shadow 0.2s;
+  /* Going dark is quick and has no delay; coming on is in the hover rule below. */
+  transition: border-color 0.25s, color 0.15s, background-color 0.15s, box-shadow 0.3s, text-shadow 0.3s;
 }
 #walk-hud #walk-pause .menu-quiet { border-color: transparent; background: transparent; color: var(--ink-muted); }
+/* Button names are typed in spaced capitals; the one-line notes under them stay in lower case. */
+#walk-hud #walk-pause :where(.main-entry strong, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter) { text-transform: uppercase; letter-spacing: 0.12em; font-size: 13px; font-weight: 700; }
 
 /* The glow behind a lit button: a soft blurred pool of its colour. */
 #walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button)::before {
@@ -95,131 +105,94 @@ body[data-escape] #walk-hud #walk-pause, body[data-death] #walk-hud #walk-pause 
   position: absolute;
   inset: -6px;
   z-index: -1;
-  border-radius: 14px;
+  border-radius: 8px;
   background: var(--neon);
   filter: blur(18px);
   opacity: 0;
-  transition: opacity 0.22s;
+  transition: opacity 0.3s;
   pointer-events: none;
 }
 
-/* Two of the resting tubes and the primary sign stutter now and then, out of step with each other.
- * Only while resting: a chosen tube burns steady. */
-#walk-hud #walk-pause .main-menu .main-entry:nth-child(2):not(:hover, :focus-visible, :active) { animation: neon-sputter 13.7s linear 6s infinite; }
-#walk-hud #walk-pause .main-menu .main-entry:nth-child(4):not(:hover, :focus-visible, :active) { animation: neon-sputter 8.9s linear 1.5s infinite; }
-#walk-hud #walk-pause .view-grid .main-entry:nth-child(3n + 2):not(:hover, :focus-visible, :active) { animation: neon-sputter 10.3s linear 2.7s infinite; }
-#walk-hud #walk-pause :is(#walk-start, .menu-primary):not(:hover, :focus-visible, :active) { animation: neon-sputter 11.3s linear 4s infinite; }
-
-/* Lit: the primary sign (always on, blue), and anything chosen: hovered, keyboard-selected or pressed (green). */
-#walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button):is(:hover, :focus-visible, :active):not(:disabled),
-#walk-hud #walk-pause :is(#walk-start, .menu-primary):not(:disabled) {
-  border-color: var(--neon);
+/* Pointing at a button brightens its words at once and nothing more. Resting on it for --glow-delay lights it in
+ * green neon, slowly and steadily; moving off turns it dark again. */
+#walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button):hover:not(:disabled) {
   color: #fff;
-  background: color-mix(in srgb, var(--neon) 9%, #0b1118);
-  text-shadow: 0 0 6px var(--neon);
-  box-shadow: 0 0 4px var(--neon), 0 0 18px color-mix(in srgb, var(--neon) 65%, transparent), 0 0 42px color-mix(in srgb, var(--neon) 22%, transparent),
-    inset 0 0 12px color-mix(in srgb, var(--neon) 30%, transparent);
+  background-color: #111b24;
+  border-color: var(--neon-green);
+  text-shadow: 0 0 6px var(--neon-green);
+  box-shadow: 0 0 4px var(--neon-green), 0 0 18px #3dff8ca6, 0 0 42px #3dff8c38, inset 0 0 12px #3dff8c4d;
   outline: none;
+  transition: color 0.15s, background-color 0.15s,
+    border-color var(--glow-in) ease var(--glow-delay), box-shadow var(--glow-in) ease var(--glow-delay), text-shadow var(--glow-in) ease var(--glow-delay);
 }
-#walk-hud #walk-pause :is(#walk-start, .menu-primary):not(:disabled)::before { opacity: 0.22; }
-/* Chosen turns green and flickers on, steady from then on while it stays chosen. */
-#walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button):is(:hover, :focus-visible, :active):not(:disabled) {
+#walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button):hover:not(:disabled)::before {
   --neon: var(--neon-green);
-  animation: neon-flicker-on 0.42s linear 1;
+  opacity: 0.6;
+  transition: opacity var(--glow-in) ease var(--glow-delay);
 }
-#walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button):is(:hover, :focus-visible, :active):not(:disabled)::before { opacity: 0.6; }
-#walk-hud #walk-pause :is(.main-entry, .menu-primary, .menu-secondary, #walk-start):active:not(:disabled) { background: color-mix(in srgb, var(--neon) 18%, #0b1118); }
+/* Keyboard selection is not lit: once the keyboard is used to move around (main.ts sets data-input), a dashed
+ * typed outline shows where you are. The menu's own default selection on opening shows nothing. */
+#walk-hud #walk-pause .walk-card :is(button, summary, a):focus-visible { outline: none; }
+html[data-input="keys"] #walk-hud #walk-pause .walk-card :is(button, summary, a):focus-visible { outline: 1px dashed #4db8ffaa; outline-offset: 3px; }
+#walk-hud #walk-pause :is(.main-entry, .menu-primary, .menu-secondary, #walk-start):active:not(:disabled) { background-color: #16232e; }
 
 #walk-hud #walk-pause .main-entry strong { color: inherit; }
 #walk-hud #walk-pause .main-entry span { color: var(--ink-muted); text-shadow: none; }
-#walk-hud #walk-pause .main-entry::after { color: color-mix(in srgb, var(--neon) 70%, #fff); }
-#walk-hud #walk-pause .main-entry:is(:hover, :focus-visible)::after { color: #fff; text-shadow: 0 0 6px var(--neon); }
+#walk-hud #walk-pause .main-entry::after { color: color-mix(in srgb, var(--neon-blue) 70%, #fff); transition: color 0.15s, text-shadow 0.3s; }
+#walk-hud #walk-pause .main-entry:hover::after { color: #fff; text-shadow: 0 0 6px var(--neon-green); transition: color 0.15s, text-shadow var(--glow-in) ease var(--glow-delay); }
 #walk-hud #walk-pause #walk-start span { color: inherit; }
-#walk-hud #walk-pause .walk-card button:disabled { background: #0d141b; color: var(--ink-muted); border-color: #ffffff1f; box-shadow: none; text-shadow: none; animation: none; }
+#walk-hud #walk-pause .walk-card button:disabled { background: #0d141b; color: var(--ink-muted); border-color: #ffffff1f; box-shadow: none; text-shadow: none; }
 
-/* Text links (Briefing, Controls, Settings, Back, Main menu) light up as small green neon words when chosen. */
-#walk-hud #walk-pause :is(.mission-menu-links button, .menu-back, .walk-home) { color: var(--ink-muted); background: transparent; border: 0; transition: color 0.15s, text-shadow 0.2s; }
-#walk-hud #walk-pause :is(.mission-menu-links button, .menu-back, .walk-home):is(:hover, :focus-visible) {
-  color: #effff5; text-decoration: none; outline: none;
+/* Text links (Back, Main menu) brighten when pointed at, and glow as small green neon words after the same rest. */
+#walk-hud #walk-pause :is(.mission-menu-links button, .menu-back, .walk-home) { color: var(--ink-muted); background: transparent; border: 0; transition: color 0.15s, text-shadow 0.3s; }
+#walk-hud #walk-pause :is(.mission-menu-links button, .menu-back, .walk-home):hover {
+  color: #effff5; text-decoration: none;
   text-shadow: 0 0 6px var(--neon-green), 0 0 16px #3dff8c99;
+  transition: color 0.15s, text-shadow var(--glow-in) ease var(--glow-delay);
 }
 #walk-hud #walk-pause .mission-menu-links { border-top-color: #ffffff17; }
 
 /* Keys, rules, inputs and the field map in the night palette. */
 #walk-hud #walk-pause kbd { color: #dff6ff; }
+/* Keys look like old typewriter keys: a dark cap inside a thin metal rim. */
 #walk-hud #walk-pause .menu-back kbd, #walk-hud #walk-pause .mission-keys kbd {
-  padding: 1px 6px; border: 1px solid #4db8ff55; border-radius: 4px; background: #0e1720; box-shadow: 0 0 6px #4db8ff22;
+  padding: 1px 7px; border: 1px solid #4db8ff66; border-radius: 9px; background: radial-gradient(circle at 50% 35%, #17222c, #0b1117);
+  box-shadow: 0 0 0 2px #0b1117, 0 0 0 3px #ffffff22, 0 0 6px #4db8ff22; text-transform: uppercase; letter-spacing: 0.06em;
 }
 #walk-hud #walk-pause :is(.mission-keys > div, .mission-settings label:has([type="checkbox"]), .mission-tips) { border-color: #ffffff14; }
 #walk-hud #walk-pause .mission-keys dt { color: var(--ink-muted); }
-#walk-hud #walk-pause .mission-tips summary { color: var(--ink); }
-#walk-hud #walk-pause .mission-tips summary:hover { color: #effff5; text-shadow: 0 0 6px var(--neon-green); }
+#walk-hud #walk-pause .mission-tips summary { color: var(--ink); transition: color 0.15s, text-shadow 0.3s; }
+#walk-hud #walk-pause .mission-tips summary:hover { color: #fff; text-shadow: 0 0 6px var(--neon-green); transition: color 0.15s, text-shadow var(--glow-in) ease var(--glow-delay); }
 #walk-hud #walk-pause .mission-settings output { color: var(--neon-blue); text-shadow: 0 0 6px #4db8ff88; }
 #walk-hud #walk-pause input[type="range"], #walk-hud #walk-pause input[type="checkbox"] { accent-color: var(--neon-blue); }
-#walk-hud #walk-pause :is(input[type="range"], input[type="checkbox"]):is(:hover, :focus-visible) { accent-color: var(--neon-green); }
 #walk-hud #walk-pause :is(.coop-join input, .coop-invite input) { background: #0b1117; color: var(--ink); border: 1px solid #4db8ff44; }
 #walk-hud #walk-pause :is(.coop-join input, .coop-invite input):focus { outline: none; border-color: var(--neon-green); box-shadow: 0 0 10px #3dff8c66; }
 #walk-hud #walk-pause .field-map svg { filter: drop-shadow(0 0 1px #4db8ff55); }
 #walk-hud #walk-pause .mission-recap { border-top-color: #ffffff1a; }
-#walk-hud #walk-pause .mission-recap dd { color: #ffe9f8; font: 400 34px/1.1 var(--vice); text-shadow: var(--vice-glow); }
+#walk-hud #walk-pause .mission-recap dd { color: #ffe9f8; font: 700 28px/1.1 var(--type); text-shadow: var(--title-glow); }
 #walk-hud #walk-pause #vr-panel { color: var(--ink-muted); }
 
 /* The small corner buttons over the world (Main menu, map views) are little blue signs that turn green. */
 .mode-button {
+  font-family: var(--type);
   border: 1px solid #4db8ff55;
-  border-radius: 8px;
+  border-radius: 2px;
   background: #080c11e6;
   color: #dbe8ee;
-  transition: border-color 0.15s, box-shadow 0.2s, text-shadow 0.2s;
+  transition: color 0.15s, border-color 0.25s, box-shadow 0.3s, text-shadow 0.3s;
 }
-.mode-button:hover, .mode-button:focus-visible {
+.mode-button:focus-visible { outline: none; }
+html[data-input="keys"] .mode-button:focus-visible { outline: 1px dashed #4db8ffaa; outline-offset: 3px; }
+.mode-button:hover {
   background: #0b1118f0;
   border-color: var(--neon-green);
   color: #fff;
   outline: none;
   text-shadow: 0 0 6px var(--neon-green);
   box-shadow: 0 0 4px var(--neon-green), 0 0 16px #3dff8c88;
+  transition: color 0.15s, border-color var(--glow-in) ease var(--glow-delay), box-shadow var(--glow-in) ease var(--glow-delay), text-shadow var(--glow-in) ease var(--glow-delay);
 }
 
-/* A tube switching on. */
-@keyframes neon-flicker-on {
-  0% { opacity: 0.55; }
-  8% { opacity: 1; }
-  14% { opacity: 0.35; }
-  22% { opacity: 1; }
-  30% { opacity: 0.7; }
-  38%, 100% { opacity: 1; }
-}
-@keyframes neon-warm-up {
-  0% { opacity: 0.15; }
-  6% { opacity: 0.9; }
-  9% { opacity: 0.25; }
-  16% { opacity: 1; }
-  19% { opacity: 0.55; }
-  26%, 100% { opacity: 1; }
-}
-/* A failing tube: steady for most of the cycle, then a stutter of dropouts. */
-@keyframes neon-broken {
-  0%, 68% { opacity: 1; }
-  68.8% { opacity: 0.12; }
-  69.6% { opacity: 0.85; }
-  70.3% { opacity: 0.2; }
-  71.5% { opacity: 1; }
-  88% { opacity: 1; }
-  88.5% { opacity: 0.35; }
-  89.2%, 100% { opacity: 1; }
-}
-/* A whole sign browning out for a moment, glow and all. */
-@keyframes neon-sputter {
-  0%, 57% { filter: none; }
-  57.6% { filter: brightness(0.45) saturate(0.6); }
-  58.3% { filter: none; }
-  59.2% { filter: brightness(0.6) saturate(0.7); }
-  60.4%, 100% { filter: none; }
-}
-
-/* Reduced Motion: the glow stays, the flicker does not. */
-body[data-reduced-motion="true"] #walk-hud #walk-pause *, body[data-reduced-motion="true"] #walk-hud #walk-pause .walk-card::before { animation: none !important; }
-@media (prefers-reduced-motion: reduce) {
-  #walk-hud #walk-pause *, #walk-hud #walk-pause .walk-card::before { animation: none !important; }
-}
+/* Reduced Motion: the neon still comes on after the rest, but at once instead of fading in. */
+body[data-reduced-motion="true"] { --glow-in: 0s; }
+@media (prefers-reduced-motion: reduce) { :root { --glow-in: 0s; } }

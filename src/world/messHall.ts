@@ -3,7 +3,7 @@ import { Draft, type Point } from '../render/ink'
 import { neonSign } from '../render/neon-sign'
 import { interiorRoomOutline, WALL_THICKNESS, wallOutline, type BuildingSpec } from './architecture'
 import { createDoor } from './doors'
-import { darkRoom, doorwayLight, screenLight } from './lights'
+import { cageLamp, darkRoom, daylightOpening, doorwayLight, LAMP_AMBER, screenLight, windowRow } from './lights'
 import { pipe, pipeLadder } from './ladders'
 
 interface Opening { center: number; width: number; bottom: number; height: number; window?: boolean }
@@ -229,8 +229,9 @@ export function messHall(spec: BuildingSpec): THREE.Group {
 
   // The central aisle leads south, beyond the service fence, into the compound.
   // The leaf swings outward over a landing flush with the interior floor.
-  g.add(createDoor({ name: 'Mess hall yard exit', x: exitX, z: halfD, floor,
-    width: exitWidth, height: exitHeight, exit: true }))
+  const yardExit = createDoor({ name: 'Mess hall yard exit', x: exitX, z: halfD, floor,
+    width: exitWidth, height: exitHeight, exit: true })
+  g.add(yardExit)
   const exitLanding = new Draft('Mess hall · yard exit landing')
   exitLanding.box(2.4, floor, 2.1, exitX, floor / 2, halfD + 1.05, 'concrete')
   g.add(exitLanding.finish())
@@ -238,14 +239,15 @@ export function messHall(spec: BuildingSpec): THREE.Group {
   // The left-hand office is a real enclosed room, with its door in the hall-facing wall.
   const officeWallX = -7.4, officeWidth = halfW + officeWallX
   const officeDoor = createDoor({ name: 'Signals office door', x: officeWallX, z: 0, floor, width: 1.4, height: 2.4, angle: Math.PI / 2 })
-  doorwayLight(officeDoor)
+  // The hall outside is lamp-lit, so only a little light follows you in through the office door.
+  doorwayLight(officeDoor, -1, { intensity: 1.6 })
   g.add(
     wall('Signals office · east partition', 8, h, officeWallX, 0, floor, Math.PI / 2,
       [{ center: 0, width: 1.4, bottom: 0, height: 2.4 }]),
     wall('Signals office · north partition', officeWidth, h, (-halfW + officeWallX) / 2, -4, floor),
     wall('Signals office · south partition', officeWidth, h, (-halfW + officeWallX) / 2, 4, floor),
     officeDoor,
-    // No lights in the office: it is lit only by the surveillance screen and by daylight through its door.
+    // No lights in the office: it is lit only by the surveillance screen and by the hall's light through its door.
     darkRoom('Signals office', [(-halfW + officeWallX) / 2, (floor - 0.3 + h + floor + 0.15) / 2, 0],
       [officeWidth / 2, (h + 0.45) / 2, 4]),
     // A blue neon SECURITY sign above the camera room's door. It is a real light on the hall side.
@@ -402,5 +404,29 @@ export function messHall(spec: BuildingSpec): THREE.Group {
   // The final rung is below this plate; its surface joins the roof through the parapet gap.
   ladder.box(1.26, 0.12, 0.84, 0, roofY - 0.06, -0.42, 'concrete')
   g.add(ladder.finish())
+
+  // Lighting, as in every building (see interiorLighting in architecture.ts): dark inside, with daylight and
+  // sunbeams through each wall's windows, daylight down the stairwell from the roof and through the yard door
+  // while it is open, and caged lamps on long cords from the high ceiling. The office is its own darker room.
+  const top = roofY - 0.15
+  g.add(darkRoom('Mess hall', [0, (floor - 0.3 + top) / 2, 0], [halfW + 0.02, (top - floor + 0.3) / 2, halfD + 0.02], { ambient: 0.035 }))
+  const paneY = floor + 1.4 + 1.45 / 2
+  g.add(
+    windowRow('Mess hall · south windows', [0, paneY, halfD], Math.PI, [-10.2, -5.2, 4.8, 10.2].map(x => -x), 1.7, 1.45),
+    windowRow('Mess hall · north windows', [0, paneY, -halfD], 0, [-10.2, -3.6, 3.5, 10.2], 1.7, 1.45),
+    // The end walls are turned a quarter round, so their openings' positions run toward -z: the west light (also
+    // turned that way) takes them as they are, the east light (turned the other way) reversed.
+    windowRow('Mess hall · west windows', [-halfW, paneY, 0], Math.PI / 2, [-7.4, 6.8], 1.7, 1.45),
+    windowRow('Mess hall · east windows', [halfW, paneY, 0], -Math.PI / 2, [-7.4, 2.4].map(z => -z), 1.7, 1.45),
+    daylightOpening('Mess hall · stairwell', [(hole.minX + hole.maxX) / 2, top, (hole.minZ + hole.maxZ) / 2], [0, -1, 0], [0, 0, 1],
+      hole.maxZ - hole.minZ, { intensity: 2.5, range: 10 }),
+  )
+  doorwayLight(yardExit, -1, { bounce: 0.12 })
+  const bulb = eave - 1.7
+  const lamps: [string, number, number][] = [
+    ['north-west', -3.9, -halfD / 2], ['north-east', 3.1, -halfD / 2], ['south-west', -3.9, halfD / 2], ['south-east', 3.1, halfD / 2],
+    ['vestibule', (halfW + 6.72) / 2, -(halfD + 7.1) / 2],
+  ]
+  for (const [where, x, z] of lamps) g.add(cageLamp(`Mess hall · ${where} lamp`, [x, eave, z], LAMP_AMBER, eave - bulb, { intensity: 4.2, range: 11 }))
   return g
 }

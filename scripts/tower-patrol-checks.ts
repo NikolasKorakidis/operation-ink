@@ -18,7 +18,7 @@ const scene = new THREE.Scene(), compound = createCompound(), mission = createMi
 prepareCompound(compound); scene.add(compound, mission.root); scene.updateMatrixWorld(true)
 const world = new CollisionWorld(scene)
 const director = new EnemyDirector({ scene, world, specs: mission.enemies.filter(e => e.role === 'sniper'),
-  doors: [], emit() {}, damagePlayer() {}, dropWeapon() {} })
+  doors: [], emit() {}, damagePlayer() {}, dropWeapon() {}, planningSteps: 2000 })
 const player: PlayerSense = { feet: v(-200, 0, -200), eye: v(-200, 1.65, -200), velocity: v(), alive: true, radioEnabled: false }
 const dt = 1 / 60, failures: string[] = []
 function check(name: string, run: () => void) {

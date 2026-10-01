@@ -6,7 +6,9 @@ import type { Vec3, WeaponName } from './types'
 
 export type HitZone = 'head' | 'torso' | 'arm' | 'leg'
 export type ActorHit = { distance: number; point: THREE.Vector3; zone: HitZone; bone: BoneName }
-export type HitReaction = { zone: HitZone; point: THREE.Vector3; direction: THREE.Vector3; lethal: boolean; bone?: BoneName; weapon?: WeaponName; targetId?: string; by?: number; headBurst?: boolean }
+export type HitReaction = { zone: HitZone; point: THREE.Vector3; direction: THREE.Vector3; lethal: boolean; bone?: BoneName; weapon?: WeaponName; targetId?: string; by?: number; headBurst?: boolean
+  /** Health the hit took, whether it was a critical hit, and whether it broke the target's armour. */
+  damage?: number; armorDamage?: number; critical?: boolean; armorBroken?: boolean }
 export type ActorReactionSnapshot = { clip: string; elapsed: number; zone: HitZone; lethal: boolean }
 export type HitVolume = { a: THREE.Vector3; b: THREE.Vector3; radius: number; zone: HitZone; bone: BoneName }
 
@@ -33,6 +35,8 @@ export function rayCapsuleDistance(origin: THREE.Vector3, direction: THREE.Vecto
 
 /** Small volumes follow the rendered skeleton, including leaning, raised arms and falling poses. */
 export class AnimatedHitVolumes {
+  /** How much wider the torso is than a standard guard's (the fat boss). */
+  girth = 1
   constructor(private rig: Rig) {}
 
   volumes(): HitVolume[] {
@@ -44,9 +48,9 @@ export class AnimatedHitVolumes {
       a: point(bone, start), b: typeof end === 'number' ? point(bone, end) : point(end), radius: radius * scale, zone, bone,
     })
     add('head', 0.205, 0.205, 'head', 0.205)
-    add('hips', 'spine', 0.095, 'torso')
-    add('spine', 'chest', 0.105, 'torso')
-    add('chest', 'neck', 0.11, 'torso')
+    add('hips', 'spine', 0.095 * this.girth, 'torso')
+    add('spine', 'chest', 0.105 * this.girth, 'torso')
+    add('chest', 'neck', 0.11 * Math.sqrt(this.girth), 'torso')
     add('neck', 'head', 0.063, 'torso')
     for (const side of ['L', 'R'] as const) {
       add(`upper_arm.${side}`, `forearm.${side}`, 0.055, 'arm')
@@ -114,17 +118,27 @@ type Stain = { position: Vec3; size: number; angle: number; stamp: number; grow?
 type ShotgunBurst = { targetId: string; direction: Vec3; elapsed: number; next: number }
 /** A piece of an exploding head: a `pop` swells and fades where the head was; a `chunk` flies and falls. */
 type Gob = { kind: 'pop' | 'chunk'; position: Vec3; velocity: Vec3; radius: number; age: number; life: number; dark: boolean }
+const STAIN_UP = new THREE.Vector3(0, 1, 0)
 export type BloodSnapshot = { droplets: Droplet[]; stains: Stain[]; seed: number; shotgunBursts?: ShotgunBurst[] }
 
 /** Per-mission version of the lab's pigment stamps; no global lab singleton, flat-ground assumption or timers. */
 export class MissionBlood {
   readonly root = new THREE.Group()
   private readonly dropLimit = 192
-  private readonly stainLimit = 512
+  /**
+   * Blood stays where it fell for the whole mission. A kill leaves a few dozen marks, so this is far beyond any
+   * mission; only past it do the oldest marks give way. Marks upload only when they change (see render).
+   */
+  private readonly stainLimit = 8192
   private droplets: Droplet[] = []
   private gobs: Gob[] = []
   private readonly gobLimit = 96
   private stains: Stain[] = []
+  /** The first mark whose instance data is stale, and the marks still spreading as pools. */
+  private stainsDirtyFrom = 0
+  private growing: number[] = []
+  private marksChanged = false
+  private readonly stainColor = new THREE.Color(bloodPalette.stain)
   private shotgunBursts: ShotgunBurst[] = []
   private seed = 17923
   private surface = createStampSurface(this.stainLimit)
@@ -289,7 +303,30 @@ export class MissionBlood {
     this.stains.push({ position: [point.x, floor + 0.006 + (this.stains.length % 8) * 0.00015, point.z],
       size: Math.min(size, limit), angle: this.random() * Math.PI * 2, stamp,
       ...(grow ? { grow: Math.min(grow, limit) } : {}) })
-    this.stains = this.stains.slice(-this.stainLimit)
+    if (this.stains.length > this.stainLimit) this.reindexStains(this.stains.slice(-this.stainLimit))
+    else {
+      const index = this.stains.length - 1
+      this.stainsDirtyFrom = Math.min(this.stainsDirtyFrom, index)
+      if (grow) this.growing.push(index)
+    }
+  }
+
+  /** Replaces the whole set of marks (overflow, checkpoint restore): every mark is redrawn. */
+  private reindexStains(stains: Stain[]) {
+    this.stains = stains
+    this.stainsDirtyFrom = 0
+    this.growing = stains.flatMap((mark, index) => mark.grow && mark.size < mark.grow ? [index] : [])
+  }
+
+  private writeStain(index: number) {
+    const mark = this.stains[index]
+    this.position.fromArray(mark.position)
+    this.orientation.setFromAxisAngle(STAIN_UP, mark.angle)
+    this.scale.set(mark.size, 1, mark.size * 1.15)
+    this.marks.setMatrixAt(index, this.matrix.compose(this.position, this.orientation, this.scale))
+    this.marks.setColorAt(index, this.stainColor)
+    this.surface.stamps.setXY(index, mark.stamp, 1)
+    this.marksChanged = true
   }
 
   update(dt: number) {
@@ -312,7 +349,13 @@ export class MissionBlood {
       }
       return burst.next < events.length
     })
-    for (const mark of this.stains) if (mark.grow && mark.size < mark.grow) mark.size = Math.min(mark.grow, mark.size + delta * 0.1)
+    this.growing = this.growing.filter(index => {
+      const mark = this.stains[index]
+      if (!mark?.grow || mark.size >= mark.grow) return false
+      mark.size = Math.min(mark.grow, mark.size + delta * 0.1)
+      this.writeStain(index)
+      return mark.size < mark.grow
+    })
     const live: Droplet[] = []
     for (const drop of this.droplets) {
       const before = this.position.fromArray(drop.position).clone()
@@ -391,24 +434,22 @@ export class MissionBlood {
     })
     this.gore.instanceMatrix.needsUpdate = true
     if (this.gore.instanceColor) this.gore.instanceColor.needsUpdate = true
+    // Marks never move once laid: only new ones and spreading pools are written, and the buffers upload only then.
     this.marks.count = this.stains.length
-    this.stains.forEach((mark, index) => {
-      this.position.fromArray(mark.position)
-      this.orientation.setFromAxisAngle(up, mark.angle)
-      this.scale.set(mark.size, 1, mark.size * 1.15)
-      this.marks.setMatrixAt(index, this.matrix.compose(this.position, this.orientation, this.scale))
-      this.marks.setColorAt(index, new THREE.Color(bloodPalette.stain))
-      this.surface.stamps.setXY(index, mark.stamp, 1)
-    })
-    this.marks.instanceMatrix.needsUpdate = this.surface.stamps.needsUpdate = true
-    if (this.marks.instanceColor) this.marks.instanceColor.needsUpdate = true
+    for (let index = this.stainsDirtyFrom; index < this.stains.length; index++) this.writeStain(index)
+    this.stainsDirtyFrom = this.stains.length
+    if (this.marksChanged) {
+      this.marks.instanceMatrix.needsUpdate = this.surface.stamps.needsUpdate = true
+      if (this.marks.instanceColor) this.marks.instanceColor.needsUpdate = true
+      this.marksChanged = false
+    }
   }
 
   snapshot(): BloodSnapshot { return structuredClone({ droplets: this.droplets, stains: this.stains, seed: this.seed, shotgunBursts: this.shotgunBursts }) }
   restore(snapshot?: BloodSnapshot | null) {
     if (this.disposed) return
     this.droplets = structuredClone(snapshot?.droplets ?? []).slice(-this.dropLimit)
-    this.stains = structuredClone(snapshot?.stains ?? []).slice(-this.stainLimit)
+    this.reindexStains(structuredClone(snapshot?.stains ?? []).slice(-this.stainLimit))
     this.shotgunBursts = structuredClone(snapshot?.shotgunBursts ?? []).slice(-16)
     this.seed = snapshot?.seed ?? 17923
     this.gobs = []

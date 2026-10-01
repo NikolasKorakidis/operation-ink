@@ -67,10 +67,11 @@ export class FirstPersonWeapons {
   private rightHand = new THREE.Group()
   private leftHand = new THREE.Group()
   private supportFingers = new THREE.Group()
-  private armMaterial = new THREE.MeshBasicMaterial({
+  // Sleeves and skin: a soft, broad sheen under lamps and sunbeams, not a metal glint.
+  private armMaterial = Object.assign(new THREE.MeshBasicMaterial({
     color: penPalette.paper, toneMapped: false,
     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
-  })
+  }), { defines: { NEON_SHINE: '0.18', NEON_GLOSS: '10.0' } })
   // Full upper arms taper through the elbow to a narrower wrist; IK still owns length.
   private upperArmGeometry = new THREE.CylinderGeometry(0.055, 0.075, 1, 24)
   private forearmGeometry = new THREE.CylinderGeometry(0.035, 0.057, 1, 24)

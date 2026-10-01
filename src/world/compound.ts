@@ -149,6 +149,36 @@ function landscaping() {
   return g.finish()
 }
 
+/**
+ * A window that opens, even partly, onto another building's wall right outside lets next to no daylight in.
+ * Drop such panes from their wall's window light (see windowRow), and the light itself when none are left.
+ */
+function shadeBlockedWindows(buildings: THREE.Object3D[]) {
+  for (const building of buildings) building.updateMatrixWorld(true)
+  const inside = (point: THREE.Vector3, building: THREE.Object3D) => {
+    const [w, d] = building.userData.footprint as [number, number]
+    const local = building.worldToLocal(point.clone())
+    return Math.abs(local.x) < w / 2 + 0.15 && Math.abs(local.z) < d / 2 + 0.15
+  }
+  for (const building of buildings) {
+    const rows: THREE.Object3D[] = []
+    building.traverse(object => { if (object.userData.neonLight?.window) rows.push(object) })
+    for (const row of rows) {
+      const spec = row.userData.neonLight
+      const middle = new THREE.Vector3(...spec.start).lerp(new THREE.Vector3(...spec.end), 0.5).applyMatrix4(row.matrixWorld)
+      const axis = new THREE.Vector3(...spec.end).sub(new THREE.Vector3(...spec.start)).normalize().transformDirection(row.matrixWorld)
+      const outward = new THREE.Vector3(0, 0, -1).transformDirection(row.matrixWorld)
+      // Look out through the pane's middle and near both its edges.
+      const reach = spec.window.width / 2 - 0.15
+      spec.window.offsets = (spec.window.offsets as number[]).filter(offset => [-reach, 0, reach].every(edge => {
+        const outside = middle.clone().addScaledVector(axis, offset + edge).addScaledVector(outward, 0.6)
+        return !buildings.some(other => other !== building && inside(outside, other))
+      }))
+      if (!spec.window.offsets.length) row.removeFromParent()
+    }
+  }
+}
+
 export function createCompound() {
   const root = new THREE.Group()
   root.name = 'Rail supply compound'
@@ -170,6 +200,7 @@ export function createCompound() {
       angle: vertical ? Math.PI / 2 : 0,
     }))
   }
+  shadeBlockedWindows(root.children.filter(child => child.userData.footprint))
   root.add(platform('Northwest building apron', ...mapPoint(522, 237), 36, 27, 0.12))
   root.add(workshop(...mapPoint(1302, 481)), truck(...mapPoint(1305, 504)))
   for (const [i, y] of [319, 432, 548].entries()) root.add(fuelTank(i + 1, ...mapPoint(147, y)))

@@ -62,7 +62,8 @@ const fill = Object.assign(new THREE.MeshBasicMaterial({ color: penPalette.chara
 
 // Dual-quaternion skinning (Blender "Preserve Volume"): glTF only carries weights and Three.js skins with linear blending,
 // which collapses the elbow/shoulder at 90 deg and candy-wraps the upper arm on twist. Rewrites the three skinning chunks.
-// ponytail: assumes rigid bones (no scale); add column normalisation in dqRotOf if a bone ever scales.
+// A uniformly scaled rig (the tutorial boss) is supported: the rotation is read from normalised columns and the scale
+// is reapplied to the vertex. Non-uniform scale is not.
 /** Per-bone axial stretch (pose length factors): bind-space bone axis and origin, origin.w = current stretch. */
 const DQ_MAX_BONES = 32
 export const dqUniforms = {
@@ -79,6 +80,7 @@ const DQ_FUNCS = /* glsl */ `
   }
   vec4 dqMul(vec4 a, vec4 b) { return vec4(a.w * b.xyz + b.w * a.xyz + cross(a.xyz, b.xyz), a.w * b.w - dot(a.xyz, b.xyz)); }
   vec4 dqRotOf(mat4 m) {
+    float scale = length(m[0].xyz); m[0] /= scale; m[1] /= scale; m[2] /= scale;
     float t = m[0][0] + m[1][1] + m[2][2]; vec4 q;
     if (t > 0.0) { float s = sqrt(t + 1.0) * 2.0; q = vec4((m[1][2] - m[2][1]) / s, (m[2][0] - m[0][2]) / s, (m[0][1] - m[1][0]) / s, 0.25 * s); }
     else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) { float s = sqrt(1.0 + m[0][0] - m[1][1] - m[2][2]) * 2.0; q = vec4(0.25 * s, (m[1][0] + m[0][1]) / s, (m[2][0] + m[0][2]) / s, (m[1][2] - m[2][1]) / s); }
@@ -98,6 +100,7 @@ const DQ_BLEND = /* glsl */ `
     dqAcc(boneMatX, skinWeight.x, dqRef, dqR, dqD); dqAcc(boneMatY, skinWeight.y, dqRef, dqR, dqD);
     dqAcc(boneMatZ, skinWeight.z, dqRef, dqR, dqD); dqAcc(boneMatW, skinWeight.w, dqRef, dqR, dqD);
     float dqLen = length(dqR); dqR /= dqLen; dqD /= dqLen;
+    float dqScale = length(boneMatX[0].xyz);
   #endif
 `
 const DQ_NORMAL = /* glsl */ `
@@ -107,7 +110,7 @@ const DQ_NORMAL = /* glsl */ `
 `
 const DQ_VERTEX = /* glsl */ `
   #ifdef USE_SKINNING
-    vec3 dqP = dqRot(dqR, dqStretch((bindMatrix * vec4(transformed, 1.0)).xyz)) + 2.0 * (dqR.w * dqD.xyz - dqD.w * dqR.xyz + cross(dqR.xyz, dqD.xyz));
+    vec3 dqP = dqRot(dqR, dqStretch((bindMatrix * vec4(transformed, 1.0)).xyz) * dqScale) + 2.0 * (dqR.w * dqD.xyz - dqD.w * dqR.xyz + cross(dqR.xyz, dqD.xyz));
     transformed = (bindMatrixInverse * vec4(dqP, 1.0)).xyz;
   #endif
 `

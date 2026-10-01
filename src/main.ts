@@ -1,17 +1,23 @@
 import * as THREE from 'three'
-import { EnvironmentCamera, views, type ViewName } from './camera'
+import { warmUp } from './render/warm-up'
+import { EnvironmentCamera, type ViewName } from './camera'
+import { levelOf, onModeSwitch, playsLevel, startMode, type Mode } from './modes'
 import { palette, resizeInk } from './render/ink'
-import { createCompound } from './world/compound'
 import { EnvironmentInteractions } from './interactions'
 import { FirstPersonController } from './player/controller'
 import { VRWalkthrough } from './vr/walkthrough'
-import { createMissionWorld, prepareCompound } from './game/world'
+import { buildLevel, levelInfo } from './levels'
 import { MissionRuntime } from './game/runtime'
 import { BuildingLabels } from './world/labels'
 import { NeonLights } from './render/neon'
 import { addExitSigns } from './world/exitSigns'
 import './style.css'
 import './game/menu-neon.css'
+
+// Menus show their keyboard outline only once the keyboard is used to move around; the mouse hides it again.
+const NAVIGATION_KEYS = new Set(['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
+addEventListener('keydown', event => { if (NAVIGATION_KEYS.has(event.key)) document.documentElement.dataset.input = 'keys' }, true)
+addEventListener('pointermove', () => { delete document.documentElement.dataset.input }, true)
 
 const canvas = document.querySelector<HTMLCanvasElement>('#world')!
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' })
@@ -25,21 +31,72 @@ renderer.toneMapping = THREE.NoToneMapping
 renderer.setClearColor(palette.paper)
 renderer.shadowMap.enabled = false
 
-const scene = new THREE.Scene()
-scene.name = 'Black ballpoint compound'
-scene.background = new THREE.Color(palette.paper)
-const compound = createCompound()
-const missionWorld = new URLSearchParams(location.search).get('explore') === '1' ? null : createMissionWorld(compound)
-if (missionWorld) prepareCompound(compound)
-scene.add(compound)
-if (missionWorld) scene.add(missionWorld.root)
-// Every way out gets a lit EXIT sign; they are real lights like every neon sign.
-addExitSigns(scene)
-// Name tags over each building for the map views; CSS hides them while walking.
-const buildingLabels = new BuildingLabels(scene)
-// Neon signs are the only real lights; they shade everything around them.
-const neonLights = new NeonLights(scene)
+/**
+ * Everything one mode runs on: its world, camera, player and (for the game and the tutorial) its mission. The
+ * renderer and the render loop stay; a mode switch disposes the session and boots the next one on the same page.
+ */
+type Session = {
+  mode: Mode; scene: THREE.Scene; camera: EnvironmentCamera; interactions: EnvironmentInteractions; player: FirstPersonController
+  vr: VRWalkthrough; mission: MissionRuntime | null; buildingLabels: BuildingLabels; neonLights: NeonLights; startupReady: boolean
+}
 const viewer = new THREE.Vector3()
+
+function boot(mode: Mode): Session {
+  const scene = new THREE.Scene()
+  scene.name = 'Black ballpoint compound'
+  scene.background = new THREE.Color(palette.paper)
+  const level = levelOf(mode)
+  const { ground, world: missionWorld } = buildLevel(level, { explore: mode === 'explore' })
+  scene.add(ground)
+  if (missionWorld) scene.add(missionWorld.root)
+  // Every way out gets a lit EXIT sign; they are real lights like every neon sign.
+  addExitSigns(scene)
+  // Name tags over each building for the map views; CSS hides them while walking.
+  const buildingLabels = new BuildingLabels(scene)
+  // Neon signs are the only real lights; they shade everything around them.
+  const neonLights = new NeonLights(scene)
+  const camera = new EnvironmentCamera(canvas, invalidate)
+  const interactions = new EnvironmentInteractions(canvas, scene, () => camera.active, invalidate, () => camera.walking)
+  const player = new FirstPersonController(canvas, scene, camera, interactions, invalidate)
+  const vr = new VRWalkthrough(renderer, scene, camera, player, invalidate)
+  const mission = missionWorld ? new MissionRuntime(scene, camera, player, missionWorld, invalidate) : null
+  const session: Session = { mode, scene, camera, interactions, player, vr, mission, buildingLabels, neonLights, startupReady: !mission }
+  // Initialization positions the mission camera and settles the menu (including
+  // load errors). Reveal only after that state has actually been rendered.
+  void mission?.initialized.then(() => {
+    warmUp(renderer, scene, camera.active)
+    neonLights.warmUp(renderer, scene, camera.active)
+    session.startupReady = true
+    invalidate()
+  })
+  if (mode === 'load') void mission?.initialized.then(() => mission.showLoad())
+  const view = mode.startsWith('view:') ? mode.slice(5) as ViewName : null
+  if (view) {
+    camera.setView(view)
+    // The mission's player shares the perspective camera and is placed at the insertion once loaded; restore the view after that.
+    void mission?.initialized.then(() => { if (!player.enabled) camera.setView(view) })
+  } else player.enable()
+  // Free roam, the map views, training and developer levels get a way back to the game's main menu.
+  document.querySelector<HTMLElement>('#home-link')!.hidden = !(!missionWorld || view || levelInfo(level)?.kind !== 'campaign')
+  return session
+}
+
+function disposeSession({ scene, vr, buildingLabels, mission, player, camera, interactions }: Session) {
+  vr.dispose()
+  buildingLabels.dispose()
+  mission?.dispose()
+  player.dispose()
+  camera.dispose()
+  interactions.dispose()
+  const materials = new Set<THREE.Material>()
+  scene.traverse(object => {
+    if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+      object.geometry.dispose()
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material)
+    }
+  })
+  materials.forEach(material => material.dispose())
+}
 
 let frame = 0
 let lastTime = performance.now()
@@ -52,16 +109,27 @@ const invalidate = () => {
     frame = requestAnimationFrame(render)
   }
 }
-const camera = new EnvironmentCamera(canvas, invalidate)
-const interactions = new EnvironmentInteractions(canvas, scene, () => camera.active, invalidate, () => camera.walking)
-const player = new FirstPersonController(canvas, scene, camera, interactions, invalidate)
-const vr = new VRWalkthrough(renderer, scene, camera, player, invalidate)
-const mission = missionWorld ? new MissionRuntime(scene, camera, player, missionWorld, invalidate) : null
 const frameTimes: number[] = []
-let startupReady = !mission
-// Initialization positions the mission camera and settles the menu (including
-// load errors). Reveal only after that state has actually been rendered.
-void mission?.initialized.then(() => { startupReady = true; invalidate() })
+let session = boot(startMode())
+
+/**
+ * The game and the tutorial switch into each other in place, with no reload. The menu click that asks for it still
+ * counts as the player's own gesture, so the mouse is captured right then; play starts as soon as the level loads.
+ * Other modes need a fresh page (modes.ts reloads the same address).
+ */
+onModeSwitch(next => {
+  if (!session.mission || !playsLevel(next)) return false
+  try { (canvas.requestPointerLock() as Promise<void> | undefined)?.catch(() => {}) } catch { /* drag-to-look takes over */ }
+  disposeSession(session)
+  document.documentElement.setAttribute('data-loading', '')
+  canvas.dataset.ready = 'false'
+  session = boot(next)
+  const { mission, player } = session
+  void mission?.initialized.then(() => { if (session.player === player) player.begin() })
+  resize()
+  exposeForDevelopment()
+  return true
+})
 
 renderer.xr.addEventListener('sessionstart', () => {
   cancelAnimationFrame(frame)
@@ -80,6 +148,7 @@ function render(now: number, xrFrame?: XRFrame) {
   rendering = true
   const elapsed = (now - lastTime) / 1000
   const dt = Math.min(elapsed, 0.05)
+  const { scene, camera, interactions, player, vr, mission, neonLights, buildingLabels } = session
   if (player.playing && elapsed < 1) {
     frameTimes.push(elapsed * 1000); if (frameTimes.length > 600) frameTimes.shift()
     if (!resolutionSettled && !renderer.xr.isPresenting && ++resolutionFrames >= 90) adaptResolution()
@@ -100,7 +169,7 @@ function render(now: number, xrFrame?: XRFrame) {
     if (!vr.active && document.body.dataset.mode !== 'walk') buildingLabels.update(camera.active)
   }
   finally { mission?.finishFrame() }
-  if (startupReady) {
+  if (session.startupReady) {
     canvas.dataset.ready = 'true'
     if (document.documentElement.hasAttribute('data-loading')) {
       document.documentElement.removeAttribute('data-loading')
@@ -131,7 +200,7 @@ function resize() {
   const width = window.innerWidth, height = window.innerHeight
   renderer.setPixelRatio(pixelRatio())
   renderer.setSize(width, height, false)
-  camera.resize(width, height)
+  session.camera.resize(width, height)
   resizeInk(width, height)
   invalidate()
 }
@@ -147,7 +216,7 @@ canvas.addEventListener('webglcontextlost', event => {
   cancelAnimationFrame(frame)
   frame = 0
   renderer.setAnimationLoop(null)
-  void vr.exit().catch(() => {})
+  void session.vr.exit().catch(() => {})
   canvas.dataset.ready = 'false'
 })
 canvas.addEventListener('webglcontextrestored', () => {
@@ -155,17 +224,11 @@ canvas.addEventListener('webglcontextrestored', () => {
   resize()
 })
 resize()
-const initialView = new URLSearchParams(location.search).get('view')
-if (initialView && initialView in views) {
-  camera.setView(initialView as ViewName)
-  // The mission's player shares the perspective camera and is placed at the insertion once loaded; restore the view after that.
-  void mission?.initialized.then(() => { if (!player.enabled) camera.setView(initialView as ViewName) })
-} else player.enable()
-// Free roam and the map views are separate pages; give them a way back to the main menu.
-if (!missionWorld || initialView) document.querySelector<HTMLElement>('#home-link')!.hidden = false
 
 // Development inspection surface, intentionally absent from production builds and the page UI.
-if (import.meta.env.DEV) {
+function exposeForDevelopment() {
+  if (!import.meta.env.DEV) return
+  const { scene, camera, interactions, player, vr, mission, neonLights } = session
   Object.assign(window, {
     __environment: {
       scene, renderer, camera,
@@ -186,6 +249,7 @@ if (import.meta.env.DEV) {
     },
   })
 }
+exposeForDevelopment()
 
 import.meta.hot?.dispose(() => {
   disposed = true
@@ -193,19 +257,6 @@ import.meta.hot?.dispose(() => {
   renderer.setAnimationLoop(null)
   window.removeEventListener('resize', resize)
   document.removeEventListener('visibilitychange', visibilityChanged)
-  vr.dispose()
-  buildingLabels.dispose()
-  mission?.dispose()
-  player.dispose()
-  camera.dispose()
-  interactions.dispose()
-  const materials = new Set<THREE.Material>()
-  scene.traverse(object => {
-    if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
-      object.geometry.dispose()
-      for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material)
-    }
-  })
-  materials.forEach(material => material.dispose())
+  disposeSession(session)
   renderer.dispose()
 })

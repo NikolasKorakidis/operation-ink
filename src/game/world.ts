@@ -12,8 +12,9 @@ import { createCellLock } from './cell-lock'
 import { SIGNALS_COMPUTER_ID } from './mission'
 import { CAMERA_LIGHTS } from './security'
 import { createMissionControl as control } from './mission-controls'
-import { cageLamp, darkRoom, daylightOpening, doorwayLight, LAMP_AMBER } from '../world/lights'
+import { cageLamp, darkRoom, daylightOpening, doorwayLight, LAMP_AMBER, windowRow } from '../world/lights'
 import { Furnishing } from '../world/interiors'
+import { compoundMap } from './compound-map'
 
 const FLOOR = 0.12
 const DOOR_WIDTH = 2.1
@@ -48,8 +49,11 @@ function house({ name, x, z, width: w, depth: d, role }: HouseSpec) {
       x: 0, z: side * (d / 2 + 0.035), floor: FLOOR, width: DOOR_WIDTH,
       height: DOOR_HEIGHT, angle: side > 0 ? 0 : Math.PI, open: false, exit: true })
     root.add(door)
-    // The security cabin is dark inside: only its camera monitor and daylight through an open door light it.
-    if (role === 'dispatch') doorwayLight(door)
+    // Every house is dark inside, lit by daylight through an open door. The security cabin has nothing else but its
+    // camera monitor; the others also take daylight through their windows and have lamps (below).
+    doorwayLight(door, -1, role === 'dispatch' ? {} : { bounce: 0.12 })
+    if (role !== 'dispatch') root.add(windowRow(`${name} · ${side > 0 ? 'south' : 'north'} windows`, [0, 2.1, side * d / 2],
+      side > 0 ? Math.PI : 0, [-(w / 2 - 1.65), w / 2 - 1.65], 1.6, 1.0))
     // Small windows beside the doors are indicated as filled glazing, so sight
     // and bullets follow the same solid wall geometry they visibly belong to.
     for (const direction of [-1, 1]) {
@@ -68,7 +72,11 @@ function house({ name, x, z, width: w, depth: d, role }: HouseSpec) {
   interiorRoomOutline(walls, w - WALL_THICKNESS, d - WALL_THICKNESS, FLOOR, ROOF - 0.2)
   root.add(walls.finish())
   // Walls on the box's faces; its top halfway through the roof slab.
-  if (role === 'dispatch') root.add(darkRoom(name, [0, (FLOOR - 0.3 + ROOF - 0.1) / 2, 0], [w / 2, (ROOF - 0.1 - FLOOR + 0.3) / 2, d / 2]))
+  root.add(darkRoom(name, [0, (FLOOR - 0.3 + ROOF - 0.1) / 2, 0], [w / 2, (ROOF - 0.1 - FLOOR + 0.3) / 2, d / 2], role === 'dispatch' ? {} : { ambient: 0.035 }))
+  // Caged amber lamps under the ceiling, as in the other buildings: one over each half of the crew house's bunk
+  // rooms, and two down the maintenance shelter.
+  const lamps: [number, number][] = role === 'crew' ? [[0, -d / 4], [0, d / 4]] : role === 'maintenance' ? [[-w / 4, 0], [w / 4, 0]] : []
+  for (const [i, [x, z]] of lamps.entries()) root.add(cageLamp(`${name} · lamp ${i + 1}`, [x, ROOF - 0.2, z], LAMP_AMBER, 0.45, { bounce: 0.12 }))
   const roof = new Draft(`${name} · flat roof`)
   roof.userData.cutaway = true
   roof.box(w + 0.45, 0.2, d + 0.45, 0, ROOF - 0.1, 0, 'roof')
@@ -317,6 +325,13 @@ function detentionBlock() {
   // The cell block is dark: the caged lamps light it, and daylight falls down the stairwell from the floor above.
   root.add(darkRoom('Detention cell block', [117, (-4.5 + 0.06) / 2, -17], [9, (0.06 + 4.5) / 2, 12]),
     daylightOpening('Detention stairwell', [117, 0.06, (h.minZ + h.maxZ) / 2], [0, -1, 0], [0, 0, 1], h.maxZ - h.minZ))
+  // The guardroom above is dark too, like every building: daylight through the open entrance, and caged lamps over
+  // the duty desk, the briefing table and the night-shift bunks. Its box takes in the walls, up to the roof slab.
+  root.add(darkRoom('Detention guardroom', [117, (FLOOR - 0.3 + 4.1) / 2, -17], [9.02, (4.1 - FLOOR + 0.3) / 2, 12.02], { ambient: 0.035 }),
+    cageLamp('Guardroom duty desk', [111, 4.0, -12], LAMP_AMBER, 0.6, { bounce: 0.12 }),
+    cageLamp('Guardroom briefing table', [111.9, 4.0, -24.4], LAMP_AMBER, 0.6, { bounce: 0.12 }),
+    cageLamp('Guardroom bunks', [122.8, 4.0, -22], LAMP_AMBER, 0.6, { bounce: 0.12 }))
+  doorwayLight(entrance, -1, { bounce: 0.12 })
   for (const child of root.children) { child.position.x -= 117; child.position.z += 17 }
   root.position.set(117, 0, -17)
   return { root, cellDoors }
@@ -512,6 +527,15 @@ export function createMissionWorld(compound?: THREE.Group): MissionWorld {
         [154, 0, -35], [146, 0, -37], [146, FLOOR, -42]], 'ak', true), alarmExit: [143, 0, -5] as Vec3 })),
   ]
   root.updateMatrixWorld(true)
-  return { root, stations, enemies, spawn: [-40, 0.15, -62.3], lookAt: [-49, 1.7, -61], bounds,
+  return { level: 'compound', root, stations, enemies, spawn: [-40, 0.15, -62.3], lookAt: [-49, 1.7, -61], bounds,
+    briefing: {
+      title: 'The rescue', premise: 'Find the hostage. Get out together.', won: 'Hostage safe.', outro: 'You both made it out.',
+      map: compoundMap(stations), legend: ['— Rail route', '┄ Service route', '▲ You'],
+      tips: [
+        'Take the mess-hall roof to the rail line, or the west service gate to the covered lanes.',
+        'Each camera terminal shuts down its own cameras for good: the office terminal the west camera, the security computer the east ones. Open the exit gate before the rescue.',
+        'The jeep is southeast of detention. If the hostage falls behind, return to him and lead him onward. Alarms bring reinforcements; you don’t need to fight everyone.',
+      ],
+    },
     rescue: { gate: exitGate, jeep, cameras, cellDoors: detention.cellDoors } }
 }
