@@ -1,3 +1,6 @@
+// The studio's ident plays over the loading game (once a session); the game loads behind it meanwhile. It is loaded
+// on its own, so if it ever fails to load the game still starts.
+void import('./brand/intro').then(intro => intro.playBrandIntro()).catch(error => console.error('Studio intro failed', error))
 // Keep the initial HTML out of view until the scene and menu are ready.
 void import('./main').catch(error => {
   console.error('Game startup failed', error)
