@@ -3,7 +3,7 @@ import { Draft, wallText, type Point } from '../../render/ink'
 import { penRandom } from '../../render/ballpoint'
 import { WALL_THICKNESS, building, groundOutline, piercedWall, roof, steps, windowFrame, type WallOpening } from '../../world/architecture'
 import { createDoor } from '../../world/doors'
-import { Furnishing } from '../../world/interiors'
+import { Furnishing, wallGaps } from '../../world/interiors'
 import { captiveChair } from '../../world/captive-chair'
 import { c4Package } from '../../game/charges'
 import { fence, lamp } from '../../world/industrial'
@@ -176,6 +176,17 @@ export function church(x: number, z: number) {
   pews.box(1.6, 1, 0.8, L / 2 - 2, floor + 0.8, 0, 'paper', 'detail')
   pews.beam([L / 2 - 2, floor + 1.3, 0], [L / 2 - 2, floor + 2.1, 0], 0.07)
   pews.beam([L / 2 - 2, floor + 1.85, -0.25], [L / 2 - 2, floor + 1.85, 0.25], 0.06)
+  for (const side of [-1, 1]) {
+    const cz = side * 1.6
+    pews.beam([L / 2 - 2.4, floor + 0.3, cz], [L / 2 - 2.4, floor + 1.5, cz], 0.05)
+    pews.box(0.25, 0.04, 0.25, L / 2 - 2.4, floor + 1.52, cz, 'paper', 'detail')
+    pews.box(0.06, 0.22, 0.06, L / 2 - 2.4, floor + 1.65, cz, 'paper', 'detail')
+  }
+  // Pictures between the windows.
+  for (const x of [-5.5, 4.5]) {
+    pews.box(0.7, 0.9, 0.04, x, floor + 2.6, W / 2 - WT - 0.03, 'paper', 'detail')
+    pews.box(0.7, 0.9, 0.04, x, floor + 2.6, -W / 2 + WT + 0.03, 'paper', 'detail')
+  }
   g.add(pews.finish())
 
   // Light: dark inside, the tall windows, the door, lamps down the nave; the tower is dark up to the belfry.
@@ -343,8 +354,17 @@ export function townHall(x: number, z: number) {
   hall.box(12, 0.6, 3, 0, floor + 0.3, -d / 2 + WT + 1.5, 'paper', 'detail')
   hall.desk(-2, -d / 2 + WT + 1.3, floor + 0.6, 0, true)
   hall.chair(-2, -d / 2 + WT + 2.25, floor + 0.6, Math.PI)
-  hall.wallMap(3, -d / 2 + 0.28, floor + 0.6)
-  for (const px of [-4.6, 4.6]) hall.beam([px, floor + 0.6, -d / 2 + WT + 0.3], [px, floor + 4.4, -d / 2 + WT + 0.3], 0.07)
+  // The map hangs between the middle back window and the next; the flags stand clear of the windows too.
+  hall.wallMap(2.25, -d / 2 + WT + 0.05, floor + 0.6)
+  // The council's benches either side of the aisle, facing the stage; the podium and the flags on it; portraits on
+  // the side walls and plants by the door.
+  for (const z of [4.1, 5.3]) for (const x of [-6.8, -4.2, 4.2, 6.8]) hall.bench(x, z, floor, Math.PI, 2.3)
+  hall.podium(2.4, -d / 2 + WT + 1.6, floor + 0.6, 0)
+  for (const x of [-5.6, 5.6]) hall.flag(x, -d / 2 + WT + 0.6, floor + 0.6, 0)
+  // One portrait on each end wall, between its two windows.
+  hall.painting(-w / 2 + WT + 0.03, 0, floor + 0.3, Math.PI / 2, true)
+  hall.painting(w / 2 - WT - 0.03, 0, floor + 0.3, -Math.PI / 2, true)
+  for (const x of [-9.9, 9.9]) hall.plant(x, d / 2 - WT - 0.45, floor, 1.4)
   g.add(hall.finish())
   // Light: dark inside, the windows, the open double door, chandeliers on long drops.
   g.add(darkRoom('Town hall', [0, (floor - 0.3 + floor + h) / 2, 0], [w / 2 + 0.02, (h + 0.3) / 2, d / 2 + 0.02], { ambient: 0.04 }))
@@ -609,7 +629,19 @@ export function fuelDepot(x: number, z: number) {
 export function detentionShed(x: number, z: number) {
   const root = new THREE.Group()
   root.name = 'Detention shed yard'
-  const shed = building({ name: 'Detention shed', x, z, width: 8, depth: 6, height: 2.9, type: 'utility' })
+  // Inside, it is the guards' interrogation room: the prisoner in the middle, the guard's chair turned to face him and
+  // his desk by the east window, a cot under the back window, supplies on a shelf, the guards' lockers by the door.
+  const shed = building({ name: 'Detention shed', x, z, width: 8, depth: 6, height: 2.9, type: 'utility', furnish: (g, room) => {
+    const { y, walls } = room
+    g.shelf(wallGaps(room, 'back', 2.4)[0], walls.minZ + 0.45, y)
+    g.bunk(-2.2, walls.minZ + 0.62, y, Math.PI / 2, true)
+    const [, doorSide] = wallGaps(room, 'ends', 1.2)
+    g.desk(walls.maxX - 0.47, doorSide, y, -Math.PI / 2)
+    g.chair(1.45, 1.95, y, -2.36)
+    g.lockers(walls.minX + 0.3, doorSide, y, 2, Math.PI / 2)
+    g.crate(walls.maxX - 0.6, walls.minZ + 0.6, y, 0.12)
+    return 'interrogation room'
+  } })
   // He faces the door (south, +Z), tied to a low chair set just behind him.
   const chairAt: [number, number, number] = [x + 0.3, 0.28, z + 0.8]
   root.add(shed, captiveChair('Detention shed · prisoner chair', chairAt, 0))

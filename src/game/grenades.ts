@@ -477,15 +477,15 @@ export class Grenades {
       const direction = new THREE.Vector3().randomDirection()
       if (frag) direction.y = Math.abs(direction.y) * 0.9
       direction.normalize()
-      rays.add(createPenLines([direction.clone().multiplyScalar(frag ? 0.5 : 0.35), direction.clone().multiplyScalar((frag ? 1.6 : 1.2) + Math.random() * 1.2)], 1700 + i, 'edge', frag ? 2.6 : 2.2))
+      rays.add(createPenLines([direction.clone().multiplyScalar(frag ? 0.7 : 0.35), direction.clone().multiplyScalar((frag ? 2.6 : 1.2) + Math.random() * (frag ? 2 : 1.2))], 1700 + i, 'edge', frag ? 2.8 : 2.2))
     }
-    const puffs = frag ? Array.from({ length: 9 }, (_, i) => {
+    const puffs = frag ? Array.from({ length: 14 }, (_, i) => {
       const puff = new THREE.Mesh(sphere, unlit(i % 3 ? 0xbdbdbd : 0x808080))
       puff.add(createPenSilhouette(sphere, 2.2))
-      const angle = i / 9 * Math.PI * 2
-      puff.position.set(Math.cos(angle) * 0.4, 0.1 + (i % 3) * 0.2, Math.sin(angle) * 0.4)
-      puff.userData.drift = new THREE.Vector3(Math.cos(angle) * 0.9, 0.8 + (i % 3) * 0.35, Math.sin(angle) * 0.9)
-      puff.userData.size = 0.5 + (i % 3) * 0.16
+      const angle = i / 14 * Math.PI * 2
+      puff.position.set(Math.cos(angle) * 0.5, 0.1 + (i % 3) * 0.25, Math.sin(angle) * 0.5)
+      puff.userData.drift = new THREE.Vector3(Math.cos(angle) * 1.4, 1 + (i % 3) * 0.45, Math.sin(angle) * 1.4)
+      puff.userData.size = 0.75 + (i % 3) * 0.22
       puff.scale.setScalar(0.001)
       return puff
     }) : []
@@ -499,8 +499,8 @@ export class Grenades {
       burst.age += delta
       const t = burst.age, frag = burst.kind === 'frag'
       const flash = Math.max(0, 1 - t / (frag ? 0.28 : 0.18))
-      burst.glow.scale.setScalar((frag ? 2.6 : 1.6) * (0.3 + 0.7 * Math.min(1, t / 0.1)))
-      burst.core.scale.setScalar((frag ? 1.2 : 0.5) * (0.2 + 0.8 * Math.min(1, t / 0.08)))
+      burst.glow.scale.setScalar((frag ? 3.8 : 1.6) * (0.3 + 0.7 * Math.min(1, t / 0.1)))
+      burst.core.scale.setScalar((frag ? 1.9 : 0.5) * (0.2 + 0.8 * Math.min(1, t / 0.08)))
       ;(burst.glow.material as THREE.MeshBasicMaterial).opacity = 0.95 * flash
       ;(burst.core.material as THREE.MeshBasicMaterial).opacity = 0.95 * flash
       burst.glow.visible = burst.core.visible = flash > 0

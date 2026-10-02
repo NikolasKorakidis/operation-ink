@@ -19,6 +19,11 @@ export class FirstPersonController {
   canPlay: () => boolean = () => true
   onPlayingChange: (playing: boolean) => void = () => {}
   lookSensitivity: () => number = () => 1
+  /** How fast what you're carrying lets you move (1: full speed; see MOVE_SPEED). */
+  speedScale: () => number = () => 1
+  /** Whether a held Shift sprints right now (aiming stops it). */
+  canSprint: () => boolean = () => true
+  private get sprinting() { return (this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight')) && this.canSprint() }
   /** Drag-to-look for good: no Pointer Lock API (automation also forces it). */
   private fallback = false
   /** The browser refused the last lock request (too soon after a release, window refocus). Drag to look until a retry succeeds. */
@@ -226,7 +231,10 @@ export class FirstPersonController {
       this.forward.y = 0
       this.forward.normalize()
       this.direction.set(-this.forward.z, 0, this.forward.x).multiplyScalar(x).addScaledVector(this.forward, z).normalize()
-      this.body.update(dt, this.direction, this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'), this.actions.traversing ? 'stand' : this.chosenStance)
+      this.body.speedScale = this.speedScale()
+      // Shift on the move gets you up off your knees or your belly and running (where there is headroom to stand).
+      if (this.sprinting && this.direction.lengthSq() > 0 && this.chosenStance !== 'stand' && !this.actions.traversing) this.chosenStance = 'stand'
+      this.body.update(dt, this.direction, this.sprinting, this.actions.traversing ? 'stand' : this.chosenStance)
     }
     if (this.body.position.y < -20 || Math.max(Math.abs(this.body.position.x), Math.abs(this.body.position.z)) > 1150) this.respawn()
     this.actions.syncCamera(this.camera.active, dt)
@@ -246,7 +254,7 @@ export class FirstPersonController {
     const state = ride ? `Riding to ${ride.destination} · ${Math.round((1 - ride.remaining / ride.distance) * 100)}%` :
       this.actions.climbing ? (this.actions.climbing.descending ? 'Climbing down' : 'Climbing up') :
       !this.body.grounded ? 'In the air' : this.direction.lengthSq() > 0 ?
-        (this.stance === 'prone' ? 'Crawling' : this.stance === 'crouch' ? 'Crouching' : this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') ? 'Sprinting' : 'Walking') :
+        (this.stance === 'prone' ? 'Crawling' : this.stance === 'crouch' ? 'Crouching' : this.sprinting ? 'Sprinting' : 'Walking') :
         this.stance === 'prone' ? 'Prone' : this.stance === 'crouch' ? 'Crouched' : 'On foot'
     this.status.textContent = this.dragLook ? `${state} · drag to look` : state
     return true

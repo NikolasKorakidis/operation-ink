@@ -4,7 +4,7 @@ import { disposeGun, type Gun } from '../lab/weapons/models'
 import { buildKnifeHand, KNIFE_HAND } from './knife-hand'
 import { offsetDirection } from './aim'
 import type { WeaponContext, WeaponFrame, WeaponItem, WeaponName, WeaponSnapshot } from './types'
-import { AIM_ZOOM, KNIFE, SILENCED_REPORT_RADIUS, STARTING_SLOT, WEAPON_RULES, WEAPON_SLOT, WEAPON_SLOTS, SHOTGUN_PELLETS, SHOTGUN_BALLISTICS, SNIPER_ZOOM, startingLoadout, type KnifeAttack } from './balance'
+import { AIM_ZOOM, AMMO, KNIFE, SILENCED_REPORT_RADIUS, STARTING_SLOT, WEAPON_RULES, WEAPON_SLOT, WEAPON_SLOTS, SHOTGUN_PELLETS, SHOTGUN_BALLISTICS, SNIPER_ZOOM, startingLoadout, type KnifeAttack } from './balance'
 import { createMissionGun } from './weapon-models'
 export { WEAPON_RULES } from './balance'
 
@@ -729,6 +729,18 @@ export class FirstPersonWeapons {
     this.setHeldModel()
     this.context.emit({ kind: 'drop', position: new THREE.Vector3(...item.position), radius: 3, text: `${WEAPON_RULES[item.name].label} dropped` })
     return true
+  }
+
+  /** Restock at a supply crate: each gun carried gets its spare ammunition back up to AMMO.player magazines. */
+  resupply() {
+    let changed = false
+    for (const item of this.inventory) {
+      if (!item || item.name === 'knife') continue
+      const full = WEAPON_RULES[item.name].capacity * AMMO.player
+      if (item.reserve < full) { item.reserve = full; changed = true }
+    }
+    if (changed) this.context.emit({ kind: 'pickup', position: this.feet.clone(), radius: 2, text: 'Ammunition restocked' })
+    return changed
   }
 
   addPickup(source: WeaponItem) {

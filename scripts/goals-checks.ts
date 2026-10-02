@@ -80,3 +80,19 @@ console.log('PASS Goals: order, locking, shared stations, side goals, counts and
   assert(Math.abs(beepInterval(10, 10) - 1) < 1e-9 && beepInterval(0, 10) < 0.1 && beepInterval(3, 10) < beepInterval(7, 10))
 }
 console.log('PASS Collect goals count their stations; a charge goal follows its charge to the blast; the beeps quicken')
+
+// An extraction with captives is theirs to reach: the players' position does not count, only every listed captive,
+// freed (the sense lists freed ones only) and inside the area. The objectives line counts them in.
+{
+  const goals: GoalSpec[] = [{ id: 'out', kind: 'extract', area: { center: [0, 0, -20], radius: 6 }, captives: ['a', 'b'], label: 'Get them out' }]
+  const state = initialMission([])
+  const at = (x: number, z: number) => new THREE.Vector3(x, 0, z)
+  const sense = (captives: Record<string, THREE.Vector3>, players = [at(0, -20)]): GoalSense =>
+    ({ players, enemies: [], totals: { crates: 0, radios: 0 }, radiosOut: 0, captives })
+  assert.deepEqual(updateGoals(state, goals, sense({})), [], 'The player alone at the gate does not end it')
+  assert.deepEqual(updateGoals(state, goals, sense({ a: at(1, -19) })), [], 'One prisoner out of two does not either')
+  assert.deepEqual(goalObjectives(state, goals, sense({ a: at(1, -19) }))[0].progress, [1, 2], 'The line counts the prisoners who are out')
+  assert.deepEqual(updateGoals(state, goals, sense({ a: at(1, -19), b: at(-2, -22) }, [at(40, 40)])), ['out'], 'Both out wins it, wherever the player is')
+  assert(goalsComplete(state, goals))
+}
+console.log('PASS An extraction for captives is done when every one of them is out, wherever the players are')

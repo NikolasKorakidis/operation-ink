@@ -2,8 +2,8 @@ import * as THREE from 'three'
 import { Draft, wallText, type Point } from '../../render/ink'
 import { building } from '../../world/architecture'
 import { fence, waterTower } from '../../world/industrial'
-import { storeyed, type FloorArea } from '../../world/storeys'
-import type { Furnishing } from '../../world/interiors'
+import { storeyed, wallGaps, type FloorArea } from '../../world/storeys'
+import { Furnishing } from '../../world/interiors'
 import { bankBarrier, groundLine, pathDistance, terrain, waterSurface, type PlanPath } from '../../world/terrain'
 import { drawOak, drawPine } from '../../world/vegetation'
 import { penRandom } from '../../render/ballpoint'
@@ -11,6 +11,7 @@ import { enemy } from '../../game/enemy-types'
 import type { GoalSpec } from '../../game/goals'
 import type { EnemySpec, MissionWorld, Station } from '../../game/types'
 import { ROADS, TOWN, onBridge, townHeight } from './plan'
+import { captiveChair } from '../../world/captive-chair'
 import { boulder, c4Cache, checkpoint, church, intelFolder, detentionShed, footbridge, fuelDepot, grainSilo, mapLines, marketSquare, signboard, stoneBridge, townHall, walledGraveyard, yardFence } from './buildings'
 
 /** Whether (x, z) is inside the perimeter fence's rounded rectangle, at least `margin` from it. */
@@ -45,44 +46,131 @@ const withFiles = (furnish: (g: Furnishing, area: FloorArea) => void, name: stri
     g.add(intelFolder(`${name} · intel files`, x - 0.35, area.y + 0.9, z, 0.2))
   }
 
-/** Classroom desks in rows facing the front, and the teacher's desk (with a radio on the ground floor). */
-function classroom(g: Furnishing, area: FloorArea) {
-  for (let x = area.minX + 1; x < area.maxX - 2.4; x += 2.4) for (const z of [-1.2, 1.4]) {
-    g.desk(x, z, area.y, Math.PI)
-    g.chair(x, z - 0.95, area.y)
+/**
+ * The school. Downstairs, the classroom: rows of pupils' desks facing the blackboard on the east end wall, the
+ * teacher's desk (radio, globe) in front of it, a map and a bookcase between the back windows, coats by the door.
+ * Upstairs, the library: shelves in every gap between the windows, reading tables down the middle, and the
+ * librarian's desk in the corner, where the files are.
+ */
+function schoolFloor(g: Furnishing, area: FloorArea) {
+  const { y, walls } = area
+  if (area.floor === 0) {
+    g.blackboard(walls.maxX - 0.04, 0, y, -Math.PI / 2, 3.2)
+    g.desk(area.maxX - 1.9, 0, y, Math.PI / 2, true)
+    g.chair(area.maxX - 0.95, 0.3, y, -Math.PI / 2)
+    g.globe(area.maxX - 1.9, -0.55, y + 0.9)
+    for (const x of [-5.6, -3, -0.4, 2.2]) for (const z of [-3, -0.7, 1.6]) {
+      g.desk(x, z, y, -Math.PI / 2)
+      g.chair(x - 0.95, z, y, Math.PI / 2)
+    }
+    g.wallMap(wallGaps(area, 'back', 2.4, 0)[0], walls.minZ + 0.05, y)
+    g.bookcase(wallGaps(area, 'back', 1.8, -4, 0)[0], walls.minZ + 0.2, y, 0, 1.8)
+    g.coatRack(4.6, area.maxZ - 0.1, y)
+    g.plant(area.maxX - 0.2, area.maxZ - 0.2, y, 1.1)
+    return
   }
-  g.desk(area.maxX - 1.1, area.minZ + 0.6, area.y, 0, area.floor === 0)
-  g.chair(area.maxX - 1.1, area.minZ + 1.6, area.y, Math.PI)
-  g.wallMap((area.minX + area.maxX) / 2, area.minZ - 0.02, area.y)
+  for (const x of wallGaps(area, 'back', 2)) g.bookcase(x, walls.minZ + 0.2, y, 0, 2.2)
+  for (const x of wallGaps(area, 'front', 2)) g.bookcase(x, walls.maxZ - 0.2, y, Math.PI, 2.2)
+  g.bookcase(walls.maxX - 0.2, 0, y, -Math.PI / 2, 2.4)
+  for (const x of [-3.2, 1.4]) {
+    g.table(x, 0, y, 2.4)
+    for (const dx of [-0.6, 0.6]) { g.chair(x + dx, -0.95, y); g.chair(x + dx, 0.95, y, Math.PI) }
+  }
+  g.globe(1.9, 0.2, y + 0.94)
+  g.rug(-0.9, 0, y, 8.6, 3.6)
+  g.desk(area.maxX - 1.1, area.minZ + 0.6, y, 0)
+  g.chair(area.maxX - 1.1, area.minZ + 1.6, y, Math.PI)
 }
 
-/** Hotel floors: the lobby with its reception desk (and radio), then rooms of beds and lockers above. */
+/**
+ * The hotel. The lobby: the reception counter (with its radio) along the west wall and the key board behind it,
+ * a lounge against the back wall (sofa under a picture, armchairs round a table, a grandfather clock), plants and a
+ * bench by the door. The first floor: guest beds between the back windows, wardrobes between the front ones. The top
+ * floor is where they keep the second prisoner: its windows boarded up, a stripped bed, the guards' table and his
+ * luggage in a heap.
+ */
 function hotelFloor(g: Furnishing, area: FloorArea) {
+  const { y, walls } = area
   if (area.floor === 0) {
-    g.desk(area.minX + 1.4, area.minZ + 0.7, area.y, 0, true)
-    g.chair(area.minX + 1.4, area.minZ + 1.7, area.y, Math.PI)
-    g.lockers(area.minX + 4, area.minZ + 0.3, area.y, 3)
-    g.table((area.minX + area.maxX) / 2 + 1, 0.2, area.y, 2.6)
+    g.counter(walls.minX + 1.8, 0, y, Math.PI / 2, 2.8, true)
+    g.chair(walls.minX + 0.75, 0.5, y, Math.PI / 2)
+    g.keyRack(walls.minX + 0.04, 0, y, Math.PI / 2)
+    g.plant(walls.minX + 1.8, -2.1, y, 1.1)
+    const lounge = wallGaps(area, 'back', 1.8, 0.5)[0]
+    g.rug(lounge, walls.minZ + 1.7, y, 4.6, 2.8)
+    g.sofa(lounge, walls.minZ + 0.5, y, 0)
+    g.painting(lounge, walls.minZ + 0.03, y, 0)
+    g.table(lounge, walls.minZ + 1.95, y, 1.5)
+    g.armchair(lounge - 1.7, walls.minZ + 1.95, y, Math.PI / 2)
+    g.armchair(lounge + 1.7, walls.minZ + 1.95, y, -Math.PI / 2)
+    g.clock(wallGaps(area, 'back', 0.6, -3, 0)[0], walls.minZ + 0.2, y)
+    g.painting(wallGaps(area, 'back', 1.3, -6.5, -3.5)[0], walls.minZ + 0.03, y, 0, true)
+    for (const x of wallGaps(area, 'front', 0.6, -6, 0)) g.plant(x, walls.maxZ - 0.35, y, 1.2)
+    g.bench(wallGaps(area, 'front', 1.8, 0.5)[0], walls.maxZ - 0.25, y, Math.PI, 1.6)
+    for (const [x, z, turn] of [[-6.9, 4.9, 0.3], [-6.4, 5.1, -0.2], [-6.65, 4.4, 1.4]] as [number, number, number][]) g.suitcase(x, z, y, turn)
     return
   }
-  for (let x = area.minX + 0.9; x < area.maxX - 0.8; x += 2.4) g.bunk(x, area.minZ + 1.1, area.y, 0, true)
-  g.lockers(area.maxX - 1.5, area.maxZ - 0.3, area.y, 2, Math.PI)
-  g.shelf(area.minX + 0.6, area.maxZ - 0.5, area.y, Math.PI)
+  if (area.floor === 1) {
+    for (const [i, x] of wallGaps(area, 'back', 1.1).entries()) {
+      const double = i === 1
+      g.bed(x, walls.minZ + 0.93, y, 0, double)
+      g.nightstand(x - (double ? 1.05 : 0.8), walls.minZ + 0.3, y)
+      if (double) g.painting(x, walls.minZ + 0.03, y, 0)
+    }
+    const fronts = wallGaps(area, 'front', 1.3)
+    for (const x of [fronts[1], fronts[3]]) g.wardrobe(x, walls.maxZ - 0.32, y, Math.PI)
+    g.armchair(fronts[2], walls.maxZ - 0.6, y, Math.PI)
+    g.suitcase(fronts[2] + 0.75, walls.maxZ - 0.3, y, 0.2)
+    g.rug(-0.6, 0.6, y, 6, 2.6)
+    return
+  }
+  for (const [x] of area.openings.back) g.boards(x, walls.minZ + 0.04, y, 0)
+  for (const [i, [x]] of area.openings.front.entries()) if (i % 2 === 0) g.boards(x, walls.maxZ - 0.04, y, Math.PI)
+  for (const [z] of area.openings.ends) g.boards(walls.minX + 0.04, z, y, Math.PI / 2)
+  g.bed(wallGaps(area, 'back', 1.1)[0], walls.minZ + 0.93, y, 0)
+  g.table(2.4, 1.4, y, 1.8)
+  g.chair(1.9, 0.5, y, 0.2)
+  g.chair(2.9, 2.3, y, Math.PI)
+  for (const [x, z, turn] of [[-7.6, 4.6, 1.5], [-7.3, 5.2, 0.4], [-6.8, 4.9, -0.3], [-7.65, 3.8, 1.7]] as [number, number, number][]) g.suitcase(x, z, y, turn)
 }
 
-/** The manor's rooms: a dining table and shelves below, a study and beds above. */
+/**
+ * The hill manor. Downstairs, the dining room (a long table, a sideboard under a landscape, a portrait, the
+ * grandfather clock by the door) and the parlour (armchairs round the fireplace on the east wall, a bookcase).
+ * Upstairs, the master bedroom and the owner's study, its desk with the radio and the files, and shelves of books.
+ */
 function manorFloor(g: Furnishing, area: FloorArea) {
+  const { y, walls } = area
+  const back = wallGaps(area, 'back', 1.8), front = wallGaps(area, 'front', 1.3)
   if (area.floor === 0) {
-    g.table((area.minX + area.maxX) / 2 + 1, -0.6, area.y, 3.3)
-    for (const x of [-0.4, 1, 2.4]) { g.chair(x, -1.85, area.y); g.chair(x, 0.65, area.y, Math.PI) }
-    g.shelf(area.maxX - 0.4, area.minZ + 0.6, area.y)
-    g.lockers(area.minX + 1, area.minZ + 0.3, area.y, 2)
+    g.rug(-3.4, -0.4, y, 4.8, 3.2)
+    g.table(-3.4, -0.4, y, 3.3)
+    for (const dx of [-1.1, 0, 1.1]) { g.chair(-3.4 + dx, -1.65, y); g.chair(-3.4 + dx, 0.85, y, Math.PI) }
+    g.sideboard(back[1], walls.minZ + 0.27, y, 0, 2)
+    g.painting(back[1], walls.minZ + 0.03, y, 0)
+    g.painting(back[0], walls.minZ + 0.03, y, 0, true)
+    g.clock(front[1], walls.maxZ - 0.2, y, Math.PI)
+    for (const x of [-1.6, 1.6]) g.plant(x, walls.maxZ - 0.35, y, 1.1)
+    g.fireplace(walls.maxX - 0.3, 0, y, -Math.PI / 2, 3)
+    g.rug(walls.maxX - 2.2, 0, y, 3, 3.4, Math.PI / 2)
+    for (const z of [-1.1, 1.1]) g.armchair(walls.maxX - 2.5, z, y, Math.PI / 2 + Math.sign(z) * 0.35)
+    g.bookcase(back[3], walls.minZ + 0.2, y, 0, 1.8)
+    g.painting(back[2], walls.minZ + 0.03, y, 0, true)
+    g.sideboard(front[3], walls.maxZ - 0.27, y, Math.PI, 1.8)
     return
   }
-  g.desk(area.maxX - 1.3, area.minZ + 0.6, area.y, 0, true)
-  g.chair(area.maxX - 1.3, area.minZ + 1.6, area.y, Math.PI)
-  for (const x of [area.minX + 1.2, area.minX + 3.6]) g.bunk(x, area.minZ + 1.1, area.y, 0, true)
-  g.wallMap(area.minX + 6, area.minZ - 0.02, area.y)
+  g.bed(back[0], walls.minZ + 0.93, y, 0, true)
+  g.nightstand(back[0] + 1.25, walls.minZ + 0.3, y)
+  g.painting(back[0], walls.minZ + 0.03, y, 0)
+  g.wardrobe(front[0], walls.maxZ - 0.32, y, Math.PI)
+  g.rug(back[0], -1.4, y, 2.6, 1.8)
+  g.desk(area.maxX - 1.3, area.minZ + 0.6, y, 0, true)
+  g.chair(area.maxX - 1.3, area.minZ + 1.6, y, Math.PI)
+  for (const x of back.slice(2)) g.bookcase(x, walls.minZ + 0.2, y, 0, 1.8)
+  g.bookcase(walls.maxX - 0.2, 0, y, -Math.PI / 2, 2.4)
+  g.rug(4.4, 0.4, y, 3.6, 2.6)
+  g.armchair(4.4, 1.3, y, Math.PI)
+  g.painting(back[1], walls.minZ + 0.03, y, 0, true)
 }
 
 export function createTown(): { ground: THREE.Group; world: MissionWorld } {
@@ -154,6 +242,11 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
   ground.add(yardFence('Town hall yard fence', -15, 11, 1, 22, [{ side: 'n', width: 4 }, { side: 's', width: 6 }]))
   ground.add(building({ name: 'Crew barn', x: TOWN.barn.x, z: TOWN.barn.z, width: 16, depth: 14, height: 5, type: 'warehouse' }))
   ground.add(c4Cache(TOWN.barn.x, 0.65, TOWN.barn.z + 4.4))
+  const barnInside = new Furnishing('Crew barn · hay')
+  for (const [dx, dz, turn] of [[-6.9, -2.6, 0.1], [-6.9, -1.2, -0.05], [-6.95, -1.9, 0.02], [6.9, 0.8, 0], [6.9, 2.2, 0.08]] as [number, number, number][]) {
+    barnInside.hayBale(TOWN.barn.x + dx, TOWN.barn.z + dz, 0.65 + (Math.abs(dz + 1.9) < 0.1 ? 1.15 : 0), Math.PI / 2 + turn)
+  }
+  ground.add(barnInside.finish())
   ground.add(wallText('CREW BARN', [TOWN.barn.x, 5.1, TOWN.barn.z + 7.06], 0.7))
   // Hay bales, a cart and a water trough in the barn yard.
   const yardProps = new Draft('Crew barn · yard', TOWN.barn.x, TOWN.barn.z)
@@ -175,7 +268,7 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
   ground.add(yardProps.finish())
   ground.add(yardFence('Crew barn fence', 27, 49.5, -28, -8, [{ side: 's', width: 6 }, { side: 'w', at: 3, width: 3 }]))
   ground.add(storeyed({ name: 'School', x: TOWN.school.x, z: TOWN.school.z, width: 20, depth: 10, floors: 2, roof: 'gable',
-    door: { x: 3 }, stairs: 'left', furnish: withFiles(classroom, 'School', area => [area.maxX - 1.1, area.minZ + 0.6]), sign: 'SCHOOL' }))
+    door: { x: 3 }, stairs: 'left', furnish: withFiles(schoolFloor, 'School', area => [area.maxX - 1.1, area.minZ + 0.6]), sign: 'SCHOOL' }))
   ground.add(yardFence('School yard fence', 18, 41, -4.5, 14, [{ side: 's', width: 5 }, { side: 'w', at: 6, width: 3 }]))
   ground.add(storeyed({ name: 'Hotel', x: TOWN.hotel.x, z: TOWN.hotel.z, width: 17, depth: 12, floors: 3, roof: 'flat',
     door: { x: -3 }, stairs: 'right', roofLadder: 'back', furnish: withFiles(hotelFloor, 'Hotel', area => [area.minX + 3.6, area.maxZ - 0.6], true), sign: 'HOTEL' }))
@@ -225,7 +318,12 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
   ground.add(trees.finish())
   ground.updateMatrixWorld(true)
 
-  // The mission: free the prisoner, defeat Bulky Boy in the town hall, and escape by the north road.
+  // The second prisoner, on the hotel's top floor, tied to a chair facing the stairs.
+  const hotelPrisoner: [number, number, number] = [TOWN.hotel.x - 2, 0.28 + 2 * 3.3, TOWN.hotel.z - 0.8]
+  ground.add(captiveChair('Hotel · prisoner chair', hotelPrisoner, Math.PI / 2))
+  ground.updateMatrixWorld(true)
+
+  // The mission: free both prisoners, defeat Bulky Boy in the town hall, and get the prisoners out by the north road.
   const root = new THREE.Group()
   root.name = 'The town mission'
   const chair = ground.getObjectByName('Detention shed · prisoner chair')!
@@ -236,6 +334,8 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
   }
   const stations: Station[] = [
     { id: 'prisoner', kind: 'objective', object: chair, point: new THREE.Vector3(prisoner[0], prisoner[1] + 1, prisoner[2]), label: 'Cut the prisoner free' },
+    { id: 'prisoner-2', kind: 'objective', object: ground.getObjectByName('Hotel · prisoner chair')!,
+      point: new THREE.Vector3(hotelPrisoner[0], hotelPrisoner[1] + 1, hotelPrisoner[2]), label: 'Cut the prisoner free' },
     { id: 'files-school', kind: 'objective', ...at('School · intel files'), label: 'Take the files' },
     { id: 'files-hotel', kind: 'objective', ...at('Hotel · intel files'), label: 'Take the files' },
     { id: 'files-manor', kind: 'objective', ...at('Hill manor · intel files'), label: 'Take the files' },
@@ -269,11 +369,18 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
     enemy('gunner', 'school-ground', [33, 0.28, 5.7], { patrol: [[33, 0.28, 5.7], [26, 0.28, 5.7]] }),
     enemy('sidearm', 'school-upstairs', [31, 3.58, 5.7], { facing: Math.PI }),
     enemy('rifleman', 'school-yard', [29, 0, 11], { facing: 0 }),
-    enemy('gunner', 'hotel-lobby', [61, 0.28, 2], { facing: 0 }),
+    enemy('gunner', 'hotel-lobby', [64.5, 0.28, 2.8], { facing: 0 }),
     enemy('breacher', 'hotel-upstairs', [59, 3.58, 1], { patrol: [[59, 3.58, 1], [55, 3.58, 1]] }),
     enemy('marksman', 'hotel-sniper', [56.5, 10.18, 2.5], { name: 'Hotel roof marksman', facing: toward([56.5, 2.5], hall) }),
-    // The town hall: Bulky Boy and his guard.
-    enemy('bulky', 'bulky-boy', [-2, 0.45, 10], { name: 'Bulky Boy', facing: 0 }),
+    // The hotel's top floor: three on the second prisoner. One stands over him, one watches the top of the stairs, one
+    // walks the boarded-up room.
+    enemy('breacher', 'hotel-warden', [TOWN.hotel.x - 0.6, 6.88, TOWN.hotel.z + 0.4], { name: 'Hotel warden', facing: Math.PI / 2 }),
+    enemy('gunner', 'hotel-landing', [TOWN.hotel.x + 3.6, 6.88, TOWN.hotel.z + 2.8], { facing: Math.PI / 2 }),
+    enemy('rifleman', 'hotel-rooms', [TOWN.hotel.x - 5.4, 6.88, TOWN.hotel.z + 3.4], { patrol: [[TOWN.hotel.x - 5.4, 6.88, TOWN.hotel.z + 3.4], [TOWN.hotel.x - 5.4, 6.88, TOWN.hotel.z - 2.4], [TOWN.hotel.x + 1, 6.88, TOWN.hotel.z - 2.4]] }),
+    // The town hall: Bulky Boy and his guard. He doesn't sit still: he paces the hall between the pillars, then walks
+    // out of the front door to look over the square and his two guards before going back in.
+    enemy('bulky', 'bulky-boy', [-2, 0.45, 10], { name: 'Bulky Boy', facing: 0, patrol: [[-2, 0.45, 10], [-9.5, 0.45, 9], [-2, 0.45, 7.5],
+      [5.5, 0.45, 9], [-2, 0.45, 12.5], [-2, 0, 23.5], [-7.5, 0, 25.5], [3.5, 0, 25.5], [-2, 0, 23.5]] }),
     enemy('gunner', 'hall-west', [-9, 0, 19], { facing: 0 }),
     enemy('rifleman', 'hall-east', [5, 0, 19], { facing: 0 }),
     // The hill manor.
@@ -296,7 +403,8 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
     destroys: ['Fuel depot · tanks'], wreck: 'Fuel depot · wreck' }]
   const snipers = ['church-sniper', 'silo-sniper', 'tower-sniper', 'hotel-sniper', 'manor-sniper']
   const goals: GoalSpec[] = [
-    { id: 'prisoner', kind: 'interact', station: 'prisoner', label: 'Free the prisoner', detail: 'Detention shed, south of the town hall', done: 'He\'s free. Now Bulky Boy.' },
+    { id: 'prisoner', kind: 'interact', station: 'prisoner', label: 'Free the prisoner in the shed', detail: 'Detention shed, south of the town hall', done: 'He\'s free. He\'ll follow you.' },
+    { id: 'prisoner-2', kind: 'interact', station: 'prisoner-2', label: 'Free the prisoner in the hotel', detail: 'Top floor of the hotel, three guards on him', done: 'He\'s free. He\'ll follow you.' },
     { id: 'boss', kind: 'eliminate', enemies: ['bulky-boy'], label: 'Defeat Bulky Boy', detail: 'He holds the town hall', done: 'Bulky Boy is down.' },
     { id: 'files', kind: 'collect', stations: ['files-school', 'files-hotel', 'files-manor'], label: 'Collect the files',
       detail: 'Blue folders upstairs in the school, the hotel and the manor', done: 'You have all the files.' },
@@ -305,19 +413,21 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
     { id: 'snipers', kind: 'eliminate', enemies: snipers, label: 'Take out the marksmen', detail: 'Silo, water tower, bell tower, hotel roof, manor balcony', main: false },
     { id: 'radios', kind: 'destroy', items: 'radios', label: 'Destroy the radios', detail: 'Shoot them, or switch them off (F)', main: false },
     { id: 'crates', kind: 'destroy', items: 'crates', label: 'Destroy the supply crates', detail: 'Barn, sheds and depot', main: false },
-    { id: 'extract', kind: 'extract', area: { center: TOWN.extraction.center, radius: TOWN.extraction.radius }, label: 'Escape by the north road',
-      detail: 'Over the stone bridge, out through the checkpoint', done: 'You\'re out.' },
+    { id: 'extract', kind: 'extract', area: { center: TOWN.extraction.center, radius: TOWN.extraction.radius }, captives: ['prisoner', 'prisoner-2'],
+      label: 'Get both prisoners out', detail: 'Lead them over the stone bridge and out through the checkpoint gate', done: 'They\'re out.' },
   ]
   const world: MissionWorld = {
     level: 'town', root, stations, enemies, goals, spawn: TOWN.spawn, lookAt: TOWN.lookAt, bounds,
-    captives: [{ id: 'prisoner', name: 'The prisoner', position: prisoner, facing: shed.facing, station: 'prisoner' }], charges,
+    captives: [{ id: 'prisoner', name: 'The prisoner', position: prisoner, facing: shed.facing, station: 'prisoner' },
+      { id: 'prisoner-2', name: 'The hotel prisoner', position: hotelPrisoner, facing: Math.PI / 2, station: 'prisoner-2' }], charges,
     briefing: {
-      title: 'The town', premise: 'Free the prisoner, take down Bulky Boy, get out by the north road.', won: 'Out of town.', outro: 'The prisoner is free.',
+      title: 'The town', premise: 'Free both prisoners, take down Bulky Boy, and get the prisoners out by the north road.', won: 'Out of town.', outro: 'Both prisoners are free.',
       tips: [
         'The files are in blue folders upstairs in the school, the hotel and the manor. The C4 is just inside the crew barn; plant it at the fuel depot and you have ten seconds to get clear.',
         'You come in behind the walled graveyard: through the cut in the fence, over the footbridge and in by the back gate. A keeper walks its middle path. The broken wall on its east side leads into town.',
         'Five marksmen watch the town: the grain silo, the water tower, the church bell tower, the hotel roof and the manor balcony. Each one you drop opens up the streets.',
-        'The prisoner is in the detention shed south of the town hall. Bulky Boy holds the town hall itself: armour soaks body hits, so aim for his head.',
+        'One prisoner is in the detention shed south of the town hall, the other on the hotel\'s top floor with three guards on him. Freed, they follow you; the mission ends when both are out through the checkpoint gate.',
+        'Bulky Boy holds the town hall and walks out front to check on his guards. Gunfire draws him from far off, and he comes straight at you firing: armour soaks body hits, so aim for his head. A flashbang stops him, briefly.',
         'The river can only be crossed at the stone bridge. The checkpoint on the north road is the way out.',
       ],
       legend: ['┄ Roads', '≈ River', '◯ Extraction', '▲ You'],

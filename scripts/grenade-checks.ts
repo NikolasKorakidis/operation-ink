@@ -96,7 +96,7 @@ console.log('PASS A frag kills up close, wounds further off, spares the far and 
   assert(seconds('away') > 0 && seconds('away') < seconds('facing') * 0.3, `Turned away: ${seconds('away').toFixed(1)} s`)
   assert.equal(seconds('walled'), 0, 'Behind a wall: not blinded')
   const facing = f.ai.enemies[0]
-  assert(facing.blind > 0 && f.reactions.includes('flinchHead'), 'He covers his eyes')
+  assert(facing.blind > 0 && f.reactions.includes('blinded'), 'He covers his eyes')
   // While blind he cannot see the player standing right in front of him.
   const player = { ...f.player, feet: new THREE.Vector3(0, 0, -8), eye: new THREE.Vector3(0, 1.6, -8) }
   for (let i = 0; i < 30; i++) f.ai.update(1 / 30, player)
@@ -208,7 +208,7 @@ console.log('PASS Grenades bounce off walls; a smoke settles, pours out, hides w
   t.run(GRENADE_RULES.fuse.frag + 0.3)
   assert(t.damage.length === 1 && t.damage[0] > 60, `A frag at your feet hurts you: ${t.damage[0]?.toFixed(0)}`)
   t.frame.forward.set(0, 0, -1)
-  t.run(0.5); t.toss(0, 0.4)
+  t.run(0.5); t.toss(2, 0.4)
   t.run(GRENADE_RULES.fuse.flash + 0.3)
   assert(t.grenades.blinded.amount > 0.9 && t.grenades.blinded.seconds > 0, `Your own flash in front of you whites you out: ${t.grenades.blinded.amount.toFixed(2)}`)
   t.run(GRENADE_RULES.flash.blind + GRENADE_RULES.flash.fade + 0.5)

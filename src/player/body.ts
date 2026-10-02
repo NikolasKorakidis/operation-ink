@@ -30,6 +30,8 @@ export class PlayerBody {
   landingSpeed = 0
   /** The stance the body is in: the one asked for, or lower while there is no room overhead to rise into it. */
   stance: Stance = 'stand'
+  /** What the player is carrying slows them (MOVE_SPEED): 1 with the knife, about 0.55 with a sniper rifle. */
+  speedScale = 1
   /** Current eye height above the feet, easing toward the stance's height. */
   eyeHeight = EYE_HEIGHT
   private capsule = new Capsule(new THREE.Vector3(), new THREE.Vector3(), RADIUS)
@@ -84,7 +86,7 @@ export class PlayerBody {
   private step(dt: number, direction: THREE.Vector3, sprint: boolean) {
     const wasGrounded = this.grounded
     const acceleration = 1 - Math.exp(-(wasGrounded ? 18 : 5) * dt)
-    const speed = sprint ? SPRINT_SPEED : STANCES[this.stance].speed
+    const speed = (sprint ? SPRINT_SPEED : STANCES[this.stance].speed) * this.speedScale
     this.velocity.x += (direction.x * speed - this.velocity.x) * acceleration
     this.velocity.z += (direction.z * speed - this.velocity.z) * acceleration
     if (wasGrounded && this.velocity.y < 0) this.velocity.y = 0

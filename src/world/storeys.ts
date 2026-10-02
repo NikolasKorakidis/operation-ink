@@ -1,7 +1,7 @@
 import { Draft, wallText, type Point } from '../render/ink'
 import { WALL_THICKNESS, groundOutline, interiorRoomOutline, piercedWall, roof, steps, windowFrame, type WallOpening } from './architecture'
 import { createDoor } from './doors'
-import { Furnishing } from './interiors'
+import { Furnishing, wallGaps, type FloorArea } from './interiors'
 import { pipeLadder } from './ladders'
 import { cageLamp, darkRoom, doorwayLight, LAMP_AMBER, windowRow } from './lights'
 
@@ -9,8 +9,8 @@ import { cageLamp, darkRoom, doorwayLight, LAMP_AMBER, windowRow } from './light
 export const STOREY = 3.3
 const RISER = 0.183, TREAD = 0.27, LANE = 1.2, PLINTH = 0.28
 
-/** The part of a floor clear of the stairs, in the building's own units: furniture goes here. */
-export type FloorArea = { minX: number; maxX: number; minZ: number; maxZ: number; y: number; floor: number }
+export type { FloorArea }
+export { wallGaps }
 
 export interface StoreyedSpec {
   name: string
@@ -122,6 +122,7 @@ export function storeyed(spec: StoreyedSpec) {
   }
   const doorX = spec.door?.x ?? 0, doorWidth = spec.door?.width ?? 1.5
   const windowsOf: { level: number; wall: 'front' | 'back' | 'west' | 'east'; panes: WallOpening[] }[] = []
+  const openingsOf: FloorArea['openings'][] = []
   for (let level = 0; level < floors; level++) {
     const y = levels[level]
     const pane = (centre: number): WallOpening => ({ centre, width: 1.3, bottom: 0.95, height: 1.4 })
@@ -148,6 +149,7 @@ export function storeyed(spec: StoreyedSpec) {
       }
     }
     windowsOf.push({ level, wall: 'front', panes: front }, { level, wall: 'back', panes: back }, { level, wall: 'west', panes: ends }, { level, wall: 'east', panes: ends })
+    openingsOf.push({ front: frontOpenings.map(o => [o.centre, o.width]), back: back.map(o => [o.centre, o.width]), ends: ends.map(o => [o.centre, o.width]) })
     interiorRoomOutline(walls, w - 2 * WALL_THICKNESS, d - 2 * WALL_THICKNESS, y, levels[level + 1] - 0.2)
   }
   g.add(walls.finish())
@@ -251,7 +253,8 @@ export function storeyed(spec: StoreyedSpec) {
     }
     if (spec.furnish) {
       const furniture = new Furnishing(`${spec.name} · floor ${level} furniture`)
-      spec.furnish(furniture, { minX: clearMin, maxX: clearMax, minZ: inner.minZ + 0.3, maxZ: inner.maxZ - 0.3, y, floor: level })
+      spec.furnish(furniture, { minX: clearMin, maxX: clearMax, minZ: inner.minZ + 0.3, maxZ: inner.maxZ - 0.3, y, floor: level,
+        walls: inner, openings: openingsOf[level], sill: 0.95 })
       g.add(furniture.finish())
     }
   }

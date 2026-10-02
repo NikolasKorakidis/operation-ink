@@ -5,6 +5,12 @@ import { GAIT_SPEED } from '../lab/gait'
 // Faster mission running, with stride/cadence adaptation shared with the lab.
 export const ENEMY_RUN_SPEED = GAIT_SPEED.run * 1.5
 export const HOSTAGE_RUN_SPEED = 2.6
+/**
+ * Hostages (the compound's and every level's prisoners) can be hurt: by guards' stray rounds, by your own bullets,
+ * knife and grenades, and by charges. `health` is what each starts with; a head hit counts `head` times. If one dies
+ * the mission is lost. Guards hold fire rather than shoot through a hostage at you; their misses can still hit one.
+ */
+export const HOSTAGE = { health: 100, head: 3 } as const
 
 /** Ordinary jumps and drops up to about 2.3 m are safe; taller falls scale with impact energy. */
 export function fallDamage(landingSpeed: number) {
@@ -30,8 +36,27 @@ export const AIM_STEADINESS = {
   aimed: 0.6,
 } as const
 
-/** Guards never hear walking (or sneaking) feet; sprinting carries only this far, in metres. */
-export const SPRINT_FOOTSTEP_RADIUS = 6
+/**
+ * How fast you move with each thing in your hands, CS-style: the knife is fastest, then each weapon is slower the
+ * bigger it is, down to the sniper rifle at about half. Walking and sprinting both scale; you can sprint while aiming,
+ * at `aimed` of that.
+ */
+export const MOVE_SPEED = {
+  weapon: { knife: 1, grenade: 0.98, pistol: 0.95, silenced: 0.95, smg: 0.9, shotgun: 0.8, ak: 0.75, sniper: 0.55 } as Record<WeaponName | 'grenade', number>,
+  aimed: 0.85,
+} as const
+
+/** Aiming stops a sprint: with right click held (or the sniper's scope up) you walk at most. */
+export const canSprint = (aiming: boolean) => !aiming
+/** Weapons whose aim is a toggle, like a sniper scope: right click raises it and leaves it up until you click again. */
+export const TOGGLE_AIM: readonly string[] = ['sniper']
+export const aimToggles = (weapon?: string | null) => !!weapon && TOGGLE_AIM.includes(weapon)
+
+/**
+ * Guards never hear walking (or sneaking) feet; sprinting carries this far in the open, in metres (through a wall,
+ * about 0.42 of it: see ai.ts audible). A guard who hears running comes at it fast, ready to fight.
+ */
+export const SPRINT_FOOTSTEP_RADIUS = 16
 
 export const PLAYER_HEALTH = { max: 100, bulletHits: 4, bulletImmunity: 1, regenDelay: 5, regenPerSecond: 40 } as const
 export const PLAYER_BULLET_DAMAGE = PLAYER_HEALTH.max / PLAYER_HEALTH.bulletHits
@@ -71,6 +96,14 @@ export const ENEMY_WEAPONS = {
   sniper: { magazine: 5, reload: 2.9, damage: 32, burst: 1, gap: 1.35, pause: [2.0, 2.6] },
 } as const
 
+/**
+ * Guards' ammunition: a full magazine and `spare` more on them. Out of everything, a guard runs to the nearest supply
+ * crate still standing and restocks there (so blowing the crates up starves them); with none left he takes cover and
+ * stops shooting. You can restock at the crates too: each gun's spare ammunition back up to `player` magazines.
+ * A sniper rifle taken from a guard holds one magazine and nothing more.
+ */
+export const AMMO = { spare: 2, player: 3, supplyReach: 1.3 } as const
+
 /** Chance a player's head shot blows the guard's head apart (always lethal). Other weapons never do. */
 export const HEAD_BURST_CHANCE: Partial<Record<WeaponName, number>> = { pistol: 0.1, silenced: 0.1, smg: 0.1, ak: 0.25, sniper: 1 }
 
@@ -90,7 +123,9 @@ export const criticalChance = (weapon: WeaponName | undefined, zone: HitZone) =>
  * of killing outright. He is a better shot than his guards: `accuracy` is added to their hit chance, and he takes
  * `aimDelay` of their aiming time before his first round.
  */
-export const BOSS_RULES = { health: 1150, armor: 800, bleed: 0.3, sniper: 2.2, speed: 0.8, scale: 2.05, damage: 1.6, accuracy: 0.12, aimDelay: 0.5 } as const
+export const BOSS_RULES = { health: 1150, armor: 800, bleed: 0.3, sniper: 2.2, speed: 0.9, scale: 2.05, damage: 1.6, accuracy: 0.12, aimDelay: 0.5,
+  /** He hears this many times further than a guard, and in a fight he walks at you until he is this close (m), firing as he comes. */
+  hearing: 2.2, closeIn: 7 } as const
 
 /** Player sniper rounds are lethal on any confirmed hit (the boss excepted). */
 export function hitDamage(weapon: WeaponName | undefined, zone: HitZone, baseDamage: number, boss = false) {
@@ -161,11 +196,11 @@ export const GRENADE_RULES = {
   order: ['frag', 'flash', 'smoke'] as const,
   carry: { frag: 1, flash: 2, smoke: 1 } as Record<GrenadeKind, number>,
   label: { frag: 'Frag grenade', flash: 'Flashbang', smoke: 'Smoke grenade' } as Record<GrenadeKind, string>,
-  throw: { full: 15.5, medium: 10.5, lob: 6.2, inherit: 0.6, gravity: 12, radius: 0.06, bounce: 0.42, friction: 0.72, roll: 5.5 },
+  throw: { full: 19, medium: 13, lob: 7.5, inherit: 0.6, gravity: 12, radius: 0.06, bounce: 0.42, friction: 0.72, roll: 5.5 },
   /** Seconds: the pin coming out, the throwing swing (the grenade leaves at `release`), and drawing the next one. */
   timing: { draw: 0.4, pin: 0.28, swing: 0.34, release: 0.11, next: 0.45 },
   fuse: { frag: 1.6, flash: 1.6, smoke: 3.5 } as Record<GrenadeKind, number>,
-  frag: { radius: 9, full: 1.5, damage: 140, hearing: 75 },
+  frag: { radius: 10.5, full: 2.5, damage: 170, hearing: 90 },
   flash: { near: 8, range: 32, blind: 4.2, fade: 2.6, hearing: 55 },
   smoke: { settle: 0.35, radius: 3.9, rise: 1.6, grow: 1.4, last: 18, fade: 2.5, hearing: 14 },
 } as const

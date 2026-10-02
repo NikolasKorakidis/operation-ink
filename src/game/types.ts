@@ -64,6 +64,13 @@ export type WeaponSnapshot = { slots: (WeaponItem | null)[]; selected: number; p
 export type EnemyState = 'idle' | 'patrol' | 'guard' | 'suspicious' | 'investigate' | 'combat' | 'search' | 'dead' | 'reserve'
 export type EnemySnapshot = { id: string; position: Vec3; yaw: number; health: number; state: EnemyState; suspicion: number; lastKnown: Vec3 | null; timer: number; waypoint: number; [key: string]: unknown }
 export type AIContext = { scene: THREE.Scene; world: CollisionWorld; doors: THREE.Group[]; specs: EnemySpec[]; emit: EmitSound; damagePlayer: (amount: number, source: THREE.Vector3, hit?: import('./player-hit-reactions').PlayerBulletHit, playerId?: number) => void; dropWeapon: (item: WeaponItem) => void; onHit?: (hit: import('./hit-reactions').HitReaction) => void; onReact?: (reaction: EnemyReaction) => void; onFire?: (index: number, end: THREE.Vector3) => void; onSurfaceHit?: (point: THREE.Vector3, direction: THREE.Vector3, surface?: import('../player/collision').SurfaceHit, weapon?: WeaponName) => void
+  /**
+   * A hostage along a guard's round, within `reach` m: returns how far along he is, or null. With `damage` the round
+   * hits him (the runtime hurts him); without, it only asks, so the guard can hold fire rather than shoot through him.
+   */
+  bystander?: (from: THREE.Vector3, direction: THREE.Vector3, reach: number, damage?: number, weapon?: WeaponName) => number | null
+  /** The supply crates still standing, where a guard out of ammunition restocks: an id and the floor point by it. */
+  supplies?: () => { id: string; position: THREE.Vector3 }[]
   /** Critical hits are on (the tutorial): see CRITICAL_HITS. */
   criticals?: boolean
   /**

@@ -4,7 +4,7 @@ import { Capsule } from 'three/addons/math/Capsule.js'
 import { EnemyActor, type ActorPostureSnapshot } from './actors'
 import type { Posture } from '../lab/postures'
 import { EnemyNavigation } from './navigation'
-import { BOSS_RULES, CRITICAL_HITS, ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as COMBAT, GRENADE_RULES, HEAD_BURST_CHANCE, WEAPON_RULES, criticalChance, flashStrength, fragDamage, hitDamage, shotgunDamageMultiplier } from './balance'
+import { AMMO, BOSS_RULES, CRITICAL_HITS, ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as COMBAT, GRENADE_RULES, HEAD_BURST_CHANCE, WEAPON_RULES, criticalChance, flashStrength, fragDamage, hitDamage, shotgunDamageMultiplier } from './balance'
 import { rayCapsuleDistance, reactionClipName, type HitReaction, type HitZone } from './hit-reactions'
 import { playerHitTarget, type PlayerBulletHit } from './player-hit-reactions'
 import type { AIContext, EnemyPuppet, EnemyReaction, EnemySnapshot, EnemySpec, EnemyState, PlayerSense, Shot, SoundEvent, Vec3, WeaponName } from './types'
@@ -77,6 +77,10 @@ export type Enemy = {
   shotTimer: number
   shots: number
   magazine: number
+  /** Rounds he carries besides the magazine (AMMO.spare magazines to start); at none, he must restock at a crate. */
+  reserve: number
+  /** The supply crate he is heading for while out of ammunition, and where he will stand to take from it. */
+  supply: { id: string; point: THREE.Vector3 } | null
   reloadTimer: number
   calloutTimer: number
   communicationTimer: number
@@ -130,7 +134,7 @@ export type Enemy = {
 const tuple = (point: THREE.Vector3): Vec3 => [point.x, point.y, point.z]
 const vector = (value: unknown) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite) ? new THREE.Vector3(...value as Vec3) : null
 const number = (value: unknown, fallback = 0) => typeof value === 'number' && Number.isFinite(value) ? value : fallback
-const NUMBERS = ['repath', 'stuck', 'senseTimer', 'lostFor', 'shotTimer', 'shots', 'magazine', 'reloadTimer', 'calloutTimer', 'communicationTimer', 'wait',
+const NUMBERS = ['repath', 'stuck', 'senseTimer', 'lostFor', 'shotTimer', 'shots', 'magazine', 'reserve', 'reloadTimer', 'calloutTimer', 'communicationTimer', 'wait',
   'patrolStop', 'visitedWaypoints', 'distanceWalked', 'footstepDistance', 'pathFailures', 'tacticTimer', 'burst', 'aimTime', 'blockedFor', 'contactMemory', 'suppress', 'settledFor', 'hitPause', 'moveSpeed', 'searchIndex',
   'scanTimer', 'scanDuration', 'scanCooldown', 'scanYaw', 'defensiveTimer', 'armor', 'respawnTimer', 'blind'] as const
 
@@ -173,7 +177,7 @@ export class EnemyDirector {
         state: spec.reserve ? 'reserve' : spec.patrol.length > 1 ? 'patrol' : 'guard',
         suspicion: 0, lastKnown: null, timer: 0, waypoint: spec.patrol.length > 1 ? 1 : 0, patrolStop: 0,
         path: [], pathTarget: null, repath: 0, stuck: 0, senseTimer: (i % 6) * 0.016,
-        canSee: false, lostFor: 0, shotTimer: 0, shots: 0, magazine: WEAPON[spec.weapon].magazine, reloadTimer: 0, calloutTimer: 0,
+        canSee: false, lostFor: 0, shotTimer: 0, shots: 0, magazine: WEAPON[spec.weapon].magazine, reserve: WEAPON[spec.weapon].magazine * AMMO.spare, supply: null, reloadTimer: 0, calloutTimer: 0,
         communicationTimer: 0, wait: 0.5 + i * 0.13, dropped: false, random: 7391 + i * 3571,
         reserveRoute: false, alarmResponse: false, alarmExit: null, post: null, visitedWaypoints: 0, distanceWalked: 0, footstepDistance: 0, pathFailures: 0,
         tactic: 'hold', tacticTimer: 0, tacticPoint: null, burst: 0, aimTime: 0, blockedFor: 0, contactMemory: 0, suppress: 0, settledFor: 0, hitPause: 0, moveSpeed: 0,
@@ -304,11 +308,12 @@ export class EnemyDirector {
       const seconds = GRENADE_RULES.flash.blind * strength + GRENADE_RULES.flash.fade * strength * 0.5
       enemy.blind = Math.max(enemy.blind, seconds)
       blinded.push({ id: enemy.spec.id, seconds, strength })
-      if (enemy.spec.dummy) { enemy.actor.react('flinchHead', false); continue }
-      // Hands to his eyes and rooted to the spot; the boss shrugs it off quicker.
+      if (enemy.spec.dummy) { enemy.actor.react('blinded', false); continue }
+      // Hands over his face, staggering back and rooted to the spot (the 'blinded' clip, then 'blindedHold' while it
+      // lasts, see update); the boss shrugs it off quicker.
       enemy.canSee = false; enemy.aimTime = 0; enemy.senseTimer = 0; enemy.moveSpeed = 0; enemy.settledFor = 0
       enemy.hitPause = Math.max(enemy.hitPause, seconds * (enemy.spec.boss ? 0.5 : 0.85))
-      enemy.actor.react('flinchHead', false)
+      enemy.actor.react('blinded', false)
       enemy.lastKnown = origin.clone().setY(enemy.position.y)
       enemy.suspicion = 1
       if (enemy.state !== 'combat') this.enter(enemy, 'investigate')
@@ -440,8 +445,15 @@ export class EnemyDirector {
     }
   }
 
+  /** Nothing in the magazine and nothing to reload it with. Training targets never run out. */
+  private dry(enemy: Enemy) { return !enemy.spec.dummy && enemy.magazine <= 0 && enemy.reserve <= 0 && enemy.reloadTimer <= 0 }
+
   private startReload(enemy: Enemy) {
     if (enemy.magazine > 0 || enemy.reloadTimer > 0) return
+    if (enemy.reserve <= 0 && !enemy.spec.dummy) {
+      if (!enemy.supply) this.say(enemy, 'I\'m out! Need ammo!', 'reload', true)
+      return
+    }
     enemy.reloadTimer = WEAPON[enemy.spec.weapon].reload
     enemy.shotTimer = enemy.reloadTimer
     enemy.burst = 0
@@ -470,6 +482,8 @@ export class EnemyDirector {
         if (enemy.spec.respawn && (enemy.respawnTimer += dt) >= enemy.spec.respawn) this.revive(enemy)
         continue
       }
+      // Still dazzled once the first stagger has played: keep the hands over the face, swaying, until it wears off.
+      if (enemy.blind > 0.35 && enemy.actor.reactionRemaining <= 0 && (enemy.spec.dummy || enemy.hitPause > 0.2)) enemy.actor.react('blindedHold', false)
       // A training target just stands at its post, facing its way, and takes hits.
       if (enemy.spec.dummy) {
         enemy.hitPause = Math.max(0, enemy.hitPause - dt)
@@ -494,7 +508,9 @@ export class EnemyDirector {
       if (enemy.reloadTimer > 0) {
         enemy.reloadTimer -= dt
         if (enemy.reloadTimer <= 0) {
-          enemy.magazine = WEAPON[enemy.spec.weapon].magazine
+          const loaded = enemy.spec.dummy ? WEAPON[enemy.spec.weapon].magazine : Math.min(WEAPON[enemy.spec.weapon].magazine, enemy.reserve)
+          enemy.magazine = loaded
+          if (!enemy.spec.dummy) enemy.reserve -= loaded
           enemy.shotTimer = 0
         }
       }
@@ -530,6 +546,8 @@ export class EnemyDirector {
       if (enemy.hitPause > 0 || enemy.actor.reactionRemaining > 0 || this.transitioning(enemy)) {
         enemy.hitPause = Math.max(0, enemy.hitPause - dt)
         enemy.settledFor = 0
+      } else if (this.dry(enemy)) {
+        moving = this.resupply(enemy, dt)
       } else if (enemy.state === 'combat') {
         moving = this.combat(enemy, player, dt)
       } else if (enemy.state === 'suspicious') {
@@ -544,7 +562,7 @@ export class EnemyDirector {
           if (enemy.timer > 3) this.enter(enemy, 'search')
         } else if (enemy.lastKnown) {
           const target = enemy.alarmExit ?? enemy.lastKnown
-          moving = this.move(enemy, target, this.speed(enemy, enemy.suspicion >= 0.5 ? ENEMY_RUN_SPEED : 1.4), dt)
+          moving = this.move(enemy, target, this.speed(enemy, enemy.suspicion >= 0.5 || enemy.spec.boss ? ENEMY_RUN_SPEED : 1.4), dt)
           if (!moving && !enemy.path.length) this.face(enemy, enemy.lastKnown, dt)
           if (enemy.alarmExit && enemy.position.distanceTo(enemy.alarmExit) < 1) { enemy.alarmExit = null; enemy.timer = 0 }
           else if (enemy.position.distanceTo(target) < 1 || enemy.timer > (enemy.alarmResponse ? 20 : 11)) this.enter(enemy, 'search')
@@ -591,6 +609,49 @@ export class EnemyDirector {
       enemy.actor.root.userData.alertScan = enemy.scanTimer > 0 && this.posture(enemy) !== 'prone' && this.posture(enemy) !== 'kneel' ? 1 - enemy.scanTimer / enemy.scanDuration : undefined
       enemy.actor.update(dt, enemy.state, moving, enemy.canSee && enemy.lastKnown ? aimPoint.copy(enemy.lastKnown).setY(enemy.lastKnown.y + 1.65) : undefined, enemy.moveSpeed)
     }
+  }
+
+  /**
+   * Out of ammunition: run to the nearest supply crate still standing and restock (a full magazine and AMMO.spare
+   * more). With no crate left, get out of the threat's sight and keep his head down.
+   */
+  private resupply(enemy: Enemy, dt: number) {
+    const supplies = this.context.supplies?.() ?? []
+    if (enemy.supply && !supplies.some(crate => crate.id === enemy.supply!.id)) enemy.supply = null
+    if (!enemy.supply) {
+      let best: { id: string; point: THREE.Vector3 } | null = null, nearest = Infinity
+      for (const crate of supplies) {
+        const distance = crate.position.distanceTo(enemy.position) + Math.abs(crate.position.y - enemy.position.y) * 4
+        if (distance >= nearest) continue
+        // Somewhere to stand beside it: the crate itself is in the way.
+        for (const radius of [0.9, 1.15]) for (let i = 0; i < 8; i++) {
+          const angle = i / 8 * Math.PI * 2
+          const point = this.navigation.floor(new THREE.Vector3(crate.position.x + Math.sin(angle) * radius, crate.position.y, crate.position.z + Math.cos(angle) * radius), false)
+          if (point) { best = { id: crate.id, point }; nearest = distance; break }
+        }
+      }
+      enemy.supply = best
+      if (best) this.say(enemy, 'Going for ammo!', 'flank')
+    }
+    const run = this.speed(enemy, ENEMY_RUN_SPEED)
+    if (enemy.supply) {
+      if (enemy.position.distanceTo(enemy.supply.point) > AMMO.supplyReach) return this.move(enemy, enemy.supply.point, run, dt)
+      // At the crate: restock and get back to it.
+      const magazine = WEAPON[enemy.spec.weapon].magazine
+      enemy.magazine = magazine; enemy.reserve = magazine * AMMO.spare; enemy.supply = null; enemy.shotTimer = 0.4
+      enemy.tactic = 'hold'; enemy.tacticPoint = null; enemy.tacticTimer = 0
+      this.context.emit({ kind: 'enemy-reload', position: enemy.position.clone(), radius: 5, weapon: enemy.spec.weapon })
+      this.say(enemy, 'Restocked!', 'reload')
+      return false
+    }
+    // Nothing left to restock from: into cover from wherever the threat was, and stay there.
+    if (enemy.lastKnown) {
+      const threat = enemy.lastKnown.clone().add(eyeOffset)
+      if (!enemy.tacticPoint || enemy.tactic !== 'retreat') { enemy.tacticPoint = this.coverPoint(enemy, threat, true); enemy.tactic = 'retreat' }
+      if (enemy.tacticPoint && enemy.position.distanceTo(enemy.tacticPoint) > 0.5) return this.move(enemy, enemy.tacticPoint, run, dt)
+      this.face(enemy, enemy.lastKnown, dt)
+    }
+    return false
   }
 
   private nextPatrolStop(enemy: Enemy, from: number) {
@@ -701,6 +762,14 @@ export class EnemyDirector {
     const roll = this.random(enemy)
     enemy.tacticPoint = null
     if (enemy.spec.role === 'sniper') { enemy.tactic = 'hold'; enemy.tacticTimer = 4; return }
+    // Bulky Boy never takes cover or flanks: he walks straight at where you were, firing as he comes (see combat), and
+    // plants himself only once he is on top of you. Short timers so he keeps re-aiming his walk at you.
+    if (enemy.spec.boss) {
+      const point = distance > BOSS_RULES.closeIn ? this.navigation.floor(known.clone()) : null
+      enemy.tactic = point ? 'charge' : 'hold'; enemy.tacticPoint = point; enemy.tacticTimer = point ? 2.5 : 1.2
+      if (point && roll < 0.3) this.say(enemy, roll < 0.15 ? 'Come here!' : 'You can\'t hide from me!', 'contact')
+      return
+    }
     if (enemy.reloadTimer > 0 || enemy.health < 35) {
       if (!this.context.world.visible(threatEye, enemy.position.clone().add(eyeOffset), ignore)) {
         enemy.tactic = 'hold'; enemy.tacticTimer = Math.max(1, enemy.reloadTimer + 0.3); return
@@ -750,7 +819,7 @@ export class EnemyDirector {
       enemy.tacticTimer = Math.max(enemy.tacticTimer, enemy.defensiveTimer)
     } else enemy.tacticTimer -= dt
     // A nearby exposed threat takes priority over a long flank or advance.
-    if (enemy.canSee && enemy.position.distanceTo(known) < 9 && (enemy.tactic === 'flank' || enemy.tactic === 'charge') && enemy.reloadTimer <= 0 && enemy.health >= 35) {
+    if (enemy.canSee && enemy.position.distanceTo(known) < (enemy.spec.boss ? BOSS_RULES.closeIn : 9) && (enemy.tactic === 'flank' || enemy.tactic === 'charge') && enemy.reloadTimer <= 0 && enemy.health >= 35) {
       enemy.tactic = 'hold'; enemy.tacticPoint = null; enemy.tacticTimer = COMBAT.openingHold
       enemy.path = []; enemy.pathTarget = null; this.plans.delete(enemy)
     }
@@ -807,9 +876,11 @@ export class EnemyDirector {
     const aligned = Math.cos(aimYaw - enemy.yaw) >= Math.cos(COMBAT.aimHalfAngle)
     // Small tracking turns are valid firing poses; only locomotion or a large turn resets readiness.
     enemy.settledFor = moving || !aligned || positioning || this.transitioning(enemy) ? 0 : enemy.settledFor + dt
+    // The boss fires on the move whenever he is facing you; everyone else has to stop and settle first.
+    const ready = enemy.spec.boss ? aligned && !this.transitioning(enemy) : enemy.settledFor >= COMBAT.settle
     if (enemy.canSee) {
       this.communicate(enemy)
-      if (enemy.settledFor >= COMBAT.settle && enemy.aimTime >= this.aimDelay(enemy) && enemy.shotTimer <= 0) {
+      if (ready && enemy.aimTime >= this.aimDelay(enemy) && enemy.shotTimer <= 0) {
         if (this.shoot(enemy, player)) enemy.blockedFor = 0
         else enemy.blockedFor += Math.max(dt, COMBAT.blockedRetry)
       }
@@ -1018,6 +1089,8 @@ export class EnemyDirector {
     let distance = muzzle.distanceTo(target)
     direction.copy(target).sub(muzzle).normalize()
     if (this.enemies.some(other => other !== enemy && other.health > 0 && other.state !== 'reserve' && this.bodyHit(other, muzzle, direction, distance))) return false
+    // Nor through a hostage: they want him alive. A miss can still find one.
+    if (this.context.bystander?.(muzzle, direction, distance) != null) return false
     const round = enemy.burst > 0 ? weapon.burst - enemy.burst : 0
     const recoil = round * 0.025
     const rangePenalty = enemy.spec.weapon === 'sniper' ? 0.004 : enemy.spec.weapon === 'smg' ? 0.017 : enemy.spec.weapon === 'pistol' ? 0.016 : 0.012
@@ -1041,10 +1114,13 @@ export class EnemyDirector {
     const range = Math.max(distance + 2, WEAPON_RULES[enemy.spec.weapon].range)
     const surface = this.context.world.raySurface(muzzle, direction, range)
     const obstruction = surface?.distance ?? range
-    const hitPlayer = hit && obstruction >= muzzle.distanceTo(target) - 0.05
+    let hitPlayer = hit && obstruction >= muzzle.distanceTo(target) - 0.05
     const end = muzzle.clone().addScaledVector(direction, hitPlayer ? Math.min(distance, obstruction) : obstruction)
     // Avoid shooting through a friendly body standing across a doorway.
     if (this.enemies.some(other => other !== enemy && other.health > 0 && other.state !== 'reserve' && this.bodyHit(other, muzzle, direction, distance))) return false
+    // A stray round (or one that would have reached the player) can find a hostage on its way: he takes it.
+    const struck = this.context.bystander?.(muzzle, direction.clone(), muzzle.distanceTo(end), weapon.damage * (enemy.spec.boss ? BOSS_RULES.damage : 1), enemy.spec.weapon) ?? null
+    if (struck != null) { hitPlayer = false; end.copy(muzzle).addScaledVector(direction, struck) }
     enemy.burst = (enemy.burst > 0 ? enemy.burst : weapon.burst) - 1
     enemy.shotTimer = enemy.burst > 0 ? weapon.gap : weapon.pause[0] + this.random(enemy) * (weapon.pause[1] - weapon.pause[0])
     enemy.shots++
@@ -1058,7 +1134,7 @@ export class EnemyDirector {
     this.context.emit({ kind: `enemy-shot-${enemy.spec.weapon}`, position: muzzle.clone(), radius: reportRange })
     const near = !hitPlayer && bulletNearMiss(muzzle, end, player.eye)
     const shotDirection = direction.clone()
-    const impact = !hitPlayer && surface ? () => {
+    const impact = !hitPlayer && struck == null && surface ? () => {
       this.context.emit({ kind: 'impact', position: end.clone(), radius: 18 })
       this.context.onSurfaceHit?.(end, shotDirection, surface, enemy.spec.weapon)
     } : undefined
@@ -1099,16 +1175,19 @@ export class EnemyDirector {
       }
       else if (enemy.scanTimer > 0) continue
       // Line of sight only decides the band between the muffled and the open radius; most guards are outside both.
-      if (!visibleShot && !audible(distance, event.radius, distance > event.radius * 0.42 && distance <= event.radius &&
+      const radius = event.radius * (enemy.spec.boss ? BOSS_RULES.hearing : 1)
+      if (!visibleShot && !audible(distance, radius, distance > radius * 0.42 && distance <= radius &&
         this.context.world.visible(from, source, ignore))) continue
       enemy.lastKnown = event.position.clone()
       // Weapon events originate at eye/muzzle height; routes need the surface below that sound.
       const floor = this.context.world.floor(event.position, 0.38, 2.2, 0.1)
       enemy.lastKnown.y = Number.isFinite(floor) ? floor + 0.006 : enemy.position.y
       enemy.lostFor = 0
-      enemy.suspicion = Math.max(enemy.suspicion, 0.25)
+      // Running feet are someone who shouldn't be there: he comes at them at a run (suspicion 0.5 and up), weapon up.
+      const running = event.kind === 'footstep'
+      enemy.suspicion = Math.max(enemy.suspicion, running ? 0.7 : 0.25)
       this.enter(enemy, 'investigate')
-      this.say(enemy, shot ? 'Gunshot! Checking the sound.' : 'Heard something. Have a look.', 'search')
+      this.say(enemy, shot ? 'Gunshot! Checking the sound.' : running ? 'Footsteps! Someone\'s running!' : 'Heard something. Have a look.', 'search')
     }
   }
 
@@ -1253,7 +1332,8 @@ export class EnemyDirector {
     let armorBroken = false, soaked = 0
     // The boss's plate covers him all round; it sheds a piece at a time as it wears down.
     if (nearest.armor > 0 && best.zone !== 'head' && !headBurst) {
-      soaked = Math.min(nearest.armor, damage)
+      // A blast gets round plate: armour takes only half of it.
+      soaked = Math.min(nearest.armor, explosive ? damage * 0.5 : damage)
       nearest.armor -= soaked
       damage = damage - soaked + soaked * BOSS_RULES.bleed
       nearest.actor.armorLeft?.(nearest.armor / (nearest.spec.armor || 1))
@@ -1290,9 +1370,11 @@ export class EnemyDirector {
       this.context.emit({ kind: 'enemy-down', position: nearest.position.clone(), radius: 5 })
       if (!nearest.dropped) {
         nearest.dropped = true
+        // His gun with what is left in it and what he carried; a sniper rifle holds one magazine and no more.
+        const sniper = nearest.spec.weapon === 'sniper'
         this.context.dropWeapon({ id: `enemy-${nearest.spec.id}`, name: nearest.spec.weapon,
-          magazine: nearest.magazine,
-          reserve: WEAPON[nearest.spec.weapon].magazine, position: tuple(nearest.position) })
+          magazine: sniper ? WEAPON_RULES.sniper.capacity : nearest.magazine,
+          reserve: sniper ? 0 : nearest.reserve, position: tuple(nearest.position) })
       }
       // A witness knows the body location. Only a visible muzzle identifies the shooter. Nobody mourns a training target.
       for (const ally of nearest.spec.dummy ? [] : this.enemies) {

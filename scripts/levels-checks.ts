@@ -93,6 +93,7 @@ for (const info of LEVEL_CATALOG) {
   for (const captive of world.captives ?? []) {
     assert(world.stations.some(station => station.id === captive.station && station.kind === 'objective'), label(`captive ${captive.id} is freed at an 'objective' station`))
     assert(within(v(captive.position)), label(`captive ${captive.id} is inside the bounds`))
+    assert(navigation.floor(v(captive.position), false), label(`captive ${captive.id} is on floor he can stand up and walk from`))
   }
 
   // Charges: picked up and planted at 'objective' stations that exist, going off inside the play area.
@@ -116,6 +117,7 @@ for (const info of LEVEL_CATALOG) {
     if (goal.kind === 'interact') assert(world.stations.some(station => station.id === goal.station && station.kind === 'objective'), label(`goal ${goal.id} uses an 'objective' station ${goal.station}`))
     if (goal.kind === 'eliminate' && goal.enemies !== 'all') for (const id of goal.enemies) assert(ids.has(id), label(`goal ${goal.id} targets an enemy that exists (${id})`))
     if (goal.kind === 'destroy') assert((goal.items === 'crates' ? crates : radios) > 0, label(`goal ${goal.id} has ${goal.items} to destroy`))
+    if (goal.kind === 'extract') for (const id of goal.captives ?? []) assert(world.captives?.some(captive => captive.id === id), label(`goal ${goal.id} brings out a captive that exists (${id})`))
     if (goal.kind === 'reach' || goal.kind === 'extract') {
       const center = v(goal.area.center)
       assert(within(center), label(`goal ${goal.id}'s area is inside the bounds`))
@@ -132,7 +134,9 @@ for (const info of LEVEL_CATALOG) {
     // The goals play out: a run that does everything wins, and one that skips a main goal does not.
     const state = initialMission([])
     const enemies = world.enemies.map(spec => ({ spec, state: 'dead' as const }))
-    const sense = (players: THREE.Vector3[]): GoalSense => ({ players, enemies, totals: { crates, radios }, radiosOut: radios })
+    // Captives an extraction is waiting for stand in its area, freed (every station has been used).
+    const captives = Object.fromEntries(goals.flatMap(goal => goal.kind === 'extract' ? (goal.captives ?? []).map(id => [id, v(goal.area.center)]) : []))
+    const sense = (players: THREE.Vector3[]): GoalSense => ({ players, enemies, totals: { crates, radios }, radiosOut: radios, captives })
     state.brokenCrates = Array.from({ length: crates }, (_, i) => `crate-${i}`)
     state.usedStations = world.stations.map(station => station.id)
     state.chargesExploded = (world.charges ?? []).map(charge => charge.id)

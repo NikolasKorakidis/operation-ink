@@ -122,7 +122,34 @@ function relaxedLook() {
   return makeClip('lookRelaxed', keys, { loop: true, duration })
 }
 
+// ── blinded by a flashbang ───────────────────────────────────────────────────
+// Both hands come up over the face, the head ducks into them, the body hunches and staggers back. The arms point
+// forward with the forearms twisted up (Y ±90) so the hands land in front of the eyes rather than at the chest.
+const blind: Pose = {
+  ...stand, spine: [12, 0, 0], chest: [10, 0, 0], head: [14, 0, 0],
+  'upper_arm.L': [-20, -90, -80], 'upper_arm.R': [-20, 90, 80], 'forearm.L': [0, 0, -138], 'forearm.R': [0, 0, 138],
+  'thigh.L': [-14, 0, 0], 'thigh.R': [-4, 0, 0], 'shin.L': [20, 0, 0], 'shin.R': [8, 0, 0],
+}
+// The whole upper body sways as one, so the hands stay on the face.
+const blindShake = (turn: number, lean = 0): Pose => ({ ...blind, head: [14, turn * 0.3, 0], chest: [10, turn * 0.6, lean], spine: [12, turn * 0.4, -lean * 0.5] })
+
 export const clips = {
+  blinded: makeClip('blinded', [
+    { t: 0, pose: stand },
+    { t: 0.12, pose: { ...stand, head: [-14, 0, 0], chest: [-8, 0, 0], 'upper_arm.L': [-55, -30, -30], 'upper_arm.R': [-55, 30, 30] }, root: [0, 0, -0.04] },
+    { t: 0.3, pose: blind, root: [0, -0.04, -0.08] },
+    { t: 0.55, pose: blindShake(14, 3), root: [0.03, -0.05, -0.12] },
+    { t: 0.8, pose: blindShake(-16, -4), root: [-0.03, -0.05, -0.15] },
+    { t: 1.05, pose: blindShake(10, 2), root: [0.02, -0.05, -0.16] },
+    { t: 1.35, pose: blindShake(-8), root: [0, -0.05, -0.16] },
+  ]),
+  blindedHold: makeClip('blindedHold', [
+    { t: 0, pose: blindShake(-8), root: [0, -0.05, -0.16] },
+    { t: 0.35, pose: blindShake(12, 3), root: [0.02, -0.05, -0.16] },
+    { t: 0.7, pose: blindShake(-12, -3), root: [-0.02, -0.06, -0.16] },
+    { t: 1.05, pose: blindShake(6), root: [0, -0.05, -0.16] },
+    { t: 1.2, pose: blindShake(-8), root: [0, -0.05, -0.16] },
+  ]),
   startle: makeClip('startle', [
     { t: 0, pose: stand },
     { t: 0.08, pose: flinch, root: [0, -0.02, 0], ease: 'linear' },

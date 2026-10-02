@@ -38,7 +38,8 @@ export const TOWN = {
   fuelDepot: { x: -25, z: 43 },
   detention: { x: 16, z: 44 },
   checkpoint: { x: -47, z: -70 },
-  extraction: { center: [-47, 0, -74] as Vec3, radius: 4 },
+  /** Outside the checkpoint gate, on the north road: get both prisoners here. */
+  extraction: { center: [-47, 0, -76.5] as Vec3, radius: 6 },
 } as const
 
 const smooth = (t: number) => { const c = THREE.MathUtils.clamp(t, 0, 1); return c * c * (3 - 2 * c) }

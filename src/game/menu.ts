@@ -440,9 +440,9 @@ export class MissionMenu {
       this.land()
     }
     const dead = state.phase === 'dead', complete = state.phase === 'complete'
-    this.title.textContent = dead ? (this.tutorial ? 'Down, not out.' : 'No way through.') : complete ? this.briefingText.won : this.hasPlayed ? 'Paused.' : this.tutorial ? 'Training ground' : this.standalone ? this.briefingText.title : 'Campaign'
-    this.premise.hidden = dead
-    this.premise.textContent = this.tutorial ? 'Learn every move, one lesson at a time, then take down Bulky Boy.'
+    this.title.textContent = dead ? (state.failure ? 'Mission failed.' : this.tutorial ? 'Down, not out.' : 'No way through.') : complete ? this.briefingText.won : this.hasPlayed ? 'Paused.' : this.tutorial ? 'Training ground' : this.standalone ? this.briefingText.title : 'Campaign'
+    this.premise.hidden = dead && !state.failure
+    this.premise.textContent = dead && state.failure ? state.failure : this.tutorial ? 'Learn every move, one lesson at a time, then take down Bulky Boy.'
       : complete ? this.briefingText.outro : this.hasPlayed ? this.objective : this.briefingText.premise
     this.start.hidden = dead || complete
     this.start.disabled = !data.ready || !this.loaded

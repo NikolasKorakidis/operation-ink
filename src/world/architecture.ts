@@ -2,7 +2,7 @@ import { BoxGeometry, CylinderGeometry, Shape, ExtrudeGeometry } from 'three'
 import { Draft, type Fill, type Point } from '../render/ink'
 import { createDoor } from './doors'
 import { cageLamp, darkRoom, doorwayLight, LAMP_AMBER, windowRow } from './lights'
-import { militaryInterior } from './interiors'
+import { Furnishing, militaryInterior, type FloorArea } from './interiors'
 
 export interface BuildingSpec {
   name: string
@@ -15,6 +15,11 @@ export interface BuildingSpec {
   type?: 'barracks' | 'warehouse' | 'utility' | 'service'
   /** No light fittings: inside it is dim, lit only by daylight through its windows and open doors. */
   daylightOnly?: boolean
+  /**
+   * Furniture of its own in place of the military interior its type would get: given the room (with its windows
+   * and door, see wallGaps), it furnishes it and returns a word for what the room is.
+   */
+  furnish?: (g: Furnishing, room: FloorArea) => string
 }
 
 export const WALL_THICKNESS = 0.14
@@ -173,6 +178,17 @@ export function roof(g: Draft, w: number, d: number, eave: number, rise: number,
     [x + insideEnd, top - 0.14 - WALL_INK_OFFSET, z]], 'edge')
 }
 
+/** A building's own furniture (BuildingSpec.furnish), tagged like the military interiors. */
+function ownInterior(spec: BuildingSpec, w: number, d: number, floor: number, openings: Record<'front' | 'back' | 'ends', WallOpening[]>) {
+  const g = new Furnishing(`${spec.name} · furnished interior`)
+  const walls = { minX: -w / 2 + WALL_THICKNESS, maxX: w / 2 - WALL_THICKNESS, minZ: -d / 2 + WALL_THICKNESS, maxZ: d / 2 - WALL_THICKNESS }
+  const sill = Math.min(...[...openings.front, ...openings.back, ...openings.ends].filter(o => o.bottom > 0).map(o => o.bottom), 2)
+  g.userData.interiorVariant = spec.furnish!(g, { minX: walls.minX + 0.3, maxX: walls.maxX - 0.3, minZ: walls.minZ + 0.3, maxZ: walls.maxZ - 0.3, y: floor, floor: 0, walls,
+    openings: { front: openings.front.map(o => [o.centre, o.width]), back: openings.back.map(o => [o.centre, o.width]), ends: openings.ends.map(o => [o.centre, o.width]) }, sill })
+  g.userData.furnitureCounts = g.counts
+  return g.finish()
+}
+
 export function building(spec: BuildingSpec) {
   const { width: w, depth: d, height: h, type = 'barracks' } = spec
   const g = new Draft(spec.name, spec.x, spec.z, spec.angle)
@@ -263,7 +279,7 @@ export function building(spec: BuildingSpec) {
   for (const x of [-w / 2 + 0.1, w / 2 - 0.1]) {
     walls.line([[x, floor + h - 0.04, front + 0.32], [x, floor + h - 0.22, front + 0.12], [x, floor + 0.1, front + 0.12]], 'detail')
   }
-  const interior = militaryInterior(spec.name, type, w, d, floor)
+  const interior = spec.furnish ? ownInterior(spec, w, d, floor, { front: frontOpenings, back: backOpenings, ends: sideOpenings }) : militaryInterior(spec.name, type, w, d, floor)
   g.userData.windowCounts = windows
   g.userData.entrances = entrances
   g.userData.interiorVariant = interior.userData.interiorVariant

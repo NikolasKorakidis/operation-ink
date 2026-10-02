@@ -1,0 +1,14 @@
+/* Status tags over guards (see status-tags.ts): a crossed-out eye in a burst while a flashbang has them blind. */
+.status-tag-layer { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+.status-tag { position: absolute; left: 0; top: 0; width: 38px; height: 38px; transition: opacity .25s ease; filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff); }
+.status-tag[hidden] { display: none; }
+.status-tag svg { width: 100%; height: 100%; overflow: visible; fill: none; stroke: #000; stroke-linecap: round; stroke-linejoin: round; }
+.status-ring-track { stroke: #bdbdbd; stroke-width: 2.2; fill: #fff; }
+.status-ring { stroke: #000; stroke-width: 2.6; }
+.status-rays line { stroke-width: 2.2; animation: status-rays 0.6s ease-in-out infinite alternate; transform-box: view-box; }
+.status-eye { stroke-width: 2.2; fill: #fff; }
+.status-pupil { fill: #000; stroke: none; }
+.status-slash { stroke-width: 3; stroke: #000; }
+.status-tag.is-fading { opacity: .55; }
+@keyframes status-rays { from { opacity: .35; } to { opacity: 1; } }
+body[data-reduced-motion="true"] .status-rays line { animation: none; }

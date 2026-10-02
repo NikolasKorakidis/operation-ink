@@ -89,6 +89,20 @@ console.log('PASS Hearing shots through a wall or behind the guard grants no dis
 }
 console.log('PASS Indoor hearing can investigate footsteps without claiming to see the player')
 {
+  // Sprinting feet carry SPRINT_FOOTSTEP_RADIUS in the open: a guard 13 m off (behind him, so he can't see) hears them
+  // and comes at a run, suspicion high. Through a wall only the near part of that radius carries.
+  const { SPRINT_FOOTSTEP_RADIUS } = await import('../src/game/balance')
+  assert(SPRINT_FOOTSTEP_RADIUS >= 15, 'Running is heard from well over ten metres away')
+  const f = await fixture()
+  f.wall.position.x = 400; f.world.refresh()
+  const behind = f.enemy.position.clone().add(new THREE.Vector3(-Math.sin(f.enemy.yaw) * 13, 0, -Math.cos(f.enemy.yaw) * 13))
+  f.ai.hear({ kind: 'footstep', position: behind, radius: SPRINT_FOOTSTEP_RADIUS })
+  assert.equal(f.enemy.state, 'investigate', 'He heard someone running 13 m behind him')
+  assert(f.enemy.suspicion >= 0.5, 'and comes at a run, ready to fight')
+  f.dispose()
+}
+console.log('PASS Running feet are heard well over ten metres off and bring the guard at a run')
+{
   const f = await fixture()
   f.enemy.state = 'investigate'; f.enemy.suspicion = 0.8; f.enemy.lastKnown = f.player.feet.clone()
   f.step(0.1)

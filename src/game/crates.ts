@@ -54,6 +54,12 @@ export class QuestCrates {
     return crate ? crate.object.localToWorld(new THREE.Vector3(0, 0.36, 0)) : null
   }
 
+  /** The crates still standing, with the floor point each stands on: guards out of ammunition restock at these. */
+  standing() {
+    return [...this.crates.values()].filter(crate => !crate.broken).map(crate => ({ id: crate.id, object: crate.object,
+      position: crate.object.getWorldPosition(new THREE.Vector3()) }))
+  }
+
   /** Applies a hit; true when it breaks the crate. The caller records that in the mission state. */
   damage(id: string, amount: number) {
     const crate = this.crates.get(id)

@@ -51,6 +51,17 @@ export class PlayerActions {
     return ladder.localToWorld(new THREE.Vector3(0, y + 0.025, top && !outside ? -data.landingDepth - 0.18 : 0.44))
   }
 
+  /**
+   * Where you stand once off the top of a ladder: the real surface under its landing point. A roof ladder's rails
+   * clear a parapet, so its nominal landing can be a metre above the deck you actually step down onto.
+   */
+  ladderLanding(ladder: THREE.Object3D) {
+    const top = this.ladderPoint(ladder, true)
+    const floor = this.body.world.floor(top, 0.7, 1.6)
+    if (Number.isFinite(floor)) top.y = floor + 0.025
+    return top
+  }
+
   ziplinePoint(zipline: THREE.Object3D, end: boolean) {
     return zipline.localToWorld(new THREE.Vector3().fromArray(zipline.userData[end ? 'endLanding' : 'startLanding']))
   }
@@ -102,9 +113,10 @@ export class PlayerActions {
       consider({ object: door, point, kind: 'door', label: door.userData.open ? 'Close' : 'Open', descending: false })
     }
     for (const ladder of this.ladders) for (const descending of [false, true]) {
-      const endpoint = this.ladderPoint(ladder, descending)
-      if (Math.abs(this.body.position.y - endpoint.y) > 1 ||
-        Math.hypot(this.body.position.x - endpoint.x, this.body.position.z - endpoint.z) > 2.3) continue
+      const nominal = this.ladderPoint(ladder, descending)
+      if (Math.hypot(this.body.position.x - nominal.x, this.body.position.z - nominal.z) > 2.3 || Math.abs(this.body.position.y - nominal.y) > 2.2) continue
+      const endpoint = descending ? this.ladderLanding(ladder) : nominal
+      if (Math.abs(this.body.position.y - endpoint.y) > 1) continue
       const point = endpoint.clone()
       point.y += descending ? 0.85 : 1.25
       consider({ object: ladder, point, kind: 'ladder', label: descending ? 'Climb down' : 'Climb up', descending })
@@ -142,10 +154,8 @@ export class PlayerActions {
     } else if (target.kind === 'ladder') {
       const bottom = this.ladderPoint(target.object, false)
       const topOutside = this.ladderPoint(target.object, true, true)
-      const top = this.ladderPoint(target.object, true)
-      // Tank roofs slope up beyond the ladder; use the actual landing surface.
-      const floor = this.body.world.floor(top, 0.7, 0.25)
-      if (Number.isFinite(floor)) top.y = floor + 0.025
+      // Tank roofs slope up beyond the ladder, and roof decks sit below a parapet: use the actual landing surface.
+      const top = this.ladderLanding(target.object)
       topOutside.y = Math.max(topOutside.y, top.y)
       if (target.descending) {
         // The interaction points include a small clearance margin. Do not lift

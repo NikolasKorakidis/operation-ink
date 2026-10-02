@@ -13,7 +13,7 @@ with a panel on the right. `window.__lab` is the `Ctx` in dev.
 | `player.ts` | `Player`: `play`, `queue`, `stop`, `setSpeed`, `update`; `fade` default |
 | `registry.ts` | `Ctx`, `Action`, `Updater`; globs `clips/*.ts`, `actions/*.ts`, `fx/*.ts`, `weapons/*.ts` |
 | `clips/idle.ts` | worked example: `hang` pose, `idle` clip, "Idle" action |
-| `clips/behavior.ts` | behaviour clips; relaxed looking uses planted feet, separate head-led glances and delayed shoulder follow |
+| `clips/behavior.ts` | behaviour clips; relaxed looking uses planted feet, separate head-led glances and delayed shoulder follow; `blinded`/`blindedHold` are the flashbang stagger, hands over the face |
 | `gait.ts` | bakes narrow walk/run foot paths, forward knee poles, pelvis height and fixed-length leg rotations into shared clips |
 | `death-settle.ts` | bakes staggered limp limb release, impact flex and resting head/hand/leg floor contacts into all six deaths |
 | `actions/scenario.ts` | game-like combos (shot → flinch/death + blood, armed patrol, alert + burst, reset) and "Export clips JSON" |
