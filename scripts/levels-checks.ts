@@ -7,6 +7,8 @@ import { EnemyNavigation } from '../src/game/navigation'
 import { goalHint, goalObjectives, goalsComplete, updateGoals, type GoalSense } from '../src/game/goals'
 import { initialMission } from '../src/game/mission'
 import { readProjection } from '../src/game/field-map'
+import { DETECTION } from '../src/game/balance'
+import { insideVisionCone } from '../src/game/ai'
 import type { Vec3 } from '../src/game/types'
 
 /*
@@ -69,6 +71,24 @@ for (const info of LEVEL_CATALOG) {
       const p = v(point)
       assert(within(p), label(`${spec.id} ${i ? `patrol point ${i}` : 'post'} is inside the bounds`))
       assert(navigation.floor(p, false), label(`${spec.id} ${i ? `patrol point ${i}` : 'post'} at ${p.toArray().map(n => n.toFixed(1))} is floor a guard fits on`))
+    }
+  }
+
+  // The insertion is safe: no guard, at his post or anywhere on his patrol, has it in sight range with a clear line to
+  // it (whichever way he happens to face). Snipers see half the map; everyone else DETECTION.soldier.
+  if (info.kind !== 'training') {
+    const span = Math.max(maxX - minX, maxZ - minZ), sniperSight = THREE.MathUtils.clamp(span * DETECTION.sniper, DETECTION.sniperMin, DETECTION.sniperMax)
+    const eye = spawn.clone().add(new THREE.Vector3(0, 1.6, 0))
+    for (const spec of world.enemies) {
+      if (spec.reserve || spec.dummy) continue
+      const range = spec.role === 'sniper' ? sniperSight : DETECTION.soldier
+      for (const point of [spec.position, ...spec.patrol]) {
+        const from = v(point).add(new THREE.Vector3(0, 1.6, 0))
+        if (Math.hypot(from.x - eye.x, from.z - eye.z) > range) continue
+        // A guard at a fixed post looks one way (his calm cone is 55° either side); a patrolling one looks every way.
+        if (spec.patrol.length < 2 && !insideVisionCone(from, spec.facing ?? 0, eye, range, 55)) continue
+        assert(!collision.visible(from, eye, new THREE.Object3D()), label(`${spec.id} at ${v(point).toArray().map(n => n.toFixed(0))} can see the insertion (${from.distanceTo(eye).toFixed(0)} m)`))
+      }
     }
   }
 

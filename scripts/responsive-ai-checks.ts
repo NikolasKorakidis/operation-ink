@@ -4,12 +4,14 @@ import { readFileSync } from 'node:fs'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { EnemyDirector } from '../src/game/ai'
 import { EnemyActor } from '../src/game/actors'
-import { ENEMY_COMBAT } from '../src/game/balance'
+import { DETECTION, ENEMY_COMBAT } from '../src/game/balance'
 import { CollisionWorld } from '../src/player/collision'
 import type { PlayerSense, SoundEvent, WeaponName } from '../src/game/types'
 
 const v = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z)
-async function fixture(weapon: WeaponName = 'ak', count = 1, real = false) {
+// Guards start hunting (DETECTION.hunting): they skip the notice time and react at first-sighting speed, which is what
+// most of these checks time. The first check starts them calm, to time the notice itself.
+async function fixture(weapon: WeaponName = 'ak', count = 1, real = false, hunting = true) {
   const scene = new THREE.Scene()
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }))
   floor.rotation.x = -Math.PI / 2; scene.add(floor)
@@ -22,6 +24,7 @@ async function fixture(weapon: WeaponName = 'ak', count = 1, real = false) {
     return { root, reactionRemaining: 0, animationTime: 0, update() {}, shoot() {}, restore() {}, dispose() {}, muzzle: () => root.position.clone().add(v(0, 1.4, 0.3)) } as unknown as EnemyActor
   })
   await ai.init()
+  if (hunting) for (const enemy of ai.enemies) enemy.suspicion = DETECTION.hunting
   const player: PlayerSense = { feet: v(0, 0, 12), eye: v(0, 1.65, 12), velocity: v(), alive: true, radioEnabled: false }
   const step = (seconds: number, dt = 1 / 60) => { for (let t = 0; t < seconds - 1e-8; t += dt) ai.update(dt, player) }
   const wall = (height: number, z = 6) => { barrier.scale.y = height; barrier.position.set(0, height / 2, z); world.refresh(); return barrier }
@@ -30,18 +33,27 @@ async function fixture(weapon: WeaponName = 'ak', count = 1, real = false) {
 
 for (const weapon of ['pistol', 'ak', 'smg', 'sniper'] as const) {
   for (const dt of [1 / 30, 1 / 60, 1 / 144]) {
-    const f = await fixture(weapon)
+    // 12 m off: he spots you, watches for the notice time (the yellow ?), then fires almost at once.
+    const f = await fixture(weapon, 1, false, false)
     f.enemy.senseTimer = 0.08
     let time = 0
-    while (!f.enemy.shots && time < 1.5) { f.ai.update(dt, f.player); time += dt }
-    assert(time >= 0.8 && time <= 1.3, `${weapon} first shot: ${time}s at ${1 / dt}fps`)
+    while (!f.enemy.shots && time < DETECTION.notice + 2) { f.ai.update(dt, f.player); time += dt }
+    assert(time >= DETECTION.notice && time <= DETECTION.notice + 0.7, `${weapon} first shot: ${time}s at ${1 / dt}fps`)
     assert.equal(f.enemy.state, 'combat')
     assert.equal(f.enemy.distanceWalked, 0, 'engage before repositioning')
     assert(f.enemy.settledFor >= ENEMY_COMBAT.settle)
     f.dispose()
+    // Point blank: no doubt and no waiting.
+    const close = await fixture(weapon, 1, false, false)
+    close.player.feet.z = close.player.eye.z = DETECTION.pointBlank - 2
+    close.enemy.senseTimer = 0.08
+    let soon = 0
+    while (!close.enemy.shots && soon < 2) { close.ai.update(dt, close.player); soon += dt }
+    assert(soon <= 1, `${weapon} point-blank first shot: ${soon}s at ${1 / dt}fps`)
+    close.dispose()
   }
 }
-console.log('PASS All weapons acquire and shoot after at least 800ms and within 1.3s at 30/60/144fps')
+console.log('PASS Every weapon fires right after the notice time at 12 m, and at once point blank, at 30/60/144fps')
 for (const weapon of ['pistol', 'ak', 'smg', 'shotgun', 'sniper'] as const) {
   const f = await fixture(weapon)
   const range = weapon === 'sniper' ? ENEMY_COMBAT.sniperEngagedRange : ENEMY_COMBAT.engagedRange

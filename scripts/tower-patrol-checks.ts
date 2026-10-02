@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import * as THREE from 'three'
+import { DETECTION } from '../src/game/balance'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { EnemyDirector } from '../src/game/ai'
 import { createMissionWorld, prepareCompound } from '../src/game/world'
@@ -102,6 +103,11 @@ try {
     player.feet.copy(water.position).add(v(-22, 0, 0)); player.eye.copy(player.feet).add(v(0, 1.65))
     water.yaw = -Math.PI / 2
     const post = water.position.clone()
+    // Not sure at first (the ?): he watches from his post, then he is alerted.
+    step(DETECTION.notice + 0.2, () => {
+      assert(['suspicious', 'combat'].includes(water.state))
+      assert(water.position.distanceTo(post) < 1e-8)
+    })
     step(8, () => {
       assert.equal(water.state, 'combat')
       assert.equal(water.tactic, 'hold')

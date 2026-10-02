@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { EnemyDirector, insideVisionCone, audible, rayBodyDistance } from '../src/game/ai'
+import { DETECTION } from '../src/game/balance'
 import type { EnemyActor } from '../src/game/actors'
 import { gridPath, EnemyNavigation } from '../src/game/navigation'
 import { CollisionWorld } from '../src/player/collision'
@@ -148,7 +149,7 @@ await check('All ordinary guards complete real patrol loops; the reserve detail 
   director.dispose()
 })
 
-await check('Live director reacts immediately and obeys last-known search, bounded communication, death/drop and restore', async () => {
+await check('Live director spots, is sure after the notice time, and obeys last-known search, squads, death/drop and restore', async () => {
   const sandbox = new THREE.Scene()
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }))
   floor.rotation.x = -Math.PI / 2; sandbox.add(floor)
@@ -168,10 +169,12 @@ await check('Live director reacts immediately and obeys last-known search, bound
   const advance = (seconds: number) => { for (let i = 0; i < seconds * 60; i++) director.update(1 / 60, player) }
   advance(0.75)
   assert.equal(director.enemies[0].shots, 0, 'visual acquisition must allow time to aim')
-  advance(0.5)
-  assert.equal(director.enemies[0].state, 'combat'); assert(director.enemies[0].shots > 0, 'clear sight must produce prompt fire')
-  assert(['investigate', 'suspicious', 'combat'].includes(director.enemies[1].state), 'near ally investigates communicated contact and may then see it')
-  assert.equal(director.enemies[2].state, 'guard', 'far guard must not receive a magical global alert')
+  // 12 m off: not sure at first (the yellow ?). He watches; only once the notice time is up is he alerted and fires.
+  assert.equal(director.enemies[0].state, 'suspicious'); assert(director.enemies[0].notice > 0.5)
+  advance(DETECTION.notice - 0.75 + 0.5)
+  assert.equal(director.enemies[0].state, 'combat'); assert(director.enemies[0].shots > 0, 'alerted, he fires promptly')
+  assert.equal(director.enemies[1].state, 'combat', 'his squadmate 15 m off is alerted with him')
+  assert.equal(director.enemies[2].state, 'guard', 'a far guard in no squad of his must not receive a magical global alert')
   const saved = director.snapshot()
   player.feet.set(0, 0, -50); player.eye.set(0, 1.65, -50)
   advance(1.8)

@@ -54,7 +54,7 @@ Marker conventions the game picks up anywhere in the scene:
 | `level` | The level's id. |
 | `spawn`, `lookAt` | The insertion point, and where the player looks when the run starts. |
 | `bounds` | The play area. Leaving it puts the player back. |
-| `enemies` | Built with `enemy(type, id, position, options)` from `game/enemy-types.ts`. Types: `rifleman`, `gunner`, `breacher`, `sidearm`, `marksman`, `bulky` (Bulky Boy, the armoured boss), `dummy`. Give `patrol` (a loop of points, starting where he stands) to make him walk, `facing` to aim a post, and `reserve` (plus `alarmExit`) for alarm reinforcements. |
+| `enemies` | Built with `enemy(type, id, position, options)` from `game/enemy-types.ts`. Types: `rifleman`, `gunner`, `breacher`, `sidearm`, `marksman`, `bulky` (Bulky Boy, the armoured boss), `dummy`. Give `patrol` (a loop of points, starting where he stands) to make him walk, `facing` to aim a post, and `reserve` (plus `alarmExit`) for alarm reinforcements. Guards near each other form a squad (alerted together; shotguns and SMGs rush, riflemen flank); name squads yourself with `squad`. Mix weapons in each squad. See `DETECTION` in `game/balance.ts` for sight ranges and the ? notice time. |
 | `stations` | Things the player uses with F. For a goal, use kind `'objective'`; its `label` is the prompt. |
 | `goals` | The mission: see below. |
 | `captives` | Prisoners: `{ id, position, facing, station }`. The blue stickman sits tied to a chair (`captiveChair` in `world/captive-chair.ts`, at the same position and facing) until the station is used; then he stands and follows the nearest player, cowering in gunfire. Pair it with an `interact` goal on the same station. An `extract` goal with `captives: [ids]` is theirs to reach: it is done when every one of them is free and inside its area, and a captive who gets there stays. |
@@ -84,6 +84,7 @@ The mission is won when every main goal is done. The run then ends on the pause 
 `scripts/levels-checks.ts` builds every catalog level in Node and checks:
 
 - The player lands and stands at the insertion.
+- No guard can see the insertion: none within his sight range (a sniper's is half the map) with a clear line to it, at his post facing his way, or anywhere on his patrol.
 - Every guard post and patrol point is floor a guard fits on.
 - Every station can be reached and seen.
 - Every goal points at something that exists.

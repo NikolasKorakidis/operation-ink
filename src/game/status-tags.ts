@@ -1,12 +1,13 @@
 import * as THREE from 'three'
+import { DETECTION } from './balance'
 import type { EnemyState } from './types'
 import './status-tags.css'
 
-type Guard = { spec: { id: string; dummy?: boolean }; state: EnemyState; blind: number; position: THREE.Vector3
-  actor: { root: THREE.Object3D; rig?: { bones: { head?: THREE.Object3D } } } }
+type Guard = { spec: { id: string; dummy?: boolean; role?: string }; state: EnemyState; blind: number; notice: number; canSee: boolean
+  position: THREE.Vector3; actor: { root: THREE.Object3D; rig?: { bones: { head?: THREE.Object3D } }; muzzle?: () => THREE.Vector3 } }
 
 /** Tags show for guards within this distance (m) whom the camera can actually see. */
-const SHOW_WITHIN = 45
+const SHOW_WITHIN = 240
 /** How often (s) each tag re-checks the line of sight. */
 const SIGHT_EVERY = 0.12
 
@@ -14,13 +15,45 @@ const SIGHT_EVERY = 0.12
 export type Seen = (point: THREE.Vector3, target: THREE.Object3D) => boolean
 
 /**
- * Over a guard blinded by a flashbang: a crossed-out eye in a burst of rays, inside a ring that drains as his sight
- * comes back, so you know who is helpless and for how long. Hidden behind walls, like everything you cannot see.
+ * A glyph drawn like a paper sticker inked in a comic (after Borderlands' markers): a white cut-out edge, a heavy ink
+ * outline, paper inside, the colour filling it from the bottom up (`--fill`), a highlight, and action ticks.
+ */
+const sticker = (kind: 'notice' | 'alert', stroke: string, dot: [number, number]) => `
+  <svg class="status-glyph status-${kind}" viewBox="0 0 40 60" aria-label="${kind === 'notice' ? 'Suspicious' : 'Alerted'}">
+    <defs><clipPath id="status-fill-${kind}-ID"><rect class="status-level" x="-5" y="0" width="50" height="60"/></clipPath></defs>
+    <g class="status-ticks"><path d="M33 6 L37 2 M35 11 L40 9 M30 3 L31 -1"/></g>
+    <path class="status-edge" d="${stroke}"/><circle class="status-edge" cx="${dot[0]}" cy="${dot[1]}" r="9.5"/>
+    <path class="status-ink" d="${stroke}"/><circle class="status-ink" cx="${dot[0]}" cy="${dot[1]}" r="6.6"/>
+    <path class="status-paper" d="${stroke}"/><circle class="status-paper" cx="${dot[0]}" cy="${dot[1]}" r="3.4"/>
+    <g clip-path="url(#status-fill-${kind}-ID)">
+      <path class="status-color" d="${stroke}"/><circle class="status-color" cx="${dot[0]}" cy="${dot[1]}" r="3.4"/>
+    </g>
+    <path class="status-shine" d="${stroke}" transform="translate(-1.1 -1.3)"/>
+  </svg>`
+const QUESTION = sticker('notice', 'M10.5 18 C10.5 8.5 29.5 7 29.5 18 C29.5 26 20 26.5 20 35', [20, 47])
+const BANG = sticker('alert', 'M20 9 L20 34', [20, 47])
+const BLIND = `<svg class="status-glyph status-blind" viewBox="-24 -24 48 48" aria-label="Blinded">
+  <circle class="status-ring-track" r="20"/><circle class="status-ring" r="20" pathLength="100" transform="rotate(-90)"/>
+  <g class="status-rays">${[0, 45, 90, 135, 180, 225, 270, 315].map(a => `<line x1="0" y1="-11.5" x2="0" y2="-15" transform="rotate(${a})"/>`).join('')}</g>
+  <path class="status-eye" d="M-10 0 Q0 -8.5 10 0 Q0 8.5 -10 0Z"/><circle class="status-pupil" r="3"/>
+  <line class="status-slash" x1="-9" y1="9" x2="9" y2="-9"/></svg>`
+const GLINT = `<svg viewBox="-20 -20 40 40" aria-label="Sniper glint"><path d="M0 -19 L3 -3 L19 0 L3 3 L0 19 L-3 3 L-19 0 L-3 -3Z"/><circle r="4.5"/></svg>`
+
+type Mode = 'blind' | 'alert' | 'notice' | null
+type Tag = { root: HTMLElement; level: SVGRectElement; ring: SVGCircleElement; glint: HTMLElement; total: number; last: number
+  seen: boolean; gunSeen: boolean; check: number; mode: Mode }
+
+/**
+ * Over each guard, what he makes of you, Borderlands-style: a yellow ? while he has spotted you but is not sure (it
+ * fills over DETECTION.notice seconds: that is your time to hide or drop him), a red ! once he is alerted and has you
+ * in view, and a crossed-out eye (with a draining ring) while a flashbang has him blind. A sniper watching you
+ * shows a glint on his rifle. All of it hidden behind walls, like anything you cannot see.
  */
 export class StatusTags {
   private layer = document.createElement('div')
-  private tags = new Map<Guard, { root: HTMLElement; ring: SVGCircleElement; total: number; last: number; seen: boolean; check: number }>()
+  private tags = new Map<Guard, Tag>()
   private point = new THREE.Vector3()
+  private ids = 0
 
   constructor(parent: HTMLElement = document.body) {
     this.layer.className = 'status-tag-layer'
@@ -30,42 +63,68 @@ export class StatusTags {
   private tag(guard: Guard) {
     let tag = this.tags.get(guard)
     if (tag) return tag
+    const id = String(this.ids++)
     const root = document.createElement('div')
     root.className = 'status-tag'
-    root.innerHTML = `<svg viewBox="-24 -24 48 48" aria-label="Blinded">
-      <circle class="status-ring-track" r="20"/><circle class="status-ring" r="20" pathLength="100" transform="rotate(-90)"/>
-      <g class="status-rays">${[0, 45, 90, 135, 180, 225, 270, 315].map(a => `<line x1="0" y1="-11.5" x2="0" y2="-15" transform="rotate(${a})"/>`).join('')}</g>
-      <path class="status-eye" d="M-10 0 Q0 -8.5 10 0 Q0 8.5 -10 0Z"/><circle class="status-pupil" r="3"/>
-      <line class="status-slash" x1="-9" y1="9" x2="9" y2="-9"/></svg>`
-    this.layer.append(root)
-    tag = { root, ring: root.querySelector('.status-ring')!, total: 0, last: 0, seen: false, check: 0 }
+    root.innerHTML = (QUESTION + BANG).replaceAll('-ID', `-${id}`) + BLIND
+    const glint = document.createElement('div')
+    glint.className = 'sniper-glint'
+    glint.innerHTML = GLINT
+    glint.hidden = true
+    this.layer.append(root, glint)
+    tag = { root, level: root.querySelector('.status-notice .status-level')!, ring: root.querySelector('.status-ring')!, glint,
+      total: 0, last: 0, seen: false, gunSeen: false, check: 0, mode: null }
     this.tags.set(guard, tag)
     return tag
+  }
+
+  private place(element: HTMLElement, camera: THREE.PerspectiveCamera, at: THREE.Vector3, width: number, height: number) {
+    this.point.copy(at).project(camera)
+    if (this.point.z >= 1 || Math.abs(this.point.x) > 1.1 || Math.abs(this.point.y) > 1.1) return false
+    element.style.transform = `translate(${((this.point.x + 1) / 2 * width).toFixed(1)}px, ${((1 - this.point.y) / 2 * height).toFixed(1)}px) translate(-50%, -100%)`
+    return true
   }
 
   update(dt: number, camera: THREE.PerspectiveCamera, guards: readonly Guard[], visible: boolean, seen: Seen) {
     const width = this.layer.clientWidth || innerWidth, height = this.layer.clientHeight || innerHeight
     for (const guard of guards) {
-      const blind = guard.state === 'dead' || guard.state === 'reserve' ? 0 : guard.blind
-      if (blind <= 0 && !this.tags.has(guard)) continue
+      const gone = guard.state === 'dead' || guard.state === 'reserve'
+      const blind = gone ? 0 : guard.blind
+      const mode: Mode = gone ? null : blind > 0 ? 'blind' : guard.state === 'combat' && guard.canSee ? 'alert'
+        : guard.state !== 'combat' && guard.notice > 0 ? 'notice' : null
+      const sniperWatching = !gone && blind <= 0 && guard.spec.role === 'sniper' && guard.canSee
+      if (!mode && !sniperWatching && !this.tags.has(guard)) continue
       const tag = this.tag(guard)
-      // A fresh flash (or a second one on top) restarts the ring from full.
+      // A fresh flash (or a second one on top) restarts the blind ring from full.
       if (blind > tag.last + 0.05) tag.total = blind
       tag.last = blind
-      if (blind <= 0) { tag.root.hidden = true; tag.total = 0; continue }
       const head = guard.actor.rig?.bones.head
-      if (head) head.getWorldPosition(this.point); else this.point.copy(guard.position).setY(guard.position.y + 1.7)
-      if ((tag.check -= dt) <= 0) { tag.check = SIGHT_EVERY; tag.seen = seen(this.point, guard.actor.root) }
-      this.point.y += 0.55 * (guard.actor.root.scale.y || 1)
-      const near = camera.position.distanceTo(this.point) < SHOW_WITHIN
-      this.point.project(camera)
-      const onScreen = this.point.z < 1 && Math.abs(this.point.x) < 1.1 && Math.abs(this.point.y) < 1.1
-      const show = visible && near && onScreen && tag.seen
+      const anchor = head ? head.getWorldPosition(new THREE.Vector3()) : guard.position.clone().setY(guard.position.y + 1.7)
+      const muzzle = sniperWatching ? guard.actor.muzzle?.() ?? null : null
+      if ((tag.check -= dt) <= 0) {
+        tag.check = SIGHT_EVERY
+        tag.seen = !!mode && seen(anchor, guard.actor.root)
+        tag.gunSeen = !!muzzle && seen(muzzle, guard.actor.root)
+      }
+      const near = camera.position.distanceTo(anchor) < SHOW_WITHIN
+      anchor.y += 0.5 * (guard.actor.root.scale.y || 1)
+      const show = visible && near && !!mode && tag.seen && this.place(tag.root, camera, anchor, width, height)
       tag.root.hidden = !show
-      if (!show) continue
-      tag.root.style.transform = `translate(${((this.point.x + 1) / 2 * width).toFixed(1)}px, ${((1 - this.point.y) / 2 * height).toFixed(1)}px) translate(-50%, -100%)`
-      tag.ring.style.strokeDasharray = `${(100 * Math.min(1, blind / Math.max(tag.total, 0.01))).toFixed(1)} 100`
-      tag.root.classList.toggle('is-fading', blind < 1)
+      if (show) {
+        if (tag.mode !== mode) { tag.root.dataset.mode = mode!; tag.root.classList.remove('is-new'); void tag.root.offsetWidth; tag.root.classList.add('is-new') }
+        if (mode === 'notice') {
+          const fill = Math.min(1, guard.notice / DETECTION.notice)
+          tag.level.setAttribute('y', (60 - 60 * fill).toFixed(1))
+          tag.root.classList.toggle('is-urgent', fill > 0.66)
+        }
+        if (mode === 'blind') {
+          tag.ring.style.strokeDasharray = `${(100 * Math.min(1, blind / Math.max(tag.total, 0.01))).toFixed(1)} 100`
+          tag.root.classList.toggle('is-fading', blind < 1)
+        }
+      }
+      tag.mode = show ? mode : null
+      // The sniper's glint: on his rifle, while he has you in his sights.
+      tag.glint.hidden = !(visible && muzzle && tag.gunSeen && this.place(tag.glint, camera, muzzle.add(new THREE.Vector3(0, 0.25, 0)), width, height))
     }
   }
 

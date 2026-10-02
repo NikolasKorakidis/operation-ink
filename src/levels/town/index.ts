@@ -349,15 +349,15 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
     // The north road and the bridge.
     enemy('rifleman', 'checkpoint-patrol', [-46, 0, -63], { patrol: [[-46, 0, -63], [-28, 0, -61.5], [-12, 0, -60]] }),
     enemy('rifleman', 'checkpoint-gate', [-50.5, 0, -67.5], { facing: 0 }),
-    enemy('sidearm', 'checkpoint-booth', [-44, 0, -64], { facing: Math.PI / 2 }),
+    enemy('breacher', 'checkpoint-booth', [-44, 0, -64], { facing: Math.PI / 2 }),
     enemy('rifleman', 'bridge-guard', [-6, 0, -44], { facing: Math.PI }),
     enemy('gunner', 'bridge-patrol', [-1, 0, -43], { patrol: [[-1, 0, -43], [-1, 0, -27]] }),
     // The market and its lanes.
     enemy('rifleman', 'market-patrol', [-11.5, 0, -14.5], { patrol: [[-11.5, 0, -14.5], [-2, 0, -24.5], [7.5, 0, -14.5], [-2, 0, -5]] }),
-    enemy('gunner', 'market-stall', [6, 0, -9.5], { facing: toward([6, -9.5], [-2, -14.5]) }),
+    enemy('breacher', 'market-stall', [6, 0, -9.5], { facing: toward([6, -9.5], [-2, -14.5]) }),
     // The church, its tower, the silo and the water tower: the marksmen.
     enemy('rifleman', 'church-door', [-49, 0, 2], { facing: 0 }),
-    enemy('sidearm', 'church-nave', [-52, 0.28, -10], { patrol: [[-52, 0.28, -10], [-40, 0.28, -10]] }),
+    enemy('breacher', 'church-nave', [-52, 0.28, -10], { patrol: [[-52, 0.28, -10], [-40, 0.28, -10]] }),
     enemy('marksman', 'church-sniper', [-33.7, 12.28, -11.6], { name: 'Bell tower marksman', facing: 0.35 }),
     enemy('marksman', 'silo-sniper', [-34.8, 14.42, -35.5], { name: 'Grain silo marksman', facing: 0.6 }),
     enemy('rifleman', 'silo-guard', [-26, 0, -29.5], { patrol: [[-26, 0, -29.5], [-38, 0, -27]] }),
@@ -366,7 +366,7 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
     enemy('breacher', 'barn-inside', [38, 0.65, -18], { facing: 0 }),
     enemy('rifleman', 'barn-yard', [30, 0, -10], { patrol: [[30, 0, -10], [47, 0, -10]] }),
     enemy('rifleman', 'orchard-patrol', [58, 0, -36], { patrol: [[58, 0, -36], [82, 0, -36], [82, 0, -19], [58, 0, -19]] }),
-    enemy('gunner', 'school-ground', [33, 0.28, 5.7], { patrol: [[33, 0.28, 5.7], [26, 0.28, 5.7]] }),
+    enemy('breacher', 'school-ground', [33, 0.28, 5.7], { patrol: [[33, 0.28, 5.7], [26, 0.28, 5.7]] }),
     enemy('sidearm', 'school-upstairs', [31, 3.58, 5.7], { facing: Math.PI }),
     enemy('rifleman', 'school-yard', [29, 0, 11], { facing: 0 }),
     enemy('gunner', 'hotel-lobby', [64.5, 0.28, 2.8], { facing: 0 }),
@@ -381,22 +381,28 @@ export function createTown(): { ground: THREE.Group; world: MissionWorld } {
     // out of the front door to look over the square and his two guards before going back in.
     enemy('bulky', 'bulky-boy', [-2, 0.45, 10], { name: 'Bulky Boy', facing: 0, patrol: [[-2, 0.45, 10], [-9.5, 0.45, 9], [-2, 0.45, 7.5],
       [5.5, 0.45, 9], [-2, 0.45, 12.5], [-2, 0, 23.5], [-7.5, 0, 25.5], [3.5, 0, 25.5], [-2, 0, 23.5]] }),
-    enemy('gunner', 'hall-west', [-9, 0, 19], { facing: 0 }),
+    enemy('breacher', 'hall-west', [-9, 0, 19], { facing: 0 }),
     enemy('rifleman', 'hall-east', [5, 0, 19], { facing: 0 }),
     // The hill manor.
     enemy('marksman', 'manor-sniper', [TOWN.manor.x - 7, manorTop, TOWN.manor.z], { name: 'Manor balcony marksman', facing: -Math.PI / 2 }),
-    enemy('rifleman', 'manor-inside', [TOWN.manor.x - 3, hill.height + 0.28, TOWN.manor.z + 6], { facing: -Math.PI / 2 }),
+    enemy('breacher', 'manor-inside', [TOWN.manor.x - 3, hill.height + 0.28, TOWN.manor.z + 6], { facing: -Math.PI / 2 }),
     enemy('rifleman', 'manor-patrol', [46.5, hill.height, 27], { patrol: [[46.5, hill.height, 27], [46.5, hill.height, 39]] }),
     // The fuel depot, the detention shed and the graveyard breach.
     enemy('rifleman', 'depot-patrol', [-33, 0, 37], { patrol: [[-33, 0, 37], [-18, 0, 37]] }),
-    enemy('gunner', 'depot-gate', [-25, 0, 33], { facing: Math.PI }),
+    enemy('breacher', 'depot-gate', [-25, 0, 33], { facing: Math.PI }),
     enemy('rifleman', 'shed-door', [TOWN.detention.x, 0, TOWN.detention.z + 5], { facing: Math.PI }),
-    enemy('sidearm', 'shed-yard', [TOWN.detention.x - 6, 0, TOWN.detention.z - 5], { patrol: [[TOWN.detention.x - 6, 0, TOWN.detention.z - 5], [TOWN.detention.x + 6, 0, TOWN.detention.z - 5]] }),
-    enemy('rifleman', 'graveyard-keeper', [-49, 0, 23.4], { name: 'Graveyard keeper', patrol: [[-49, 0, 23.4], [-69, 0, 23.4]] }),
-    enemy('rifleman', 'graveyard-watch', [-40, 0, 16], { patrol: [[-40, 0, 16], [-40, 0, 29]] }),
+    enemy('breacher', 'shed-yard', [TOWN.detention.x - 6, 0, TOWN.detention.z - 5], { patrol: [[TOWN.detention.x - 6, 0, TOWN.detention.z - 5], [TOWN.detention.x + 6, 0, TOWN.detention.z - 5]] }),
+    // He walks the middle path but turns back short of the back gate: from its far end he would see you come in.
+    enemy('rifleman', 'graveyard-keeper', [-47, 0, 23.4], { name: 'Graveyard keeper', patrol: [[-47, 0, 23.4], [-59, 0, 23.4]] }),
+    enemy('breacher', 'graveyard-watch', [-40, 0, 16], { patrol: [[-40, 0, 16], [-40, 0, 29]] }),
     // Reinforcements in the barn, called out by the alarm.
     ...[[34, -16.5], [42, -16.5], [35, -21], [41, -21]].map(([x, z], i) => enemy('rifleman', `reserve-${i + 1}`, [x, 0.65, z], { reserve: true, alarmExit: [38, 0, -9] })),
   ]
+  // Squads by quarter: alerted together, the riflemen flank and the breachers rush. Marksmen spot for their quarter.
+  const squads: [RegExp, string][] = [[/^(checkpoint|bridge)/, 'north road'], [/^market/, 'market'], [/^church/, 'church'],
+    [/^(silo|tower-sniper)/, 'silo'], [/^(barn|orchard|reserve)/, 'barn'], [/^school/, 'school'], [/^hotel-(lobby|upstairs|sniper)/, 'hotel'],
+    [/^hotel-/, 'hotel top floor'], [/^(bulky|hall)/, 'town hall'], [/^manor/, 'manor'], [/^depot/, 'depot'], [/^shed/, 'shed'], [/^graveyard/, 'graveyard']]
+  for (const spec of enemies) spec.squad ??= squads.find(([pattern]) => pattern.test(spec.id))?.[1]
   const chargeAt = ground.getObjectByName('Fuel depot · charge point')!.getWorldPosition(new THREE.Vector3())
   const charges = [{ id: 'depot-c4', name: 'C4', pickup: 'c4-pickup', plant: 'c4-plant', fuse: 10, plantTime: 3,
     blast: { center: [chargeAt.x, 0.02, chargeAt.z] as [number, number, number], radius: 16, lethal: 7 },

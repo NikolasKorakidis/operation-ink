@@ -135,6 +135,25 @@ export function hitDamage(weapon: WeaponName | undefined, zone: HitZone, baseDam
 }
 
 /** Responsive combat: reaction runs alongside weapon presentation, never after it. */
+/**
+ * How guards spot you. A soldier sees `soldier` m while calm and `engaged` m once he has seen you; a sniper sees
+ * `sniper` of the level's longest side (no less than `sniperMin`, no more than `sniperMax`). A guard who spots you is
+ * not sure at first: a yellow ? over him fills for `notice` seconds while he keeps you in view, then he is alerted
+ * (a red !) and fights. Inside `pointBlank` m, or already hunting you (suspicion `hunting` and up: he heard you run,
+ * was shot at), he is alerted at once and fires almost straight away. Out of view, the ? drains `forget` times as
+ * fast as it filled. Guards within `squadLink` m of each other (and `squadRise` m in height) form a squad, unless the
+ * level names squads (EnemySpec.squad): one alerted, the whole squad is, and they share where you are.
+ */
+export const DETECTION = {
+  soldier: 45, engaged: 70, sniper: 0.5, sniperMin: 110, sniperMax: 220,
+  notice: 3, pointBlank: 8, hunting: 0.7, forget: 0.5, quickShot: 0.3,
+  squadLink: 28, squadRise: 7,
+  /** How close each kind of fighter pushes in before he plants himself: shotguns rush right in, SMGs to mid range. */
+  closeIn: { shotgun: 5, smg: 9, other: 9 },
+  /** How far out riflemen take their flanking positions (m from where you were), and how far round to the side (degrees). */
+  flank: { distance: [16, 26] as const, angle: 75 },
+} as const
+
 export const ENEMY_COMBAT = {
   passiveRange: 20,
   sniperPassiveRange: 28,

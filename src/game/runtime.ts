@@ -181,6 +181,7 @@ export class MissionRuntime {
     this.ai = new EnemyDirector({ scene, world: player.world, doors: player.actions.doors, specs: world.enemies,
       emit: event => this.emit(event, false), damagePlayer: (amount, source, hit, playerId) => this.damageFromGuard(amount, source, hit, playerId),
       supplies: () => this.crates.standing(),
+      mapSpan: Math.max(world.bounds.maxX - world.bounds.minX, world.bounds.maxZ - world.bounds.minZ),
       bystander: (from, direction, reach, damage, weapon) => {
         const hostage = hostageAlong(this.hostageBodies(), from, direction, reach)
         if (hostage && damage) this.harmHostage(hostage.body, damage, hostage.head, hostage.point, direction, weapon)

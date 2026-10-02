@@ -23,7 +23,9 @@ export type EnemySpec = { id: string; name: string; position: Vec3; patrol: Vec3
   /** The armoured brute: huge, slow, immune to instant kills. */
   boss?: boolean
   /** Starts in reserve and only a script wakes it (never the alarm). */
-  held?: boolean }
+  held?: boolean
+  /** The squad he belongs to: alerted together, they hunt you together. Without it, guards near each other form one (DETECTION.squadLink). */
+  squad?: string }
 /**
  * The mission on a level: where the player starts, who is there, what can be used, and what has to be done.
  * `level` is the level's id (levels/catalog.ts): saves are kept under it. `goals` are the mission's objectives
@@ -71,6 +73,8 @@ export type AIContext = { scene: THREE.Scene; world: CollisionWorld; doors: THRE
   bystander?: (from: THREE.Vector3, direction: THREE.Vector3, reach: number, damage?: number, weapon?: WeaponName) => number | null
   /** The supply crates still standing, where a guard out of ammunition restocks: an id and the floor point by it. */
   supplies?: () => { id: string; position: THREE.Vector3 }[]
+  /** The level's longest side (m): a sniper sees half of it (DETECTION.sniper). */
+  mapSpan?: number
   /** Critical hits are on (the tutorial): see CRITICAL_HITS. */
   criticals?: boolean
   /**

@@ -1,14 +1,53 @@
-/* Status tags over guards (see status-tags.ts): a crossed-out eye in a burst while a flashbang has them blind. */
+/*
+ * Status tags over guards (see status-tags.ts). The ? and ! are paper stickers inked comic-style, after Borderlands:
+ * a white cut-out edge, a heavy black outline, the colour inside, a highlight, and little action ticks.
+ */
 .status-tag-layer { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
-.status-tag { position: absolute; left: 0; top: 0; width: 38px; height: 38px; transition: opacity .25s ease; filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff); }
-.status-tag[hidden] { display: none; }
-.status-tag svg { width: 100%; height: 100%; overflow: visible; fill: none; stroke: #000; stroke-linecap: round; stroke-linejoin: round; }
+.status-tag { position: absolute; left: 0; top: 0; width: 34px; height: 51px; filter: drop-shadow(1.5px 2px 0 rgba(0, 0, 0, .28)); }
+.status-tag[hidden], .sniper-glint[hidden] { display: none; }
+.status-glyph { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: none; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.status-tag[data-mode="notice"] .status-notice, .status-tag[data-mode="alert"] .status-alert { display: block; }
+.status-tag[data-mode="blind"] { width: 38px; height: 38px; }
+.status-tag[data-mode="blind"] .status-blind { display: block; stroke: #000; }
+
+.status-glyph path.status-edge { stroke: #fff; stroke-width: 17; }
+.status-glyph circle.status-edge { fill: #fff; }
+.status-glyph path.status-ink { stroke: #000; stroke-width: 11; }
+.status-glyph circle.status-ink { fill: #000; }
+.status-glyph path.status-paper { stroke: #fff6df; stroke-width: 5.5; }
+.status-glyph circle.status-paper { fill: #fff6df; }
+.status-glyph path.status-color { stroke-width: 5.5; }
+.status-glyph path.status-shine { stroke: rgba(255, 255, 255, .85); stroke-width: 1.4; }
+.status-ticks path { stroke: #000; stroke-width: 2.2; }
+.status-notice { transform: rotate(-7deg); }
+.status-notice path.status-color { stroke: #ffcf1a; }
+.status-notice circle.status-color { fill: #ffcf1a; }
+.status-alert path.status-color { stroke: #e8322a; }
+.status-alert circle.status-color { fill: #e8322a; }
+.status-alert { transform: rotate(5deg); }
+.status-tag.is-urgent .status-notice { animation: status-wobble .32s ease-in-out infinite alternate; }
+.status-tag.is-new { animation: status-pop .22s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes status-pop { from { scale: .35; } to { scale: 1; } }
+@keyframes status-wobble { from { transform: rotate(-11deg); } to { transform: rotate(-3deg); } }
+
+/* The blinded marker: a crossed-out eye in a burst, inside a ring that drains as his sight comes back. */
 .status-ring-track { stroke: #bdbdbd; stroke-width: 2.2; fill: #fff; }
 .status-ring { stroke: #000; stroke-width: 2.6; }
-.status-rays line { stroke-width: 2.2; animation: status-rays 0.6s ease-in-out infinite alternate; transform-box: view-box; }
+.status-rays line { stroke-width: 2.2; animation: status-rays .6s ease-in-out infinite alternate; }
 .status-eye { stroke-width: 2.2; fill: #fff; }
 .status-pupil { fill: #000; stroke: none; }
-.status-slash { stroke-width: 3; stroke: #000; }
+.status-slash { stroke-width: 3; }
 .status-tag.is-fading { opacity: .55; }
 @keyframes status-rays { from { opacity: .35; } to { opacity: 1; } }
-body[data-reduced-motion="true"] .status-rays line { animation: none; }
+
+/* A sniper's scope catching the light while he has you in his sights. */
+.sniper-glint { position: absolute; left: 0; top: 0; width: 30px; height: 30px; margin-top: 15px; filter: drop-shadow(0 0 5px #fff6c8) drop-shadow(0 0 9px #ffe27a); animation: glint 0.9s ease-in-out infinite; }
+.sniper-glint svg { width: 100%; height: 100%; overflow: visible; }
+.sniper-glint path { fill: #fffdf2; stroke: #000; stroke-width: 1.2; stroke-linejoin: round; }
+.sniper-glint circle { fill: #fff; }
+@keyframes glint { 0%, 100% { scale: .7; rotate: 0deg; opacity: .75; } 50% { scale: 1.15; rotate: 20deg; opacity: 1; } }
+
+body[data-reduced-motion="true"] .status-rays line,
+body[data-reduced-motion="true"] .status-tag.is-urgent .status-notice,
+body[data-reduced-motion="true"] .status-tag.is-new,
+body[data-reduced-motion="true"] .sniper-glint { animation: none; }
