@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { MissionAudio } from '../src/game/audio'
-import { IGI_SAMPLES, IGI_VOICES } from '../src/game/igi-samples'
+import { IGI_SAMPLES, IGI_VOICES, servedFile } from '../src/game/igi-samples'
 import { existsSync, readFileSync } from 'node:fs'
 
 class Param {
@@ -274,20 +274,23 @@ reactions.dispose()
 console.log('PASS Immediate pain interrupts the hurt speaker, survives dialogue cooldowns, stays bounded, and respects mute/pause/reset')
 
 // Track the requested URL through decoding to prove routing selects the actual IGI bank.
-const manifest = JSON.parse(readFileSync('public/sounds/igi/manifest.json', 'utf8')) as { assets: { file: string }[] }
+const manifest = JSON.parse(readFileSync('public/OST/igi-manifest.json', 'utf8')) as { assets: { file: string }[] }
 const deployed = new Set(manifest.assets.map(asset => `igi/${asset.file}`))
 const routed = new Set([...Object.values(IGI_SAMPLES).flatMap(entry => entry.files), ...Object.values(IGI_VOICES).flat()])
 assert.deepEqual(routed, deployed, 'Every installed sample is used, and every route has a deployed sample')
-// Manifest ids are the source .wav names; the served files are mono AAC (looped alarm: FLAC).
-const served = (file: string) => file.replace('.wav', file.includes('alarm_') ? '.flac' : '.m4a')
-for (const file of routed) assert(existsSync(`public/sounds/${served(file)}`), `${file} is served as ${served(file)}`)
+// Manifest ids are the source .wav names; each is served from its folder in public/OST (servedFile).
+const served = (file: string) => servedFile(file)
+for (const file of routed) assert(existsSync(`public/OST/${served(file)}`), `${file} is served as ${served(file)}`)
+/** True for a URL of an IGI recording (the bank and the older fallbacks share the OST folders). */
+const igiUrls = [...routed].map(file => `/OST/${served(file)}`)
+const isIgi = (url: string) => igiUrls.some(path => url.endsWith(path))
 const response = (url: string, ok = true) => ({ ok, arrayBuffer: async () => new TextEncoder().encode(url).buffer })
 const requested: string[] = []
 Object.assign(globalThis, { fetch: async (url: string) => { requested.push(url); return response(url) } })
 const igi = new MissionAudio(); igi.setActive(true); await igi.unlock()
 await new Promise(resolve => setTimeout(resolve, 0))
 assert(requested.every(url => !/\/(voice_|guard_hey|pain_)/.test(url)), 'Legacy character assets are never requested')
-assert(requested.length === routed.size && requested.every(url => url.includes('/igi/')), 'Fallback recordings are not downloaded while the IGI bank decodes')
+assert(requested.length === routed.size && requested.every(isIgi), 'Fallback recordings are not downloaded while the IGI bank decodes')
 const igiContext = FakeAudioContext.latest
 for (const [kind, entry] of Object.entries(IGI_SAMPLES)) {
   igi.reset()
@@ -296,7 +299,7 @@ for (const [kind, entry] of Object.entries(IGI_SAMPLES)) {
   const source = igiContext.nodes.slice(before).find(node => node instanceof Source && (node.buffer as { url?: string })?.url) as Source
   assert(source, `${kind} must include a decoded recording, including layered cues`)
   const url = (source.buffer as { url: string }).url
-  assert(entry.files.some(file => url.endsWith(`/sounds/${served(file)}`)), `${kind} must select its IGI sample`)
+  assert(entry.files.some(file => url.endsWith(`/OST/${served(file)}`)), `${kind} must select its IGI sample`)
 }
 igi.reset()
 igi.play({ kind: 'ladder', position: new THREE.Vector3(0, 0, 0) })
@@ -309,7 +312,7 @@ assert(!rung1.loop && !rung2.loop, 'Climbing plays one-shots, not a persistent l
 for (const voice of Object.keys(IGI_VOICES)) {
   igi.reset(); igi.play({ kind: 'callout', voice, speaker: 1 })
   const bark = igiContext.nodes.filter(node => node instanceof Source).at(-1) as Source
-  assert(IGI_VOICES[voice].some(file => (bark.buffer as { url: string }).url.endsWith(`/sounds/${served(file)}`)))
+  assert(IGI_VOICES[voice].some(file => (bark.buffer as { url: string }).url.endsWith(`/OST/${served(file)}`)))
 }
 igi.reset()
 for (const voice of ['lost', 'search', 'down', 'reload', 'flank', 'retreat', 'clear']) {
@@ -321,7 +324,7 @@ const alert = igiContext.nodes.filter(node => node instanceof Source).at(-1) as 
 igi.play({ kind: 'enemy-pain', speaker: 1 })
 const pain = igiContext.nodes.filter(node => node instanceof Source).at(-1) as Source
 assert(alert.stopped, 'Being hit interrupts the original detection bark')
-assert((pain.buffer as { url: string }).url.includes('/igi/ai_hit_'), 'Hits use original IGI pain recordings')
+assert((pain.buffer as { url: string }).url.includes('/voice/guards/ai_hit_'), 'Hits use original IGI pain recordings')
 igi.reset()
 igi.play({ kind: 'enemy-bullet-whiz', position: new THREE.Vector3(1, 1.6, 0) })
 const flybyCount = igi.diagnostics.sources
@@ -353,7 +356,7 @@ for (const weapon of ['pistol', 'ak', 'smg', 'shotgun', 'sniper']) {
     assert.equal(reports.diagnostics.sources, before + 1, `${kind} remains audible throughout its combat range`)
     const source = latestReport(), gain = source.connections[0] as Gain, panner = gain.connections[0] as Panner
     const url = (source.buffer as { url: string }).url
-    assert(IGI_SAMPLES[kind].files.some(file => url.endsWith(`/sounds/${served(file)}`)), `${kind} retains its native recording`)
+    assert(IGI_SAMPLES[kind].files.some(file => url.endsWith(`/OST/${served(file)}`)), `${kind} retains its native recording`)
     assert.equal(gain.gain.value, IGI_SAMPLES[kind].gain, 'Restoring range does not boost the original sample gain')
     assert(source.playbackRate.value >= 0.94 && source.playbackRate.value <= 1.06, 'Native report pitch is preserved')
     assert.equal(panner.panningModel, 'HRTF'); assert.equal(panner.distanceModel, 'inverse')
@@ -386,13 +389,13 @@ const incidentalSources = reportSources().slice(-room)
 assert.equal(reports.diagnostics.sources, 80)
 reports.play({ kind: 'enemy-shot-ak', position: new THREE.Vector3(40, 1.6, 0), radius: 80 })
 const admittedEnemy = latestReport()
-assert((admittedEnemy.buffer as { url: string }).url.endsWith('/igi/ak47_single.m4a'))
+assert((admittedEnemy.buffer as { url: string }).url.endsWith('/sfx/weapons/ak47_single.m4a'))
 assert.equal(reports.diagnostics.sources, 80, 'A weapon report replaces an incidental sound without exceeding capacity')
 assert(incidentalSources[0].stopped && !incidentalSources[1].stopped)
 assert(passingSources.every(source => !source.stopped), 'Footsteps and impacts are reclaimed before older whiz layers')
 reports.play({ kind: 'shot-pistol' })
 const admittedPlayer = latestReport()
-assert((admittedPlayer.buffer as { url: string }).url.includes('/igi/glock_shot_'))
+assert((admittedPlayer.buffer as { url: string }).url.includes('/sfx/weapons/glock_shot_'))
 assert(incidentalSources[1].stopped && !incidentalSources[2].stopped, 'Player reports receive the same source priority')
 assert.equal(reports.diagnostics.sources, 80)
 incidentalSources.forEach(source => source.onended?.())
@@ -400,7 +403,7 @@ while (reports.diagnostics.sources < 80) reports.play({ kind: 'shot-ak' })
 const reportsBeforeWhizReclaim = reportSources().filter(source => !source.disconnected && !protectedSources.includes(source) && !passingSources.includes(source))
 reports.play({ kind: 'enemy-shot-sniper', position: new THREE.Vector3(110, 1.6, 0), radius: 130 })
 const admittedSniper = latestReport()
-assert((admittedSniper.buffer as { url: string }).url.endsWith('/igi/svddrag_shot_1.m4a'))
+assert((admittedSniper.buffer as { url: string }).url.endsWith('/sfx/weapons/svddrag_shot_1.m4a'))
 assert(passingSources[0].stopped && !passingSources[1].stopped, 'The oldest whiz layer yields when no incidental sound remains')
 assert.equal(reports.diagnostics.sources, 80)
 reports.play({ kind: 'shot-smg' })
@@ -427,23 +430,23 @@ const latestShotgunSource = () => sc.nodes.filter(node => node instanceof Source
 for (const kind of ['shot-shotgun', 'enemy-shot-shotgun']) {
   shotgunAudio.play({ kind, position: new THREE.Vector3(1, 1, 0) })
   const source = latestShotgunSource()
-  assert((source.buffer as { url: string }).url.endsWith('/igi/spas12_shot_1.m4a'), 'Both sides fire the original SPAS report')
+  assert((source.buffer as { url: string }).url.endsWith('/sfx/weapons/spas12_shot_1.m4a'), 'Both sides fire the original SPAS report')
   assert(source.playbackRate.value >= 0.94 && source.playbackRate.value <= 1.06, 'SPAS report retains its original pitch')
   assert(!source.loop, 'One report plays per shotgun blast')
 }
 const beforePump = shotgunAudio.diagnostics.sources
 shotgunAudio.play({ kind: 'weapon-pump' })
 assert.equal(shotgunAudio.diagnostics.sources, beforePump + 1, 'The two mechanism strokes use one bounded source')
-assert((latestShotgunSource().buffer as { url: string }).url.endsWith('/igi/spas12_pump.m4a'))
+assert((latestShotgunSource().buffer as { url: string }).url.endsWith('/sfx/weapons/spas12_pump.m4a'))
 shotgunAudio.play({ kind: 'shell-load' }); const firstShell = latestShotgunSource().buffer
 shotgunAudio.play({ kind: 'shell-load' }); const nextShell = latestShotgunSource().buffer
-assert((firstShell as { url: string }).url.includes('/igi/spas12_bulins_'))
+assert((firstShell as { url: string }).url.includes('/sfx/weapons/spas12_bulins_'))
 assert.notEqual(firstShell, nextShell, 'Successive shells vary the original insertion clips')
 for (const [kind, clip] of [['reload', 'spas12_reload_1'], ['reload-ready', 'spas12_reload_2'], ['enemy-reload', 'spas12_pump']]) {
   shotgunAudio.play({ kind, weapon: 'shotgun' })
-  assert((latestShotgunSource().buffer as { url: string }).url.endsWith(`/igi/${clip}.m4a`), 'Shotgun reload metadata selects SPAS mechanism clips')
+  assert((latestShotgunSource().buffer as { url: string }).url.endsWith(`/sfx/weapons/${clip}.m4a`), 'Shotgun reload metadata selects SPAS mechanism clips')
   shotgunAudio.play({ kind, weapon: 'ak' })
-  assert((latestShotgunSource().buffer as { url: string }).url.includes('/igi/ak47_reload_'), 'Other weapons retain their existing reload clips')
+  assert((latestShotgunSource().buffer as { url: string }).url.includes('/sfx/weapons/ak47_reload_'), 'Other weapons retain their existing reload clips')
 }
 for (const mode of ['muted', 'zero-volume', 'paused'] as const) {
   shotgunAudio.setMuted(mode === 'muted'); shotgunAudio.setVolume(mode === 'zero-volume' ? 0 : 0.55); shotgunAudio.setActive(mode !== 'paused')
@@ -463,7 +466,7 @@ await new Promise(resolve => setTimeout(resolve, 0))
 const ac = FakeAudioContext.latest
 siren.setAlarm(true, new THREE.Vector3(4, 2, 0))
 const alarm = ac.nodes.filter(node => node instanceof Source).at(-1) as Source
-assert((alarm.buffer as { url: string }).url.endsWith('/igi/alarm_1.flac'))
+assert((alarm.buffer as { url: string }).url.endsWith('/sfx/alarms/alarm_1.flac'))
 assert(alarm.loop); assert.equal(alarm.playbackRate.value, 1)
 const count = siren.diagnostics.sources
 for (let i = 0; i < 100; i++) { siren.setAlarm(true); siren.play({kind:'horn'}) }
@@ -484,24 +487,24 @@ console.log('PASS Original IGI siren loops at native pitch, does not stack, and 
 for (const failure of ['missing', 'decode'] as const) {
   let release!: () => void
   const ready = new Promise<void>(resolve => { release = resolve })
-  Object.assign(globalThis, { fetch: async (url: string) => { await ready; return response(url, failure !== 'missing' || !url.includes('/igi/')) } })
+  Object.assign(globalThis, { fetch: async (url: string) => { await ready; return response(url, failure !== 'missing' || !isIgi(url)) } })
   const fallback = new MissionAudio()
   await fallback.unlock()
   const fc = FakeAudioContext.latest, decode = fc.decodeAudioData.bind(fc)
   if (failure === 'decode') fc.decodeAudioData = async data => {
-    if (new TextDecoder().decode(data).includes('/igi/')) throw new Error('Corrupt sample')
+    if (isIgi(new TextDecoder().decode(data))) throw new Error('Corrupt sample')
     return decode(data)
   }
   release()
   await new Promise(resolve => setTimeout(resolve, 0))
   fallback.setActive(true); fallback.play({ kind: 'shot-sniper' })
   const shot = fc.nodes.filter(node => node instanceof Source).at(-1) as Source
-  assert((shot.buffer as { url: string }).url.includes('/sounds/shot_rifle_'), `${failure}: previous sample is retained`)
+  assert((shot.buffer as { url: string }).url.includes('/sfx/weapons/shot_rifle_'), `${failure}: previous sample is retained`)
   assert(shot.playbackRate.value < 0.8, 'Fallback rifle keeps the original sniper pitch adjustment')
   for (const kind of ['shot-shotgun', 'enemy-shot-shotgun']) {
     fallback.play({ kind })
     const report = fc.nodes.filter(node => node instanceof Source).at(-1) as Source
-    assert((report.buffer as { url: string }).url.includes('/sounds/shot_rifle_'), `${failure}: shotgun retains the previous sample fallback`)
+    assert((report.buffer as { url: string }).url.includes('/sfx/weapons/shot_rifle_'), `${failure}: shotgun retains the previous sample fallback`)
     assert(report.playbackRate.value >= 0.58 && report.playbackRate.value <= 0.66, 'Only the fallback uses the lowered rifle pitch')
   }
   for (const kind of ['weapon-pump', 'shell-load']) {

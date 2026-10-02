@@ -40,7 +40,7 @@ npm run test:<area>  # focused suite, see table
 - `src/world/`: compound geometry built in code from plan coordinates (0.15 m per reference pixel, north = −Z).
 - `src/player/`: capsule controller, collision trees, ladders. Physics substeps are ≤ 1/120 s.
 - `src/render/ink.ts`: the shared paper/ink materials. Use these; don't create ad-hoc materials.
-- `public/`: `models/stickman.glb` (the one skinned character), `sounds/` (see `public/sounds/CREDITS.md`).
+- `public/`: `models/stickman.glb` (the one skinned character), `OST/` (every sound and music track, by category: see `public/OST/README.md` and `CREDITS.md`).
 - `scripts/*-checks.ts`: Node logic checks. `scripts/check-*.js`, `capture-*.js`, route scripts: browser checks (see below). `scripts/agent-browser.mjs` provides the portable browser CLI launcher used by runtime checks.
 - `localonly/` and `artifacts/` are git-ignored scratch space. Put screenshots and evidence there, never in the repo.
 

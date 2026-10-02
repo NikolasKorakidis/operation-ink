@@ -2,6 +2,7 @@ import type { MissionState } from './mission'
 import { LEVELS, listSaves, missionNumber, readCampaign, type RunKind } from './saves'
 import type { Objective } from './objectives'
 import { goTo } from '../modes'
+import { MenuAudio } from './menu-audio'
 import type { ViewName } from '../camera'
 import type { Briefing } from './types'
 import { campaignLevels } from '../levels/catalog'
@@ -108,6 +109,8 @@ export class MissionMenu {
   private briefingText: Briefing
 
   constructor(private start: HTMLButtonElement, briefing: Briefing & { map: string }, reducedMotion: boolean, private callbacks: MenuCallbacks) {
+    // The menu theme and the typewriter keys under the pointer (one for the page, kept across mode switches).
+    MenuAudio.shared()
     this.briefingText = briefing
     const escapeText = (text: string) => text.replace(/[&<>]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[char]!)
     // Taken before the card is rewritten: on a mode switch in place it already lives inside the card.

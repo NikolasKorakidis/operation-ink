@@ -15,7 +15,9 @@ spec = importlib.util.spec_from_file_location('extract_igi', ROOT / 'scripts/ext
 extract = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(extract)
 source = ROOT / 'project-igi-files/pc/common/sounds/sounds.res'
-manifest = json.loads((ROOT / 'public/sounds/igi/manifest.json').read_text())
+manifest = json.loads((ROOT / 'public/OST/igi-manifest.json').read_text())
+# The lossless WAVs are not served (public/OST has the AAC/FLAC encodes); extract-igi-audio.py writes them here.
+wavs = ROOT / 'artifacts/igi-audio.game'
 assert hashlib.sha256(source.read_bytes()).hexdigest() == manifest['sourceSha256']
 sounds = extract.read_archive(source)
 selected = extract.curated_sounds(sounds)
@@ -25,7 +27,7 @@ for name, sound in sounds.items():
     assert len(sound['pcm']) == sound['frames'] * sound['channels'] * 2
 assert any(sound['channels'] == 2 for sound in sounds.values())
 for asset in manifest['assets']:
-    path = ROOT / 'public/sounds/igi' / asset['file']
+    path = wavs / asset['file']
     assert hashlib.sha256(path.read_bytes()).hexdigest() == asset['sha256']
     with wave.open(str(path)) as wav:
         assert wav.getnchannels() == asset['channels']

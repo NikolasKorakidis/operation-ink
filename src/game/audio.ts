@@ -1,10 +1,10 @@
 import * as THREE from 'three'
 import type { SoundEvent } from './types'
 import type { HitReaction } from './hit-reactions'
-import { IGI_SAMPLES, IGI_VOICES } from './igi-samples'
+import { IGI_SAMPLES, IGI_VOICES, servedFile } from './igi-samples'
 
 /**
- * IGI effects take priority over the previous samples (see public/sounds/CREDITS.md).
+ * IGI effects take priority over the previous samples (see public/OST/CREDITS.md).
  * Procedural synthesis remains the fallback for kinds without a decoded sample.
  */
 const series = (name: string, count: number) => Array.from({ length: count }, (_, i) => `${name}_${i}`)
@@ -99,12 +99,10 @@ export class MissionAudio {
     if (this.loading || !this.context || this.disposed) return
     this.loading = true
     const context = this.context
-    // IGI ids keep their source names (igi/manifest.json) but ship as mono AAC; the looped
-    // alarm is FLAC because AAC tail padding would leave a gap at every loop (see CREDITS.md).
-    const served = (name: string) => name.endsWith('.wav') ? name.replace('.wav', name.includes('alarm_') ? '.flac' : '.m4a') : `${name}.m4a`
+    // Sound ids map to their files in public/OST (see servedFile).
     const fetchAll = (names: Iterable<string>) => Promise.all([...new Set(names)].map(async name => {
       try {
-        const response = await fetch(`${import.meta.env?.BASE_URL ?? '/'}sounds/${served(name)}`, { signal: this.loadAbort.signal })
+        const response = await fetch(`${import.meta.env?.BASE_URL ?? '/'}OST/${servedFile(name)}`, { signal: this.loadAbort.signal })
         if (!response.ok) return
         const buffer = await context.decodeAudioData(await response.arrayBuffer())
         if (!this.disposed && context === this.context) this.buffers.set(name, buffer)

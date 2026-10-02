@@ -123,7 +123,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=ROOT / 'project-igi-files/pc/common/sounds/sounds.res')
     parser.add_argument('--output', type=Path, default=ROOT / 'artifacts/igi-audio.local')
-    parser.add_argument('--game-output', type=Path, default=ROOT / 'public/sounds/igi')
+    parser.add_argument('--game-output', type=Path, default=ROOT / 'artifacts/igi-audio.game')
     parser.add_argument('--curated-only', action='store_true', help='Install only the curated game bank, skipping full archive export')
     args = parser.parse_args()
     sounds = read_archive(args.source)
@@ -143,7 +143,7 @@ def main():
     manifest = dict(sourceArchive='project-igi-files/pc/common/sounds/sounds.res',
                     sourceSha256=hashlib.sha256(args.source.read_bytes()).hexdigest(),
                     extractedCount=len(sounds), assets=entries)
-    (args.game_output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    (args.game_output / 'igi-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     if not args.curated_only:
         print(f'Extracted {len(sounds)} WAV files to {args.output}')
     print(f'Installed {len(selected)} game samples ({sum(44 + len(s["pcm"]) for s in selected.values()):,} bytes) to {args.game_output}')
