@@ -14,24 +14,35 @@ const SIGHT_EVERY = 0.12
 /** Seeing a world point from the camera, ignoring `target` (the guard himself). */
 export type Seen = (point: THREE.Vector3, target: THREE.Object3D) => boolean
 
+/** A manga burst balloon's outline: `spikes` points round a centre, alternating out to `outer` and in to `inner`. */
+const burst = (spikes: number, outer: number, inner: number, turn = 0) => Array.from({ length: spikes * 2 }, (_, i) => {
+  const a = turn + i / (spikes * 2) * Math.PI * 2, r = i % 2 ? inner : outer * (0.9 + 0.1 * ((i * 7) % 3) / 2)
+  return `${(Math.sin(a) * r).toFixed(1)},${(-Math.cos(a) * r).toFixed(1)}`
+}).join(' ')
 /**
- * A glyph drawn like a paper sticker inked in a comic (after Borderlands' markers): a white cut-out edge, a heavy ink
- * outline, paper inside, the colour filling it from the bottom up (`--fill`), a highlight, and action ticks.
+ * A marker drawn like a manga sound effect, after killer7 and Borderlands: a spiky burst balloon cut out of white
+ * paper and inked heavy black, its colour filling it from the bottom up (`--fill`, the clip's level), screentone dots
+ * where it is empty, emphasis lines round it, and the glyph in poster capitals across it.
  */
-const sticker = (kind: 'notice' | 'alert', stroke: string, dot: [number, number]) => `
-  <svg class="status-glyph status-${kind}" viewBox="0 0 40 60" aria-label="${kind === 'notice' ? 'Suspicious' : 'Alerted'}">
-    <defs><clipPath id="status-fill-${kind}-ID"><rect class="status-level" x="-5" y="0" width="50" height="60"/></clipPath></defs>
-    <g class="status-ticks"><path d="M33 6 L37 2 M35 11 L40 9 M30 3 L31 -1"/></g>
-    <path class="status-edge" d="${stroke}"/><circle class="status-edge" cx="${dot[0]}" cy="${dot[1]}" r="9.5"/>
-    <path class="status-ink" d="${stroke}"/><circle class="status-ink" cx="${dot[0]}" cy="${dot[1]}" r="6.6"/>
-    <path class="status-paper" d="${stroke}"/><circle class="status-paper" cx="${dot[0]}" cy="${dot[1]}" r="3.4"/>
-    <g clip-path="url(#status-fill-${kind}-ID)">
-      <path class="status-color" d="${stroke}"/><circle class="status-color" cx="${dot[0]}" cy="${dot[1]}" r="3.4"/>
-    </g>
-    <path class="status-shine" d="${stroke}" transform="translate(-1.1 -1.3)"/>
+const balloon = (kind: 'notice' | 'alert', glyph: string, spikes: number, turn: number) => {
+  const shape = burst(spikes, 25, 17, turn)
+  return `
+  <svg class="status-glyph status-${kind}" viewBox="-34 -34 68 68" aria-label="${kind === 'notice' ? 'Suspicious' : 'Alerted'}">
+    <defs>
+      <clipPath id="status-fill-${kind}-ID"><rect class="status-level" x="-40" y="-34" width="80" height="68"/></clipPath>
+      <pattern id="status-tone-${kind}-ID" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.85" fill="#000" opacity="0.55"/></pattern>
+    </defs>
+    <g class="status-ticks"><path d="M27 -27 L33 -33 M31 -16 L38 -18 M18 -31 L19 -38 M-27 -27 L-32 -32"/></g>
+    <polygon class="status-edge" points="${shape}"/>
+    <polygon class="status-ink" points="${shape}"/>
+    <polygon class="status-paper" points="${shape}"/>
+    <polygon class="status-tone" points="${shape}" fill="url(#status-tone-${kind}-ID)"/>
+    <polygon class="status-color" points="${shape}" clip-path="url(#status-fill-${kind}-ID)"/>
+    <text class="status-letter" x="1" y="11" text-anchor="middle">${glyph}</text>
   </svg>`
-const QUESTION = sticker('notice', 'M10.5 18 C10.5 8.5 29.5 7 29.5 18 C29.5 26 20 26.5 20 35', [20, 47])
-const BANG = sticker('alert', 'M20 9 L20 34', [20, 47])
+}
+const QUESTION = balloon('notice', '?', 11, 0.12)
+const BANG = balloon('alert', '!', 13, -0.08)
 const BLIND = `<svg class="status-glyph status-blind" viewBox="-24 -24 48 48" aria-label="Blinded">
   <circle class="status-ring-track" r="20"/><circle class="status-ring" r="20" pathLength="100" transform="rotate(-90)"/>
   <g class="status-rays">${[0, 45, 90, 135, 180, 225, 270, 315].map(a => `<line x1="0" y1="-11.5" x2="0" y2="-15" transform="rotate(${a})"/>`).join('')}</g>
@@ -114,7 +125,7 @@ export class StatusTags {
         if (tag.mode !== mode) { tag.root.dataset.mode = mode!; tag.root.classList.remove('is-new'); void tag.root.offsetWidth; tag.root.classList.add('is-new') }
         if (mode === 'notice') {
           const fill = Math.min(1, guard.notice / DETECTION.notice)
-          tag.level.setAttribute('y', (60 - 60 * fill).toFixed(1))
+          tag.level.setAttribute('y', (34 - 68 * fill).toFixed(1))
           tag.root.classList.toggle('is-urgent', fill > 0.66)
         }
         if (mode === 'blind') {

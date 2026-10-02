@@ -114,3 +114,20 @@ console.log('PASS One guard alerted alerts his squad, and only his squad')
   f.dispose()
 }
 console.log('PASS A squad fights together: shotguns rush, riflemen flank one at a time under cover')
+
+{
+  // Low and slow: the ? fills 20% slower against a crouched player, half as fast against a prone one.
+  const fill = async (eye: number) => {
+    const f = await field([{}], v(0, 0, 20))
+    f.player.eye.y = eye
+    f.step(1.5)
+    const notice = f.ai.enemies[0].notice
+    f.dispose()
+    return notice
+  }
+  const stand = await fill(1.65), crouch = await fill(1.12), prone = await fill(0.42)
+  assert(stand > 1.2, `Standing, the ? fills at full speed (${stand.toFixed(2)} s in 1.5)`)
+  assert(Math.abs(crouch / stand - DETECTION.stance.crouch) < 0.08, `Crouched, 20% slower (${(crouch / stand).toFixed(2)})`)
+  assert(Math.abs(prone / stand - DETECTION.stance.prone) < 0.08, `Prone, half as fast (${(prone / stand).toFixed(2)})`)
+}
+console.log('PASS Crouching slows the ? by a fifth, lying prone halves it')

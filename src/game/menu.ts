@@ -1,5 +1,6 @@
 import type { MissionState } from './mission'
-import { LEVELS, listSaves, type SaveInfo } from './saves'
+import { LEVELS, listSaves, missionNumber, readCampaign, type RunKind } from './saves'
+import type { Objective } from './objectives'
 import { goTo } from '../modes'
 import type { ViewName } from '../camera'
 import type { Briefing } from './types'
@@ -26,8 +27,10 @@ export function goToDestination(destination: Destination) {
 }
 
 const BRAND = 'Stickman: Ghost Ink'
+/** How long the debrief of a campaign win stays before the next mission's briefing comes up by itself. */
+const NEXT_MISSION_SECONDS = 8
 
-type MenuPage = 'home' | 'campaign' | 'pause' | 'load' | 'levels' | 'gallery' | 'options' | 'mission' | 'controls' | 'settings' | 'restart' | 'coop' | 'views' | 'leave'
+type MenuPage = 'home' | 'campaign' | 'pause' | 'newgame' | 'levels' | 'gallery' | 'options' | 'mission' | 'controls' | 'settings' | 'restart' | 'coop' | 'views' | 'leave'
 /**
  * Where each page lives. The main menu holds Campaign, Multiplayer, Gallery and Options; the pause page holds what a
  * run in progress needs. Back normally returns along the way you came (`trail`); this is the fallback when you
@@ -35,11 +38,22 @@ type MenuPage = 'home' | 'campaign' | 'pause' | 'load' | 'levels' | 'gallery' | 
  */
 const PARENT: Record<MenuPage, MenuPage> = {
   home: 'home', campaign: 'home', coop: 'home', gallery: 'home', options: 'home', pause: 'home', leave: 'home',
-  load: 'campaign', levels: 'campaign', views: 'gallery', settings: 'options', controls: 'options', mission: 'pause', restart: 'pause',
+  newgame: 'campaign', levels: 'campaign', views: 'gallery', settings: 'options', controls: 'options', mission: 'pause', restart: 'pause',
+}
+/** Each page's kanji, set down the edge of its panel (theme-k7.css). */
+const KANJI: Record<MenuPage, string> = {
+  home: '幽霊墨', campaign: '作戦', pause: '一時停止', newgame: '新規', levels: '自由任務', gallery: '画廊', options: '設定',
+  mission: '任務', controls: '操作', settings: '調整', restart: '再開始', coop: '協力', views: '視点', leave: '撤退',
 }
 const back = '<button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>'
 /** `leaveWarning` names what leaving to another mode would lose, or null when nothing is at stake. */
-type MenuCallbacks = { retry: () => void; restart: () => void; load?: (level: string) => void; leaveWarning?: () => string | null }
+type MenuCallbacks = { retry: () => void; restart: () => void; load?: (level: string) => void; leaveWarning?: () => string | null
+  /** The campaign: start it over from the first mission, carry on where it was left, or go on to the next mission. */
+  newGame?: () => void; continueGame?: () => void; nextMission?: () => void
+  /** Play a mission on its own, outside the campaign. */
+  freeMission?: (level: string) => void
+  /** The mission's objectives as they stand, for the briefing. */
+  objectives?: () => Objective[] }
 
 /**
  * Two kinds of page. The main menu picks what to do: Campaign (new game, load game, training), Multiplayer, Gallery
@@ -77,7 +91,16 @@ export class MissionMenu {
   /** The level this page is running (levels/catalog.ts), so the level select can mark it. */
   private level = ''
   private coopPlay: HTMLButtonElement
-  private saves: SaveInfo[] = []
+  private briefingStart: HTMLButtonElement
+  private resumeEntry: HTMLButtonElement
+  /** After a campaign win: seconds left before going on to the next mission's briefing by itself. */
+  private countdown = 0
+  private countdownTimer = 0
+  private nextButton: HTMLButtonElement
+  /** How this level was entered: from the campaign, as a free mission, or neither (the game's own first page). */
+  private entry: RunKind | null = null
+  /** A campaign mission just won: the next mission's id, null after the last; undefined when not a campaign win. */
+  private next: string | null | undefined = undefined
   /** The run's current objective, kept from the last update for the Campaign page's Resume entry. */
   private objective = ''
 
@@ -90,6 +113,7 @@ export class MissionMenu {
     // Taken before the card is rewritten: on a mode switch in place it already lives inside the card.
     const vrPanel = document.querySelector<HTMLElement>('#vr-panel')!
     this.card.dataset.page = 'home'
+    this.card.dataset.kanji = KANJI.home
     this.card.setAttribute('role', 'dialog')
     this.card.setAttribute('aria-modal', 'true')
     this.card.setAttribute('aria-labelledby', 'mission-menu-title')
@@ -99,7 +123,7 @@ export class MissionMenu {
         <h1 id="mission-menu-title">${BRAND}</h1>
         <p class="menu-premise">Find the hostage. Get out together.</p>
         <nav class="main-menu" aria-label="Main menu">
-          <button class="main-entry" data-menu-open="campaign"><strong>Campaign</strong><span>New game, saved games and training</span></button>
+          <button class="main-entry" data-menu-open="campaign"><strong>Campaign</strong><span>New game, load game, free missions and training</span></button>
           <button class="main-entry" data-menu-open="coop"><strong>Multiplayer</strong><span>Co-op for up to 4 players</span></button>
           <button class="main-entry" data-menu-open="gallery"><strong>Gallery</strong><span>Map views, free roam and the animation lab</span></button>
           <button class="main-entry" data-menu-open="options"><strong>Options</strong><span>Settings and controls</span></button>
@@ -110,9 +134,10 @@ export class MissionMenu {
         <h2 id="campaign-page-title">Campaign</h2>
         <p>Find the hostage. Get out together.</p>
         <nav class="main-menu" aria-label="Campaign">
-          <button id="campaign-play" class="main-entry"><strong>New game</strong><span>Start the mission</span></button>
-          <button id="campaign-levels" class="main-entry" data-menu-open="levels"><strong>Select level</strong><span>Play any mission</span></button>
-          <button id="campaign-load" class="main-entry"><strong>Load game</strong><span>Continue a saved mission</span></button>
+          <button id="campaign-resume" class="main-entry" hidden><strong>Resume mission</strong><span></span></button>
+          <button id="campaign-play" class="main-entry"><strong>New game</strong><span>The campaign from mission 1</span></button>
+          <button id="campaign-load" class="main-entry" hidden><strong>Load game</strong><span>Continue your campaign</span></button>
+          <button id="campaign-levels" class="main-entry" data-menu-open="levels"><strong>Free missions</strong><span>Play any mission on its own</span></button>
           <button id="campaign-training" class="main-entry"><strong>Training</strong><span>Learn every move, then fight Bulky Boy</span></button>
         </nav>
       </section>
@@ -123,6 +148,7 @@ export class MissionMenu {
         <div id="mission-debrief" role="status" hidden></div>
         <div class="mission-actions">
           <div class="mission-start-slot"></div>
+          <button id="mission-next" class="menu-primary" hidden>Next mission</button>
           <button id="mission-retry" class="menu-primary" hidden>Try again</button>
           <button id="mission-restart" class="menu-quiet" hidden>Restart mission</button>
         </div>
@@ -132,17 +158,20 @@ export class MissionMenu {
           <button id="pause-home" class="main-entry" data-menu-open="home"><strong>Main menu</strong><span>Campaign, multiplayer and the gallery</span></button>
         </nav>
       </section>
-      <section data-menu-page="load" hidden>
+      <section data-menu-page="newgame" hidden>
         ${back}
-        <h2 id="load-page-title">Load game</h2>
-        <p>Pick up where you left off. A mission saves itself whenever you pause or leave it.</p>
-        <nav class="main-menu save-list" aria-label="Saved missions"></nav>
+        <h2 id="newgame-page-title">Start a new campaign?</h2>
+        <p id="newgame-warning">Your saved campaign will be replaced.</p>
+        <div class="mission-actions">
+          <button id="newgame-cancel" class="menu-primary">Keep my campaign</button>
+          <button id="newgame-confirm" class="menu-secondary">Start over</button>
+        </div>
       </section>
       <section data-menu-page="levels" hidden>
         ${back}
-        <h2 id="levels-page-title">Select level</h2>
-        <p>Play any mission, in any order.</p>
-        <nav class="main-menu level-list" aria-label="Levels"></nav>
+        <h2 id="levels-page-title">Free missions</h2>
+        <p>Play any mission on its own. Free missions are not saved and don't change your campaign.</p>
+        <nav class="main-menu level-list" aria-label="Missions"></nav>
       </section>
       <section data-menu-page="gallery" hidden>
         ${back}
@@ -176,13 +205,30 @@ export class MissionMenu {
           <button id="mission-confirm-leave" class="menu-secondary">Leave</button>
         </div>
       </section>
-      <section data-menu-page="mission" hidden>
-        ${back}
-        <h2 id="mission-page-title">${escapeText(briefing.title)}</h2>
-        <p id="mission-current-objective"></p>
-        <div class="field-map">${briefing.map}</div>
-        <p class="map-legend">${(briefing.legend ?? ['▲ You']).map(entry => `<span>${escapeText(entry)}</span>`).join('')}</p>
-        ${briefing.tips.length ? `<details class="mission-tips"><summary>Route tips</summary>${briefing.tips.map(tip => `<p>${escapeText(tip)}</p>`).join('')}</details>` : ''}
+      <section data-menu-page="mission" class="briefing" hidden>
+        <div class="briefing-top">
+          ${back}
+          <header class="briefing-head">
+            <p class="briefing-kicker" id="briefing-kicker"></p>
+            <h2 id="mission-page-title">${escapeText(briefing.title)}</h2>
+            <p class="briefing-premise" id="briefing-premise">${escapeText(briefing.premise)}</p>
+          </header>
+        </div>
+        <div class="briefing-map">
+          <div class="field-map">${briefing.map}</div>
+          <p class="map-legend">${(briefing.legend ?? ['▲ You']).map(entry => `<span>${escapeText(entry)}</span>`).join('')}</p>
+        </div>
+        <p id="mission-current-objective" hidden></p>
+        <div class="briefing-body">
+          <section class="briefing-objectives" aria-labelledby="briefing-objectives-title">
+            <h3 id="briefing-objectives-title">Objectives</h3>
+            <ol class="briefing-main"></ol>
+            <h3 class="briefing-side-title">Optional</h3>
+            <ul class="briefing-side"></ul>
+          </section>
+          ${briefing.tips.length ? `<section class="briefing-intel" aria-labelledby="briefing-intel-title"><h3 id="briefing-intel-title">Intel</h3>${briefing.tips.map(tip => `<p>${escapeText(tip)}</p>`).join('')}</section>` : ''}
+        </div>
+        <div class="mission-actions briefing-actions"><button id="briefing-start" class="menu-primary">Start mission</button></div>
       </section>
       <section data-menu-page="controls" hidden>
         ${back}
@@ -249,17 +295,13 @@ export class MissionMenu {
     this.loadEntry = this.element('#campaign-load')
     this.training = this.element('#campaign-training')
     this.coopPlay = this.element('#coop-play')
-    // One button per saved level; the list is drawn each time the page opens.
-    this.element('.save-list').addEventListener('click', event => {
-      const level = (event.target as HTMLElement).closest<HTMLElement>('[data-save-level]')?.dataset.saveLevel
-      if (level) callbacks.load?.(level)
-    }, { signal: this.abort.signal })
-    // One button per campaign level; picking the one you're in plays it, any other switches to it.
+    this.briefingStart = this.element('#briefing-start')
+    this.resumeEntry = this.element('#campaign-resume')
+    this.nextButton = this.element('#mission-next')
+    // One button per campaign mission: it opens that mission's briefing, to play it on its own.
     this.element('.level-list').addEventListener('click', event => {
-      const button = (event.target as HTMLElement).closest<HTMLElement>('[data-level]')
-      if (!button) return
-      if (button.dataset.level === this.level && !this.tutorial) this.playCampaign()
-      else this.go(`level:${button.dataset.level}`, button)
+      const level = (event.target as HTMLElement).closest<HTMLElement>('[data-level]')?.dataset.level
+      if (level) callbacks.freeMission?.(level)
     }, { signal: this.abort.signal })
     const options = { signal: this.abort.signal }
     this.card.querySelectorAll<HTMLElement>('[data-menu-open]').forEach(button => {
@@ -278,8 +320,13 @@ export class MissionMenu {
       button.addEventListener('click', () => this.go(button.dataset.menuGo as Destination, button), options)
     })
     this.play.addEventListener('click', () => this.playCampaign(), options)
+    this.resumeEntry.addEventListener('click', () => this.start.click(), options)
     this.coopPlay.addEventListener('click', () => this.playCampaign(), options)
-    this.loadEntry.addEventListener('click', () => this.tutorial ? this.go('load', this.loadEntry) : this.open('load', this.loadEntry), options)
+    this.loadEntry.addEventListener('click', () => callbacks.continueGame?.(), options)
+    this.element('#newgame-confirm').addEventListener('click', () => callbacks.newGame?.(), options)
+    this.element('#newgame-cancel').addEventListener('click', () => this.back(), options)
+    this.briefingStart.addEventListener('click', () => this.start.click(), options)
+    this.nextButton.addEventListener('click', () => callbacks.nextMission?.(), options)
     this.training.addEventListener('click', () => {
       if (!this.tutorial) this.go('tutorial', this.training)
       else if (this.phase === 'active') this.start.click()
@@ -305,17 +352,20 @@ export class MissionMenu {
     this.open('leave', source)
   }
 
-  /** The campaign's first entry: in the tutorial it leaves for the mission; otherwise it starts, resumes or starts over. */
+  /** New game: start the campaign over (asking first if one is saved). */
   private playCampaign() {
-    if (this.tutorial || this.standalone) this.go('mission', this.play)
-    else if (this.phase === 'active') this.start.click()
-    else this.callbacks.restart()
+    if (readCampaign()) this.open('newgame', this.play)
+    else this.callbacks.newGame?.()
   }
 
   /** Resuming makes sense: a run is under way and paused. */
   private get resumable() { return (this.hasPlayed || this.tutorial) && this.phase === 'active' }
   /** The page the menu settles on: the main menu until a run starts, the pause page from then on (and in training). */
-  private get landing(): MenuPage { return this.tutorial || this.standalone || this.hasPlayed || this.phase !== 'active' ? 'pause' : 'home' }
+  private get landing(): MenuPage {
+    // A mission entered from the campaign or the free missions (or opened on its own) opens on its briefing.
+    if (!this.tutorial && !this.hasPlayed && this.phase === 'active' && (this.entry || this.standalone)) return 'mission'
+    return this.tutorial || this.standalone || this.hasPlayed || this.phase !== 'active' ? 'pause' : 'home'
+  }
 
   /** Go on to a page from this one; Back returns here, to `source`. */
   private open(page: MenuPage, source: HTMLElement | null = null) {
@@ -331,19 +381,20 @@ export class MissionMenu {
   }
 
   private show(page: MenuPage, focus = true) {
-    if (page === 'load') this.drawSaves()
+    if (page === 'mission') this.drawBriefing()
     if (page === 'campaign') this.drawCampaign()
     if (page === 'levels') this.drawLevels()
     this.page = page
     this.card.dataset.page = page
+    this.card.dataset.kanji = KANJI[page]
     this.card.querySelectorAll<HTMLElement>('[data-menu-page]').forEach(section => { section.hidden = section.dataset.menuPage !== page })
     // The main menu has a Back only when you came to it from somewhere, such as the pause page.
     this.element('[data-menu-page="home"] [data-menu-back]').hidden = !this.trail.length
     this.card.setAttribute('aria-labelledby', page === 'home' ? 'mission-menu-title' : `${page}-page-title`)
     this.pause.scrollTop = 0
     if (!focus) return
-    if (page === 'home' || page === 'campaign' || page === 'pause') this.focusPrimary()
-    else this.element<HTMLButtonElement>(`[data-menu-page="${page}"] ${page === 'restart' ? '#mission-cancel-restart' : page === 'leave' ? '#mission-cancel-leave' : '[data-menu-back]'}`).focus({ preventScroll: true })
+    if (page === 'home' || page === 'campaign' || page === 'pause' || page === 'mission') this.focusPrimary()
+    else this.element<HTMLButtonElement>(`[data-menu-page="${page}"] ${page === 'restart' ? '#mission-cancel-restart' : page === 'leave' ? '#mission-cancel-leave' : page === 'newgame' ? '#newgame-cancel' : '[data-menu-back]'}`).focus({ preventScroll: true })
   }
 
   private back() {
@@ -365,32 +416,53 @@ export class MissionMenu {
     }
     this.wasPlaying = playing
   }
-  private drawSaves() {
-    this.saves = listSaves()
-    const minutes = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
-    const when = (time: number) => new Date(time).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-    this.element('.save-list').innerHTML = this.saves.map(save => `<button class="main-entry" data-save-level="${save.level}">
-      <strong>${LEVELS[save.level].name}</strong><span>${save.objective} · ${minutes(save.elapsed)} played · saved ${when(save.savedAt)}</span></button>`).join('')
-      || '<p>No saved games yet. A mission saves itself whenever you pause or leave it.</p>'
-  }
-  /** The level select: every campaign mission in order, the one you're in marked. */
+  /** Free missions: every campaign mission in order. */
   private drawLevels() {
-    const here = (id: string) => id === this.level && !this.tutorial
-    this.element('.level-list').innerHTML = campaignLevels().map((level, index) => `<button class="main-entry" data-level="${level.id}"${here(level.id) ? ' aria-current="true"' : ''}>
-      <strong>Mission ${index + 1} · ${level.name}</strong><span>${here(level.id) ? `${this.hasPlayed && this.phase === 'active' ? 'Playing now · resume' : 'Playing now'} · ` : ''}${level.summary}</span></button>`).join('')
+    this.element('.level-list').innerHTML = campaignLevels().map((level, index) => `<button class="main-entry" data-level="${level.id}">
+      <strong>Mission ${index + 1} · ${level.name}</strong><span>${level.summary}</span></button>`).join('')
   }
+
   /** The Campaign page names what each entry will do right now. */
   private drawCampaign() {
     const away = this.tutorial || this.standalone
     const resume = !away && this.hasPlayed && this.phase === 'active'
-    this.setEntry(this.play, resume ? 'Resume mission' : 'New game', this.tutorial ? 'Leave training and start the mission'
-      : this.standalone ? 'Leave this level and start the campaign' : resume ? this.objective : 'Start the mission')
-    // A run under way is already saved by pausing, so loading is offered only when none is.
-    this.loadEntry.hidden = !away && (resume || !this.callbacks.load)
-    const saves = listSaves().length
-    this.setEntry(this.loadEntry, 'Load game', saves ? `${saves} saved ${saves === 1 ? 'mission' : 'missions'}` : 'No saved games yet')
+    // A run under way is resumed from its own entry; New game is always there.
+    this.resumeEntry.hidden = !resume
+    if (resume) this.setEntry(this.resumeEntry, 'Resume mission', this.objective)
+    this.setEntry(this.play, 'New game', 'The campaign from mission 1')
+    // Load game carries on the saved campaign: its mission, from its checkpoint if it has one.
+    const campaign = readCampaign()
+    // Hidden only while the paused run is the campaign's own mission (Resume covers that), or with nothing to load.
+    this.loadEntry.hidden = !campaign || !this.callbacks.continueGame || resume && this.entry !== 'free' && campaign.mission === this.level
+    if (campaign) {
+      const save = campaign.mission ? listSaves().find(entry => entry.level === campaign.mission) : undefined
+      const when = (time: number) => new Date(time).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+      this.setEntry(this.loadEntry, 'Load game', !campaign.mission ? 'Campaign complete'
+        : `Mission ${missionNumber(campaign.mission)} · ${LEVELS[campaign.mission].name}${save ? ` · ${save.objective} · saved ${when(save.savedAt)}` : ' · from the start'}`)
+      this.loadEntry.disabled = !campaign.mission
+    }
     this.setEntry(this.training, this.tutorial && this.hasPlayed ? 'Resume training' : 'Training',
       this.tutorial ? 'Back to the training ground' : 'Learn every move, then fight Bulky Boy')
+  }
+
+  /** The briefing: which mission, its premise, its objectives as they stand, and the intel. */
+  private drawBriefing() {
+    const number = missionNumber(this.level), count = campaignLevels().length
+    this.element('#briefing-kicker').textContent = !number ? 'Developer level'
+      : this.entry === 'free' ? `Mission ${number} · Free mission` : `Mission ${number} of ${count} · Campaign`
+    const objectives = this.callbacks.objectives?.() ?? []
+    const item = (objective: Objective) => `<li class="${objective.done ? 'is-done' : ''}"><strong>${objective.label}${objective.progress ? ` <em>${objective.progress[0]}/${objective.progress[1]}</em>` : ''}</strong>${objective.detail ? `<span>${objective.detail}</span>` : ''}</li>`
+    this.element('.briefing-main').innerHTML = objectives.filter(objective => objective.main).map(item).join('')
+    const side = objectives.filter(objective => !objective.main)
+    this.element('.briefing-side').innerHTML = side.map(item).join('')
+    this.element('.briefing-side-title').hidden = !side.length
+    this.element('[data-menu-page="mission"] .briefing-objectives').hidden = !objectives.length
+    // Before the run, the briefing starts it; during one, it resumes it.
+    const underway = this.hasPlayed && this.phase === 'active'
+    this.briefingStart.textContent = underway ? 'Resume mission' : 'Start mission'
+    this.briefingStart.hidden = this.phase !== 'active'
+    this.briefingStart.disabled = this.start.disabled
+    this.element('#mission-current-objective').hidden = !underway
   }
   private setEntry(entry: HTMLElement, name: string, note: string) {
     entry.querySelector('strong')!.textContent = name
@@ -399,8 +471,8 @@ export class MissionMenu {
 
   /** The main menu leads with Campaign, the Campaign page with its first entry, the pause page with what the run needs next. */
   focusPrimary() {
-    const primary = this.page === 'home' ? this.campaignEntry : this.page === 'campaign' ? this.play : this.page !== 'pause' ? null
-      : this.phase === 'dead' ? this.retry : this.phase === 'complete' ? this.restart : this.start
+    const primary = this.page === 'home' ? this.campaignEntry : this.page === 'campaign' ? (this.resumeEntry.hidden ? this.play : this.resumeEntry) : this.page === 'mission' ? this.briefingStart
+      : this.page !== 'pause' ? null : this.phase === 'dead' ? this.retry : this.phase === 'complete' ? (this.next ? this.nextButton : this.restart) : this.start
     if (primary && !this.pause.hidden && !this.pause.inert && !primary.hidden && !primary.disabled) primary.focus({ preventScroll: true })
   }
   /** The tutorial level: the pause page runs training, and it has no briefing. */
@@ -415,15 +487,39 @@ export class MissionMenu {
     this.standalone = true
     this.land()
   }
-  /** Open on the saved games (arriving from the tutorial's Load game). */
-  showLoad() { this.trail = [{ page: 'home', focus: this.campaignEntry }, { page: 'campaign', focus: this.loadEntry }]; this.show('load') }
+  /** How this level was entered (see RunKind); a mission entered this way opens on its briefing. */
+  setRun(kind: RunKind | null) {
+    this.entry = kind
+    // A fresh run: nothing played on it yet.
+    if (kind) { this.hasPlayed = false; this.wasPlaying = false }
+    this.trail = kind ? [{ page: 'home', focus: this.campaignEntry }, { page: 'campaign', focus: kind === 'free' ? this.element('#campaign-levels') : this.play }] : []
+    this.show(this.landing)
+  }
+  /**
+   * A campaign mission is won: offer the next one (null after the last), and go on to its briefing by itself after a
+   * few seconds on the debrief, so the campaign keeps going. The count waits while you look at another page.
+   */
+  setComplete(next: string | null) {
+    this.next = next
+    window.clearInterval(this.countdownTimer)
+    if (!next) return
+    this.countdown = NEXT_MISSION_SECONDS
+    this.countdownTimer = window.setInterval(() => {
+      if (this.page !== 'pause' || this.pause.hidden) return
+      if (--this.countdown <= 0) { window.clearInterval(this.countdownTimer); this.callbacks.nextMission?.() }
+      this.labelNext()
+    }, 1000)
+  }
+  private labelNext() {
+    if (this.next) this.nextButton.textContent = `Next mission · ${LEVELS[this.next]?.name ?? ''}${this.countdown > 0 ? ` · ${this.countdown}` : ''}`
+  }
   ready() { this.loaded = true; this.start.disabled = false; this.start.textContent = this.tutorial ? 'Begin training' : this.standalone ? 'Begin mission' : 'New game'; if (this.page === this.landing) this.focusPrimary() }
   error(message: string) {
     this.loadError = message; this.start.textContent = 'Unable to load'; this.start.disabled = true
     this.trail = [{ page: 'home', focus: this.campaignEntry }]; this.show('pause'); this.showError()
   }
   private showError() { const debrief = this.element('#mission-debrief'); debrief.hidden = false; delete debrief.dataset.summary; debrief.textContent = this.loadError }
-  reset() { this.phase = 'active'; this.loadError = ''; this.land() }
+  reset() { this.phase = 'active'; this.loadError = ''; this.next = undefined; window.clearInterval(this.countdownTimer); this.land() }
 
   update(state: MissionState, data: { playing: boolean; enabled: boolean; ready: boolean }, objective: string) {
     this.objective = objective
@@ -440,7 +536,8 @@ export class MissionMenu {
       this.land()
     }
     const dead = state.phase === 'dead', complete = state.phase === 'complete'
-    this.title.textContent = dead ? (state.failure ? 'Mission failed.' : this.tutorial ? 'Down, not out.' : 'No way through.') : complete ? this.briefingText.won : this.hasPlayed ? 'Paused.' : this.tutorial ? 'Training ground' : this.standalone ? this.briefingText.title : 'Campaign'
+    const campaignWon = complete && this.next !== undefined
+    this.title.textContent = dead ? (state.failure ? 'Mission failed.' : this.tutorial ? 'Down, not out.' : 'No way through.') : campaignWon && this.next === null ? 'Campaign complete.' : complete ? this.briefingText.won : this.hasPlayed ? 'Paused.' : this.tutorial ? 'Training ground' : this.standalone ? this.briefingText.title : 'Campaign'
     this.premise.hidden = dead && !state.failure
     this.premise.textContent = dead && state.failure ? state.failure : this.tutorial ? 'Learn every move, one lesson at a time, then take down Bulky Boy.'
       : complete ? this.briefingText.outro : this.hasPlayed ? this.objective : this.briefingText.premise
@@ -452,7 +549,9 @@ export class MissionMenu {
     this.briefing.hidden = this.tutorial || dead || complete
     this.restart.hidden = dead || (!complete && !this.hasPlayed)
     this.restart.disabled = !data.ready
-    this.restart.className = complete ? 'menu-primary' : 'menu-quiet'
+    this.restart.className = complete && !this.next ? 'menu-primary' : 'menu-quiet'
+    this.nextButton.hidden = !campaignWon || !this.next
+    this.labelNext()
     this.restart.textContent = complete ? 'Play again' : this.tutorial ? 'Restart training' : 'Restart mission'
     this.play.disabled = this.training.disabled = this.coopPlay.disabled = !data.ready || !this.loaded
     // Once you are in a co-op room, its page leads straight into the mission.
@@ -475,6 +574,7 @@ export class MissionMenu {
     }
     if (this.loadError) this.showError()
     this.element('#mission-current-objective').textContent = this.objective
+    if (this.page === 'mission') this.drawBriefing()
     if (data.enabled && ((justPaused && !dead) || complete) && this.page === this.landing && !this.card.contains(document.activeElement)) this.focusPrimary()
   }
 
@@ -508,5 +608,5 @@ export class MissionMenu {
     }
   }
 
-  dispose() { this.abort.abort() }
+  dispose() { this.abort.abort(); window.clearInterval(this.countdownTimer) }
 }

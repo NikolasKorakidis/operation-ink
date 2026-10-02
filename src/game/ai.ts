@@ -17,6 +17,11 @@ const point = new THREE.Vector3(), aimPoint = new THREE.Vector3()
 const clamp = THREE.MathUtils.clamp
 /** Eye height above the feet: 1.65 standing, lower crouched or prone. */
 const bodyHeight = (player: PlayerSense) => Math.max(0.3, player.eye.y - player.feet.y)
+/** How fast a guard's ? fills watching this player: slower the lower he keeps (told apart by eye height). */
+const noticeRate = (player: PlayerSense) => {
+  const height = bodyHeight(player)
+  return height < 0.8 ? DETECTION.stance.prone : height < 1.4 ? DETECTION.stance.crouch : 1
+}
 
 /** The cone operates horizontally; occlusion is a separate, real-geometry test. */
 export function insideVisionCone(from: THREE.Vector3, yaw: number, target: THREE.Vector3, range = 36, halfAngle = 55) {
@@ -649,7 +654,7 @@ export class EnemyDirector {
         // Hunting you already, he reacts at the ordinary speed of a first sighting.
         let quick = close
         if (enemy.state !== 'combat' && (close || hunting)) enemy.notice = DETECTION.notice
-        else if (enemy.state !== 'combat') { enemy.notice = Math.min(DETECTION.notice, enemy.notice + dt); quick ||= enemy.notice >= DETECTION.notice }
+        else if (enemy.state !== 'combat') { enemy.notice = Math.min(DETECTION.notice, enemy.notice + dt * noticeRate(player)); quick ||= enemy.notice >= DETECTION.notice }
         if (enemy.state === 'combat' || enemy.notice >= DETECTION.notice) {
           enemy.suspicion = 1
           if (enemy.state !== 'combat') {

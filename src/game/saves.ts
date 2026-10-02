@@ -69,3 +69,62 @@ export function deleteSave(level: string) {
   const saves = readIndex()
   if (saves.some(save => save.level === level)) writeIndex(saves.filter(save => save.level !== level))
 }
+
+/**
+ * The campaign: the missions played one at a time, in order. `mission` is the one you are on (null once the last is
+ * done), `completed` those finished. Load game continues it: that mission's checkpoint if it has one, else its
+ * briefing. New game starts it over and clears the missions' checkpoints. Free missions never touch it.
+ */
+export type Campaign = { version: number; mission: string | null; completed: string[]; startedAt: number }
+const CAMPAIGN_KEY = 'stickman-ghost-ink.campaign'
+
+/** The campaign in progress, or null. A mission saved before campaigns existed counts as one, on that mission. */
+export function readCampaign(): Campaign | null {
+  try {
+    const campaign = JSON.parse(storage()?.getItem(CAMPAIGN_KEY) ?? 'null') as Campaign | null
+    if (campaign?.version === SAVE_VERSION && (campaign.mission === null || LEVELS[campaign.mission])) return campaign
+  } catch { /* damaged: as if none */ }
+  const [newest] = listSaves()
+  return newest ? { version: SAVE_VERSION, mission: newest.level, completed: [], startedAt: newest.savedAt } : null
+}
+
+function writeCampaign(campaign: Campaign) {
+  try { storage()?.setItem(CAMPAIGN_KEY, JSON.stringify(campaign)) } catch { /* storage unavailable */ }
+  return campaign
+}
+
+/** A new campaign from the first mission; every mission's checkpoint is cleared. */
+export function startCampaign(): Campaign {
+  for (const level of Object.keys(LEVELS)) deleteSave(level)
+  return writeCampaign({ version: SAVE_VERSION, mission: FIRST_LEVEL, completed: [], startedAt: Date.now() })
+}
+
+/** A campaign mission is won: it is done, and the campaign moves on. Returns the next mission's id, or null at the end. */
+export function finishCampaignMission(level: string): string | null {
+  const campaign = readCampaign() ?? { version: SAVE_VERSION, mission: level, completed: [], startedAt: Date.now() }
+  const order = campaignLevels().map(entry => entry.id)
+  const next = order[order.indexOf(level) + 1] ?? null
+  writeCampaign({ ...campaign, mission: next, completed: [...new Set([...campaign.completed, level])] })
+  return next
+}
+
+/** The campaign's mission number for a level (1-based), or 0 for one outside it. */
+export const missionNumber = (level: string) => campaignLevels().findIndex(entry => entry.id === level) + 1
+
+/**
+ * How the next level was entered, kept across the switch to it: from the campaign (it saves, and leads on to the
+ * next mission) or as a free mission (no saves, no campaign progress).
+ */
+export type RunKind = 'campaign' | 'free'
+const RUN_KEY = 'stickman-ghost-ink.next-run'
+export function setNextRun(kind: RunKind, level: string) {
+  try { window.sessionStorage.setItem(RUN_KEY, JSON.stringify({ kind, level })) } catch { /* the level opens without it */ }
+}
+/** The run kind set for this level before switching to it (read once). */
+export function takeRun(level: string): RunKind | null {
+  try {
+    const next = JSON.parse(window.sessionStorage.getItem(RUN_KEY) ?? 'null') as { kind: RunKind; level: string } | null
+    window.sessionStorage.removeItem(RUN_KEY)
+    return next?.level === level ? next.kind : null
+  } catch { return null }
+}

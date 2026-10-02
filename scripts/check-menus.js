@@ -21,8 +21,9 @@
   const entries = name => [...document.querySelectorAll(`[data-menu-page="${name}"] .main-entry`)].map(entry => entry.dataset.menuOpen ?? entry.dataset.menuGo)
   const HOME = '[data-menu-page="home"]', CAMPAIGN = '[data-menu-page="campaign"]', PAUSE = '[data-menu-page="pause"]', OPTIONS = '[data-menu-page="options"]', GALLERY = '[data-menu-page="gallery"]'
   const shown = list => list.filter(entry => entry.getClientRects().length)
-  // Start with no saved missions so the Load button's appearance is predictable.
-  for (const key of Object.keys(localStorage)) if (key.startsWith('stickman-ghost-ink.save')) localStorage.removeItem(key)
+  // Start with no saved campaign or missions so the Load button's appearance is predictable.
+  const clearSaves = () => { for (const key of Object.keys(localStorage)) if (key.startsWith('stickman-ghost-ink.save') || key === 'stickman-ghost-ink.campaign') localStorage.removeItem(key) }
+  clearSaves()
   const originalAI = m.ai.update, originalFallback = p.fallback, originalInvincible = m.invincible
   m.ai.update = () => {}
   p.fallback = true
@@ -41,24 +42,18 @@
       .find(rule => rule.selectorText?.includes(':hover:not(:disabled)') && rule.selectorText.includes('.main-entry') && !rule.selectorText.includes('::'))
     check(hoverRule && /var\(--glow-delay\)/.test(hoverRule.style.transition) && getComputedStyle(document.documentElement).getPropertyValue('--glow-delay').trim() === '2s', 'Hover neon only comes on after resting on a button for 2 s')
 
-    // Campaign: a new game, a level of your choice, a saved game, or training. Nothing else, nothing twice.
+    // Campaign: a new game, a saved game (once there is one), the free missions, or training. Nothing else, nothing twice.
     click(`${HOME} [data-menu-open="campaign"]`)
     const campaign = () => shown([...document.querySelectorAll(`${CAMPAIGN} .main-entry`)]).map(entry => entry.querySelector('strong').textContent)
-    check(page() === 'campaign' && singlePage() && document.activeElement.id === 'campaign-play' && JSON.stringify(campaign()) === '["New game","Select level","Load game","Training"]', `Campaign offers New game, Select level, Load game and Training: ${campaign()}`)
-    check($('#campaign-load span').textContent === 'No saved games yet', 'Load game is offered even with nothing saved, and says so')
+    check(page() === 'campaign' && singlePage() && document.activeElement.id === 'campaign-play' && JSON.stringify(campaign()) === '["New game","Free missions","Training"]', `With nothing saved, Campaign offers New game, Free missions and Training: ${campaign()}`)
     check(!visible('#walk-start') && !visible('#mission-briefing'), 'No mission buttons and no briefing before the mission')
-    // Select level: every campaign mission in order, the one this page runs marked as playing.
+    // Free missions: every campaign mission in order.
     click('#campaign-levels')
     const levels = [...document.querySelectorAll('.level-list [data-level]')]
-    check(page() === 'levels' && singlePage() && levels.length >= 2 && levels[0].querySelector('strong').textContent === 'Mission 1 · The compound'
-      && levels[1].querySelector('strong').textContent === 'Mission 2 · The town', `Select level lists the missions in order: ${levels.map(level => level.querySelector('strong').textContent)}`)
-    check(levels[0].getAttribute('aria-current') === 'true' && levels[0].textContent.includes('Playing now') && !levels[1].hasAttribute('aria-current'), 'The mission you are in is marked as playing now')
+    check(page() === 'levels' && singlePage() && $('#levels-page-title').textContent === 'Free missions' && levels.length >= 2 && levels[0].querySelector('strong').textContent === 'Mission 1 · The compound'
+      && levels[1].querySelector('strong').textContent === 'Mission 2 · The town', `Free missions lists the missions in order: ${levels.map(level => level.querySelector('strong').textContent)}`)
     key('Escape')
-    check(page() === 'campaign' && document.activeElement.id === 'campaign-levels', 'Escape from Select level returns to the Campaign, on Select level')
-    click('#campaign-load')
-    check(page() === 'load' && $('.save-list').textContent.includes('No saved games yet'), 'Load game with nothing saved says so')
-    key('Escape')
-    check(page() === 'campaign' && document.activeElement.id === 'campaign-load', 'Escape from Load game returns to the Campaign, on Load game')
+    check(page() === 'campaign' && document.activeElement.id === 'campaign-levels', 'Escape from Free missions returns to the Campaign, on Free missions')
     key('Escape')
     check(page() === 'home' && document.activeElement === $(`${HOME} [data-menu-open="campaign"]`) && !p.playing, 'Escape from Campaign returns to the main menu, on Campaign')
 
@@ -111,9 +106,13 @@
     volume.value = '55'; volume.dispatchEvent(new Event('input', { bubbles: true }))
     click('#mission-mute'); click('#mission-motion'); key('Escape'); key('Escape')
 
-    // Playing: New game starts, and pausing lands on the pause page.
+    // New game: the mission's briefing first (map, then the mission, objectives and intel), then Start mission plays it.
     click(`${HOME} [data-menu-open="campaign"]`); click('#campaign-play'); draw()
-    check(p.playing && $('#walk-pause').hidden, 'New game enters play directly')
+    check(!p.playing && page() === 'mission' && visible('.field-map') && document.activeElement.id === 'briefing-start' && $('#briefing-start').textContent === 'Start mission', 'New game opens the briefing, on Start mission')
+    check($('#briefing-kicker').textContent === 'Mission 1 of 2 · Campaign' && document.querySelectorAll('.briefing-main li').length >= 1 && visible('.briefing-intel'), 'The briefing names the mission and lists its objectives and intel')
+    check(JSON.parse(localStorage.getItem('stickman-ghost-ink.campaign')).mission === 'compound', 'New game saves a campaign on mission 1')
+    click('#briefing-start'); draw()
+    check(p.playing && $('#walk-pause').hidden, 'Start mission enters play')
     m.state.elapsed = 12; p.pause(); draw()
     const pauseEntries = () => shown([...document.querySelectorAll(`${PAUSE} button`)]).map(button => button.querySelector('strong')?.textContent ?? button.textContent)
     check(page() === 'pause' && document.activeElement.id === 'walk-start' && $('#pause-page-title').textContent === 'Paused.', 'Pausing lands on the pause page, on Resume mission')
@@ -125,7 +124,7 @@
     click('#pause-home')
     check(page() === 'home' && visible(`${HOME} [data-menu-back]`), 'Main menu from the pause page has a Back to it')
     click(`${HOME} [data-menu-open="campaign"]`)
-    check(JSON.stringify(campaign()) === '["Resume mission","Select level","Training"]' && $('#campaign-play span').textContent.length > 0, `A paused mission's Campaign page resumes it, with no Load: ${campaign()}`)
+    check(JSON.stringify(campaign()) === '["Resume mission","New game","Free missions","Training"]' && $('#campaign-resume span').textContent.length > 0 && document.activeElement.id === 'campaign-resume', `A paused campaign mission's Campaign page leads with Resume, keeps New game, and has no Load: ${campaign()}`)
     key('Escape'); click(`${HOME} [data-menu-open="gallery"]`); click(`${GALLERY} [data-menu-go="explore"]`)
     check(page() === 'leave' && $('#leave-warning').textContent.includes('saved') && document.activeElement.id === 'mission-cancel-leave', 'Leaving mid-mission says the progress is saved and focuses Stay')
     click('#mission-cancel-leave')
@@ -134,7 +133,7 @@
     check(page() === 'pause', 'Back from the main menu returns to the pause page')
     key('Escape')
     check(p.playing, 'Escape on the pause page resumes')
-    p.pause(); draw(); click('#pause-home'); click(`${HOME} [data-menu-open="campaign"]`); click('#campaign-play'); draw()
+    p.pause(); draw(); click('#pause-home'); click(`${HOME} [data-menu-open="campaign"]`); click('#campaign-resume'); draw()
     check(p.playing, 'Resume mission on the Campaign page resumes')
     key('KeyM'); draw()
     check(!p.playing && page() === 'mission' && visible('.field-map'), 'M opens the mission map directly from gameplay')
@@ -171,7 +170,8 @@
 
     p.pause(); m.state.phase = 'complete'; m.state.elapsed = 87; m.state.kills = 9; m.state.health = 42.3; draw()
     check(page() === 'pause' && $('#pause-page-title').textContent === 'Hostage safe.' && visible('#mission-restart') && !visible('#mission-retry') && !visible('#walk-start') && !visible('#mission-briefing'), 'Completion offers Play again without invalid actions')
-    check(document.activeElement.id === 'mission-restart' && $('#mission-restart').textContent === 'Play again', 'Completion focuses Play again')
+    check(document.activeElement.id === 'mission-next' && $('#mission-next').textContent.startsWith('Next mission · The town') && $('#mission-restart').textContent === 'Play again', `A campaign win leads on to the next mission (by itself after a countdown), with Play again too: ${$('#mission-next').textContent}`)
+    check(JSON.parse(localStorage.getItem('stickman-ghost-ink.campaign')).mission === 'town', 'Winning moves the campaign on to mission 2')
     const recap = () => [...document.querySelectorAll('.mission-recap dd')].map(value => value.textContent).join('|')
     check(visible('#mission-debrief') && recap() === '1:27|9|43%', 'Completion recap uses actual mission time, kills and remaining health')
     m.state.elapsed = 0; m.state.kills = 0; m.state.health = 100; draw()
@@ -181,20 +181,22 @@
     p.pause(); draw()
     check(!visible('#mission-debrief'), 'Fresh mission hides the previous completion recap')
 
-    // Loading: a saved mission picks up exactly where it was saved.
+    // Loading: the saved campaign picks up exactly where it was saved. (The forced win above moved it on; put it back.)
+    localStorage.setItem('stickman-ghost-ink.campaign', JSON.stringify({ version: 1, mission: 'compound', completed: [], startedAt: 1 }))
     click('#walk-start'); draw(); m.state.elapsed = 33.5; m.state.health = 61; p.pause(); draw()
     click('#walk-start'); draw(); m.damage(200)
     for (let i = 0; i < 260; i++) { m.update(1 / 60); m.finishFrame() }
     click('#pause-home'); click(`${HOME} [data-menu-open="campaign"]`)
-    check(m.state.phase === 'dead' && JSON.stringify(campaign()) === '["New game","Select level","Load game","Training"]' && $('#campaign-load span').textContent === '1 saved mission', `After dying, the Campaign page offers the saved mission: ${campaign()}`)
-    click('#campaign-load')
-    const slots = shown([...document.querySelectorAll('.save-list [data-save-level]')])
-    check(page() === 'load' && slots.length === 1 && slots[0].textContent.includes('The compound') && slots[0].textContent.includes('0:33'), 'Load game lists the saved compound mission with its time')
-    slots[0].click(); draw()
+    check(m.state.phase === 'dead' && JSON.stringify(campaign()) === '["New game","Load game","Free missions","Training"]' && $('#campaign-load span').textContent.startsWith('Mission 1 · The compound') && $('#campaign-load span').textContent.includes('saved'), `After dying, the Campaign page offers the saved campaign: ${campaign()} · ${$('#campaign-load span').textContent}`)
+    click('#campaign-play')
+    check(page() === 'newgame' && document.activeElement.id === 'newgame-cancel', 'New game over a saved campaign asks first, on Keep my campaign')
+    key('Escape')
+    check(page() === 'campaign' && document.activeElement.id === 'campaign-play', 'Keeping the campaign returns to the Campaign page')
+    click('#campaign-load'); draw()
     check(p.playing && m.state.phase === 'active' && Math.abs(m.state.elapsed - 33.5) < 0.2 && m.state.health === 61, 'Loading resumes the saved mission exactly')
     p.pause(); draw()
     check(page() === 'pause', 'A loaded mission pauses to the pause page')
-    for (const key of Object.keys(localStorage)) if (key.startsWith('stickman-ghost-ink.save')) localStorage.removeItem(key)
+    clearSaves()
     return { passed: results.length, initialWords }
   } finally {
     m.ai.update = originalAI

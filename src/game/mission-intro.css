@@ -1,21 +1,28 @@
 /*
- * Mission opening (mission-intro.ts), 5 s: the scene starts as its negative, black paper and white ink, and
- * slowly swaps to white paper and black ink. Nothing moves; the whole screen just turns over from dark to bright.
+ * Mission opening (mission-intro.ts), 5 s, in three colours: the screen starts black, comes up in black and red (the
+ * paper red, the ink black), and then the red drains away to white paper and black ink. Nothing moves; only the
+ * colour changes. The whole overlay multiplies with the world, so the ink stays black under the red.
  */
-.mission-intro { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+.mission-intro { position: fixed; inset: 0; z-index: 5; pointer-events: none; mix-blend-mode: multiply; }
+/* Reduced Motion's plain fade is not a tint: it covers. */
+.mission-intro[data-reduced-motion="true"] { mix-blend-mode: normal; }
 .mission-intro i { position: absolute; inset: 0; display: block; }
-.intro-negative {
-  backdrop-filter: invert(1);
-  -webkit-backdrop-filter: invert(1);
-  animation: intro-swap 5s ease-in-out forwards;
+.intro-red {
+  background: #e3261d;
+  animation: intro-red 5s ease-in-out forwards;
 }
-@keyframes intro-swap {
-  from { backdrop-filter: invert(1); -webkit-backdrop-filter: invert(1); }
-  to { backdrop-filter: invert(0); -webkit-backdrop-filter: invert(0); }
+.intro-black {
+  background: #000;
+  animation: intro-black 5s ease-out forwards;
 }
+/* Red from the start, held while the black lifts, then draining to nothing. */
+@keyframes intro-red { 0%, 52% { opacity: 1; } 100% { opacity: 0; } }
+/* Black to begin with, held a moment, then lifting by the second and a half to show the world in red. */
+@keyframes intro-black { 0%, 12% { opacity: 1; } 34% { opacity: 0; } 100% { opacity: 0; } }
 
 /* Reduced Motion: a plain fade up from black instead. */
-.mission-intro[data-reduced-motion="true"] .intro-negative { display: none; }
+.mission-intro[data-reduced-motion="true"] .intro-red { display: none; }
 .mission-intro .intro-shade { display: none; background: #000; }
+.mission-intro[data-reduced-motion="true"] .intro-black { display: none; }
 .mission-intro[data-reduced-motion="true"] .intro-shade { display: block; animation: intro-fade 5s ease-out forwards; }
 @keyframes intro-fade { from { opacity: 1; } to { opacity: 0; } }

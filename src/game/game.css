@@ -23,7 +23,44 @@ body[data-mission="true"] .walk-controls,
 body[data-mission="true"] #inspect-mode,
 body[data-mission="true"] .walk-heading { display: none; }
 body[data-mission="true"] .walk-card { width: min(440px, 100%); padding: 38px; background: var(--paper); border-radius: 4px 7px 3px 6px; box-shadow: 3px 4px 0 #00000012; }
-body[data-mission="true"] .walk-card[data-page="mission"] { width: min(760px, 100%); }
+body[data-mission="true"] .walk-card[data-page="mission"] { width: min(1040px, 100%); padding: 24px 38px 34px; }
+/*
+ * The mission briefing (the page before a mission, and the map in one): the field map large on top, then which
+ * mission it is, its premise, the objectives and the intel side by side, and the button that starts it.
+ */
+/* Back on the left, which mission it is on the right, both on the first line. */
+.briefing .briefing-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.briefing .briefing-top .menu-back { margin-top: 8px; }
+.briefing .briefing-head { text-align: right; }
+.briefing .briefing-map .map-legend { font-size: 11px; }
+.briefing .briefing-map { margin-top: 12px; padding: 10px 12px 2px; border: 1px solid var(--ink-rule); border-radius: 3px; background: var(--paper-shade, #f6f6f6); }
+.briefing .briefing-map .field-map { margin-top: 0; }
+.briefing .briefing-map .field-map svg { max-height: min(36vh, 380px); margin: 0 auto; }
+body[data-mission="true"] .walk-card .briefing .map-legend { margin: 8px 0 6px; justify-content: center; }
+body[data-mission="true"] .walk-card .briefing .briefing-kicker { margin: 0; font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-light); }
+body[data-mission="true"] .walk-card .briefing h2 { margin: 4px 0 0; }
+body[data-mission="true"] .walk-card .briefing .briefing-premise { margin-top: 4px; max-width: 52ch; margin-left: auto; font-size: 14px; line-height: 1.5; color: var(--ink); }
+.briefing .briefing-body { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 30px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--ink-rule); }
+.briefing .briefing-body:not(:has(.briefing-intel)) { grid-template-columns: 1fr; }
+.briefing h3 { margin: 0 0 12px; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-light); font-weight: 700; }
+.briefing .briefing-side-title { margin-top: 20px; }
+.briefing :is(.briefing-main, .briefing-side) { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: objective; }
+.briefing :is(.briefing-main, .briefing-side) li { position: relative; padding-left: 36px; counter-increment: objective; }
+.briefing .briefing-main li::before { content: counter(objective); position: absolute; left: 0; top: 1px; width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--ink); font-size: 12px; font-weight: 700; }
+.briefing .briefing-side li::before { content: ''; position: absolute; left: 6px; top: 7px; width: 9px; height: 9px; border: 1px solid var(--ink-muted); transform: rotate(45deg); }
+.briefing li strong { display: block; font-size: 14px; color: var(--ink); }
+.briefing li strong em { font-style: normal; color: var(--ink-muted); font-size: 12px; margin-left: 6px; }
+.briefing li span { display: block; margin-top: 2px; font-size: 12.5px; line-height: 1.5; color: var(--ink-muted); }
+.briefing li.is-done strong { text-decoration: line-through; text-decoration-thickness: 1px; color: var(--ink-muted); }
+.briefing li.is-done::before { content: '✓'; }
+body[data-mission="true"] .walk-card .briefing .briefing-intel p { margin: 0 0 12px; padding-left: 14px; border-left: 2px solid var(--ink-rule); font-size: 13px; line-height: 1.65; }
+/* The start button stays in reach while you read: pinned to the bottom of the page as it scrolls. */
+.briefing .briefing-actions { position: sticky; bottom: -34px; z-index: 2; margin: 26px -38px -34px; padding: 18px 38px 30px; justify-content: flex-end; background: linear-gradient(180deg, transparent, var(--paper) 38%); }
+.briefing .briefing-actions .menu-primary { min-width: 260px; }
+@media (max-width: 760px) {
+  .briefing .briefing-body { grid-template-columns: 1fr; gap: 20px; }
+  .briefing .briefing-actions .menu-primary { width: 100%; }
+}
 body[data-mission="true"] .walk-card[data-page="controls"] { width: min(560px, 100%); }
 /* Co-op: the home line names the room; the page hosts, joins and lists teammates in their colours. */
 body[data-mission="true"] .walk-card #coop-status { margin-top: 10px; font-size: 13px; color: var(--ink); }

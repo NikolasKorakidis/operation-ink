@@ -14,8 +14,8 @@ import { MissionBlood, type BloodSnapshot } from './hit-reactions'
 import { MissionImpacts } from './impacts'
 import { CRATE_RULES, QuestCrates } from './crates'
 import { MissionIntro } from './mission-intro'
-import { deleteSave, readSave, writeSave } from './saves'
-import { FIRST_LEVEL, levelInfo } from '../levels/catalog'
+import { deleteSave, finishCampaignMission, readCampaign, readSave, setNextRun, startCampaign, takeRun, writeSave, type RunKind } from './saves'
+import { FIRST_LEVEL, campaignLevels, levelInfo } from '../levels/catalog'
 import { goTo } from '../modes'
 import { goalHint, goalObjectives, goalsComplete, goalUnlocked, updateGoals, type GoalSense } from './goals'
 import { missionObjectives } from './objectives'
@@ -116,6 +116,12 @@ export class MissionRuntime {
   private initial: Checkpoint | null = null
   private active = false
   private aiming = false
+  /** How this level was entered: from the campaign (saves, leads on), as a free mission, or neither (see RunKind). */
+  private run: RunKind | null = null
+  /** The campaign's next mission once this one is won (null after the last). */
+  private nextLevel: string | null = null
+  /** This run's win has been handled (campaign progress, the next-mission offer). */
+  private won = false
   /** Right click is down (aiming holds while it is, except with a toggled scope). */
   private rightHeld = false
   /** Until when (performance.now) the frames keep running after a hostage is killed, so he is seen to fall. */
@@ -207,6 +213,11 @@ export class MissionRuntime {
       },
       volume: value => this.audio.setVolume(value), mute: value => this.audio.setMuted(value),
       load: level => this.loadSaved(level),
+      newGame: () => { startCampaign(); this.enterLevel('campaign', FIRST_LEVEL) },
+      continueGame: () => this.continueCampaign(),
+      freeMission: level => this.enterLevel('free', level),
+      nextMission: () => { if (this.nextLevel) this.enterLevel(this.run === 'free' ? 'free' : 'campaign', this.nextLevel) },
+      objectives: () => this.objectiveList(),
       leaveWarning: () => {
         const room = this.coop.active ? ` You will leave co-op room ${this.coop.room}.` : ''
         // Leaving the tutorial loses nothing worth asking about.
@@ -358,6 +369,9 @@ export class MissionRuntime {
       this.initial = this.snapshot()
       this.checkpoint = structuredClone(this.initial)
       this.ready = true; this.hud.ready(); this.invalidate()
+      // Entered from the campaign or the free missions: open on the briefing.
+      this.run = takeRun(this.world.level)
+      if (this.run) this.hud.setRun(this.run)
       // Arriving from another level's Load game: load this level's save now.
       let pending: string | null = null
       try { pending = sessionStorage.getItem(PENDING_LOAD); sessionStorage.removeItem(PENDING_LOAD) } catch { /* no storage */ }
@@ -659,6 +673,7 @@ export class MissionRuntime {
   }
 
   private restore(saved: Checkpoint) {
+    this.won = false; this.nextLevel = null
     this.intro.clear(); this.introPending = true
     this.escape.reset(this.camera.perspective)
     this.escapeDust.clear()
@@ -802,7 +817,68 @@ export class MissionRuntime {
   }
 
   /** Whether this level keeps saves: campaign missions do, training and developer levels don't. */
-  private get saved() { return levelInfo(this.world.level)?.kind === 'campaign' }
+  private get saved() { return levelInfo(this.world.level)?.kind === 'campaign' && this.run !== 'free' }
+
+  /** The objectives as the mission state stands (the briefing lists them). */
+  private objectiveList() {
+    const goals = this.world.goals
+    return goals ? goalObjectives(this.state, goals, this.goalSense())
+      : missionObjectives(this.state, { crates: this.crates.crates.size, radios: [...this.radios.radios.keys()] })
+  }
+
+  /**
+   * Go into a mission from the menu, from the campaign or as a free mission: on its briefing, fresh. This level is
+   * reset in place; another is switched to, told how it was entered.
+   */
+  private enterLevel(kind: RunKind, level: string) {
+    if (level === this.world.level && !this.coop.active) {
+      this.run = kind
+      if (this.state.elapsed > 0 || this.state.phase !== 'active') this.restart()
+      this.hud.setRun(kind)
+      this.invalidate()
+      return
+    }
+    if (this.run !== 'free') this.saveProgress()
+    setNextRun(kind, level)
+    goTo(level === FIRST_LEVEL ? 'mission' : `level:${level}`)
+  }
+
+  /** Load game: carry on the campaign at its mission, from that mission's checkpoint if it has one. */
+  private continueCampaign() {
+    const mission = readCampaign()?.mission
+    if (!mission) return
+    if (!readSave(mission)) { this.enterLevel('campaign', mission); return }
+    if (mission !== this.world.level) setNextRun('campaign', mission)
+    else { this.run = 'campaign'; this.hud.setRun('campaign') }
+    this.loadSaved(mission)
+  }
+
+  /** Entered from the campaign or the free missions (and not loading a checkpoint): it opens on its briefing. */
+  get opensOnBriefing() { return !!this.run && !this.player.playing }
+
+  /** A mission won, however it was won (goals, the compound's escape): handled once. */
+  private checkWon() {
+    if (this.state.phase === 'complete' && !this.won) { this.won = true; this.missionWon() }
+  }
+
+  /**
+   * A mission won: the next one is offered, and comes up by itself after the debrief. In the campaign (or a campaign
+   * level opened without a menu entry) the campaign moves on too; a free mission leads to the next free mission.
+   */
+  private missionWon() {
+    if (levelInfo(this.world.level)?.kind !== 'campaign' || this.world.tutorial) return
+    if (this.run === 'free') {
+      const order = campaignLevels().map(level => level.id)
+      this.nextLevel = order[order.indexOf(this.world.level) + 1] ?? null
+      // The last mission played free has nothing after it: just Play again.
+      if (!this.nextLevel) return
+    } else {
+      this.run = 'campaign'
+      this.nextLevel = finishCampaignMission(this.world.level)
+      deleteSave(this.world.level)
+    }
+    this.hud.setComplete(this.nextLevel)
+  }
   private objectiveHint() { return this.world.goals ? goalHint(this.state, this.world.goals) : missionObjective(this.state) }
 
   /** What the level's goals read from the world (see goals.ts). */
@@ -852,7 +928,7 @@ export class MissionRuntime {
   }
 
   /** Open the menu on the saved games (Load game from the tutorial). */
-  showLoad() { this.hud.showLoad() }
+  showLoad() { this.continueCampaign() }
 
   retry() {
     if (!this.checkpoint) return
@@ -959,6 +1035,8 @@ export class MissionRuntime {
       this.hud.notify('Hostage safely extracted.', 8)
       deleteSave(this.world.level)
     }
+    // The compound is won out here, during the drive: the campaign moves on just the same.
+    this.checkWon()
     this.escape.applyCamera(this.camera.perspective)
     this.audio.setActive(playing && !this.escape.menuVisible)
     this.audio.setAlarm(false); this.audio.update(this.camera.perspective)
@@ -1095,6 +1173,7 @@ export class MissionRuntime {
       this.hitFlash-=dt
     }
     this.tutorial?.frame(dt, this.player.playing && this.player.enabled && !this.player.immersive)
+    this.checkWon()
     const tagsShown = this.player.playing && this.player.enabled && !this.player.immersive
     const seen = (point: THREE.Vector3, target: THREE.Object3D) => this.player.world.visible(this.camera.perspective.position, point, target)
     this.bossTags?.update(dt, this.camera.perspective, this.ai.enemies as never, tagsShown, seen)

@@ -1,15 +1,16 @@
 /* Boss tags: name, armour strip and health bar floating over a boss's head (see boss-tags.ts). */
 .boss-tag-layer { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
-.boss-tag { position: absolute; left: 0; top: 0; width: 170px; display: grid; gap: 3px; text-align: center; transition: opacity .6s ease; }
+.boss-tag { position: absolute; left: 0; top: 0; width: 190px; display: grid; gap: 3px; text-align: center; transition: opacity .6s ease; filter: drop-shadow(3px 3px 0 #0000004d); }
 .boss-tag[hidden] { display: none; }
-.boss-tag b { font: 700 15px/1 "Chalkboard SE", "Comic Sans MS", cursive; color: #000; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
-.boss-tag-armor, .boss-tag-health { position: relative; border: 1.5px solid #000; background: #fff; }
+/* The name is a title card: poster capitals in bone on a black slab, leaning, with the red off-register print. */
+.boss-tag b { justify-self: center; padding: 3px 10px 2px; background: #0a0a0a; color: #f2f2f2; font: 400 18px/1 Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif; letter-spacing: 0.06em; text-transform: uppercase; text-shadow: 2px 2px 0 #5a5a5a; transform: skewX(-8deg); border-left: 5px solid #8a8a8a; }
+.boss-tag-armor, .boss-tag-health { position: relative; border: 2px solid #000; background: #f2f2f2; transform: skewX(-8deg); }
 .boss-tag-armor { height: 6px; }
 .boss-tag-armor i { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(-45deg, #7d7d7d 0 3px, #a8a8a8 3px 6px); transition: width .12s linear; }
 .boss-tag.no-armor .boss-tag-armor { border-style: dashed; opacity: .45; }
 .boss-tag-health { height: 11px; }
 .boss-tag-health i { position: absolute; inset: 0 auto 0 0; }
-.boss-tag-health .trail { background: #f3b7b7; }
-.boss-tag-health .fill { background: #c41d1d; transition: width .08s linear; }
-.boss-tag-health span { position: absolute; inset: 0; display: grid; place-items: center; font: 700 8px/1 system-ui, sans-serif; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+.boss-tag-health .trail { background: #bdbdbd; }
+.boss-tag-health .fill { background: repeating-linear-gradient(-45deg, #1a1a1a 0 6px, #3a3a3a 6px 9px); transition: width .08s linear; }
+.boss-tag-health span { position: absolute; inset: 0; display: grid; place-items: center; font: 400 10px/1 Impact, "Arial Narrow Bold", sans-serif; letter-spacing: 0.08em; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
 .boss-tag.is-down { opacity: .5; }

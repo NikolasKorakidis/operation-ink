@@ -12,7 +12,7 @@ import { BuildingLabels } from './world/labels'
 import { NeonLights } from './render/neon'
 import { addExitSigns } from './world/exitSigns'
 import './style.css'
-import './game/menu-neon.css'
+import './game/theme-k7.css'
 
 // Menus show their keyboard outline only once the keyboard is used to move around; the mouse hides it again.
 const NAVIGATION_KEYS = new Set(['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
@@ -125,7 +125,11 @@ onModeSwitch(next => {
   canvas.dataset.ready = 'false'
   session = boot(next)
   const { mission, player } = session
-  void mission?.initialized.then(() => { if (session.player === player) player.begin() })
+  // Straight into play, unless the mission was entered from the campaign or the free missions: then its briefing first.
+  void mission?.initialized.then(() => {
+    if (session.player !== player) return
+    if (mission.opensOnBriefing) { try { document.exitPointerLock() } catch { /* not locked */ } } else player.begin()
+  })
   resize()
   exposeForDevelopment()
   return true

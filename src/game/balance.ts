@@ -147,6 +147,8 @@ export function hitDamage(weapon: WeaponName | undefined, zone: HitZone, baseDam
 export const DETECTION = {
   soldier: 45, engaged: 70, sniper: 0.5, sniperMin: 110, sniperMax: 220,
   notice: 3, pointBlank: 8, hunting: 0.7, forget: 0.5, quickShot: 0.3,
+  /** How fast the ? fills against someone low: crouched 20% slower, prone half as fast. */
+  stance: { crouch: 0.8, prone: 0.5 },
   squadLink: 28, squadRise: 7,
   /** How close each kind of fighter pushes in before he plants himself: shotguns rush right in, SMGs to mid range. */
   closeIn: { shotgun: 5, smg: 9, other: 9 },

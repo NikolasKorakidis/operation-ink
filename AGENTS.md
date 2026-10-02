@@ -47,6 +47,7 @@ npm run test:<area>  # focused suite, see table
 ## Conventions and gotchas
 
 - **Style:** pure white paper `#ffffff`, ink `#000000` / `#808080` / `#bdbdbd`. NPCs are solid black, the hostage is blue `#2878d0`, blood is solid red. Quest items are the one painted exception: radios (olive and brown), breakable crates (wood brown), C4 charges (brown) and intel files (blue folders), from the `QUEST_COLORS` fills in `src/render/ink.ts`. Structural strokes are 2.2 CSS px and taper with distance. Never render mesh tessellation as wireframe.
+- **Menus and HUD** follow a manga-noir theme after killer7, with neon (`src/game/theme-k7.css`): black panels ruled in bone `#f3efe6` with a red `#e3261d` off-register print, condensed poster capitals, a kanji per page, screentone and speed lines, red neon only after resting on a button. Markers over enemies are manga burst balloons (yellow ?, red !). Menus never animate on their own.
 - The stickman must read as one continuous body — no visible joints or separate limb meshes.
 - Collision extraction skips `ShaderMaterial` meshes. Keep solid material types on anything that must block movement.
 - Physics `dt` is capped at 50 ms; cinematics and door/gate timing use real elapsed time. Test timing-sensitive work at 30/60/144 fps like the existing checks do.
