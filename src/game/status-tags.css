@@ -1,0 +1,53 @@
+/*
+ * Status tags over guards (see status-tags.ts). The ? and ! are manga sound-effect balloons, after killer7 and
+ * Borderlands: a spiky burst cut out of white paper, inked heavy black, filled yellow (?) or red (!), screentone dots
+ * where the ? has not filled yet, emphasis lines, and the glyph in poster capitals.
+ */
+.status-tag-layer { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+.status-tag { position: absolute; left: 0; top: 0; width: 50px; height: 50px; filter: drop-shadow(1.5px 2px 0 rgba(0, 0, 0, .28)); }
+.status-tag[hidden], .sniper-glint[hidden] { display: none; }
+.status-glyph { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: none; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.status-tag[data-mode="notice"] .status-notice, .status-tag[data-mode="alert"] .status-alert { display: block; }
+.status-tag[data-mode="blind"] { width: 38px; height: 38px; }
+.status-tag[data-mode="blind"] .status-blind { display: block; stroke: #000; }
+
+.status-glyph polygon { stroke-linejoin: miter; }
+.status-glyph .status-edge { fill: #fff; stroke: #fff; stroke-width: 9; }
+.status-glyph .status-ink { fill: none; stroke: #000; stroke-width: 4.5; }
+.status-glyph .status-paper { fill: #f3efe6; }
+.status-glyph .status-tone { stroke: none; }
+.status-glyph .status-color { stroke: none; }
+.status-glyph .status-letter { font: 400 34px/1 Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif; paint-order: stroke; stroke-linejoin: round; }
+.status-ticks path { stroke: #000; stroke-width: 3; stroke-linecap: square; }
+.status-notice { transform: rotate(-8deg); }
+.status-notice .status-color { fill: #ffd21a; }
+.status-notice .status-letter { fill: #000; stroke: #fff; stroke-width: 3; }
+.status-alert { transform: rotate(6deg); }
+.status-alert .status-color { fill: #e3261d; }
+.status-alert .status-letter { fill: #f3efe6; stroke: #000; stroke-width: 5; }
+.status-tag.is-urgent .status-notice { animation: status-wobble .32s ease-in-out infinite alternate; }
+.status-tag.is-new { animation: status-pop .22s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes status-pop { from { scale: .35; } to { scale: 1; } }
+@keyframes status-wobble { from { transform: rotate(-11deg); } to { transform: rotate(-3deg); } }
+
+/* The blinded marker: a crossed-out eye in a burst, inside a ring that drains as his sight comes back. */
+.status-ring-track { stroke: #bdbdbd; stroke-width: 2.2; fill: #fff; }
+.status-ring { stroke: #000; stroke-width: 2.6; }
+.status-rays line { stroke-width: 2.2; animation: status-rays .6s ease-in-out infinite alternate; }
+.status-eye { stroke-width: 2.2; fill: #fff; }
+.status-pupil { fill: #000; stroke: none; }
+.status-slash { stroke-width: 3; }
+.status-tag.is-fading { opacity: .55; }
+@keyframes status-rays { from { opacity: .35; } to { opacity: 1; } }
+
+/* A sniper's scope catching the light while he has you in his sights. */
+.sniper-glint { position: absolute; left: 0; top: 0; width: 30px; height: 30px; margin-top: 15px; filter: drop-shadow(0 0 5px #fff6c8) drop-shadow(0 0 9px #ffe27a); animation: glint 0.9s ease-in-out infinite; }
+.sniper-glint svg { width: 100%; height: 100%; overflow: visible; }
+.sniper-glint path { fill: #fffdf2; stroke: #000; stroke-width: 1.2; stroke-linejoin: round; }
+.sniper-glint circle { fill: #fff; }
+@keyframes glint { 0%, 100% { scale: .7; rotate: 0deg; opacity: .75; } 50% { scale: 1.15; rotate: 20deg; opacity: 1; } }
+
+body[data-reduced-motion="true"] .status-rays line,
+body[data-reduced-motion="true"] .status-tag.is-urgent .status-notice,
+body[data-reduced-motion="true"] .status-tag.is-new,
+body[data-reduced-motion="true"] .sniper-glint { animation: none; }

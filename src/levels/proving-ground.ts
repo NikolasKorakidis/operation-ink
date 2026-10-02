@@ -122,11 +122,13 @@ export function createProvingGround(): { ground: THREE.Group; world: MissionWorl
   const enemies = [
     enemy('sidearm', 'officer', [-17, 0.28, -16.2], { name: 'The officer', facing: Math.PI }),
     enemy('gunner', 'post-guard', [-9.3, 0.28, -15.6], { facing: -Math.PI / 2 }),
-    enemy('rifleman', 'yard-1', [-6, 0, 10], { patrol: [[-6, 0, 10], [12, 0, 10], [12, 0, -10], [-6, 0, -10]] }),
+    // His loop stays out of sight of the gap in the fence (DETECTION.soldier from the insertion).
+    enemy('rifleman', 'yard-1', [-6, 0, 3], { patrol: [[-6, 0, 3], [12, 0, 3], [12, 0, -10], [-6, 0, -10]] }),
     enemy('rifleman', 'yard-2', [32, 0, 4], { patrol: [[32, 0, 4], [32, 0, -26], [10, 0, -26]] }),
-    enemy('breacher', 'store-guard', [18, 0, 24], { facing: 0 }),
+    enemy('breacher', 'store-guard', [18, 0, 24], { facing: Math.PI / 2 }),
     enemy('rifleman', 'gate-guard', [20, 0, -15], { facing: 0 }),
-    enemy('marksman', 'watch', [post.x, post.height, post.z], { facing: 0.2 }),
+    // He watches the yard and the north gate, not the fence gap you come in by.
+    enemy('marksman', 'watch', [post.x, post.height, post.z], { facing: 2.5 }),
     enemy('rifleman', 'reserve-1', [-17, 0.28, -21], { reserve: true, alarmExit: [-14, 0, -11] }),
     enemy('rifleman', 'reserve-2', [-11, 0.28, -21], { reserve: true, alarmExit: [-14, 0, -11] }),
   ]

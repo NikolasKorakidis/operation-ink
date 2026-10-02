@@ -40,13 +40,14 @@ npm run test:<area>  # focused suite, see table
 - `src/world/`: compound geometry built in code from plan coordinates (0.15 m per reference pixel, north = −Z).
 - `src/player/`: capsule controller, collision trees, ladders. Physics substeps are ≤ 1/120 s.
 - `src/render/ink.ts`: the shared paper/ink materials. Use these; don't create ad-hoc materials.
-- `public/`: `models/stickman.glb` (the one skinned character), `sounds/` (see `public/sounds/CREDITS.md`).
+- `public/`: `models/stickman.glb` (the one skinned character), `OST/` (every sound and music track, by category: see `public/OST/README.md` and `CREDITS.md`).
 - `scripts/*-checks.ts`: Node logic checks. `scripts/check-*.js`, `capture-*.js`, route scripts: browser checks (see below). `scripts/agent-browser.mjs` provides the portable browser CLI launcher used by runtime checks.
 - `localonly/` and `artifacts/` are git-ignored scratch space. Put screenshots and evidence there, never in the repo.
 
 ## Conventions and gotchas
 
-- **Style:** pure white paper `#ffffff`, ink `#000000` / `#808080` / `#bdbdbd`. NPCs are solid black, the hostage is blue `#2878d0`, blood is solid red. Quest items are the one painted exception: radios (olive and brown) and breakable crates (wood brown), from the `QUEST_COLORS` fills in `src/render/ink.ts`. Structural strokes are 2.2 CSS px and taper with distance. Never render mesh tessellation as wireframe.
+- **Style:** pure white paper `#ffffff`, ink `#000000` / `#808080` / `#bdbdbd`. NPCs are solid black, the hostage is blue `#2878d0`, blood is solid red. Quest items are the one painted exception: radios (olive and brown), breakable crates (wood brown), C4 charges (brown) and intel files (blue folders), from the `QUEST_COLORS` fills in `src/render/ink.ts`. Structural strokes are 2.2 CSS px and taper with distance. Never render mesh tessellation as wireframe.
+- **Menus and HUD** follow a manga-noir theme after killer7, with neon (`src/game/theme-k7.css`): black panels ruled in bone `#f3efe6` with a red `#e3261d` off-register print, condensed poster capitals, a kanji per page, screentone and speed lines, red neon only after resting on a button. Markers over enemies are manga burst balloons (yellow ?, red !). Menus never animate on their own.
 - The stickman must read as one continuous body — no visible joints or separate limb meshes.
 - Collision extraction skips `ShaderMaterial` meshes. Keep solid material types on anything that must block movement.
 - Physics `dt` is capped at 50 ms; cinematics and door/gate timing use real elapsed time. Test timing-sensitive work at 30/60/144 fps like the existing checks do.

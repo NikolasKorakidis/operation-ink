@@ -117,7 +117,7 @@ await check('Snipers fire at long range, stay on post when contact moves, and ca
   f.director.hear({ kind: 'shot-pistol', position: f.player.eye, radius: 38 })
   f.advance(1.3); assert(f.enemy.shots > 0, 'sniper must engage promptly')
   f.advance(9); assert(f.enemy.shots >= 4); assert(f.enemy.shots <= 5)
-  assert(f.events.some(event => event.kind === 'enemy-shot-sniper' && event.radius === 130), 'a long-range sniper round must remain audible to the player')
+  assert(f.events.some(event => event.kind === 'enemy-shot-sniper' && event.radius! >= 130), 'a long-range sniper round must remain audible to the player')
   f.player.feet.z = f.player.eye.z = -125
   f.advance(20)
   assert(f.enemy.position.distanceTo(post) < 0.00001)

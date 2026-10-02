@@ -13,13 +13,13 @@ with a panel on the right. `window.__lab` is the `Ctx` in dev.
 | `player.ts` | `Player`: `play`, `queue`, `stop`, `setSpeed`, `update`; `fade` default |
 | `registry.ts` | `Ctx`, `Action`, `Updater`; globs `clips/*.ts`, `actions/*.ts`, `fx/*.ts`, `weapons/*.ts` |
 | `clips/idle.ts` | worked example: `hang` pose, `idle` clip, "Idle" action |
-| `clips/behavior.ts` | behaviour clips; relaxed looking uses planted feet, separate head-led glances and delayed shoulder follow |
+| `clips/behavior.ts` | behaviour clips; relaxed looking uses planted feet, separate head-led glances and delayed shoulder follow; `blinded`/`blindedHold` are the flashbang stagger, hands over the face |
 | `gait.ts` | bakes narrow walk/run foot paths, forward knee poles, pelvis height and fixed-length leg rotations into shared clips |
 | `death-settle.ts` | bakes staggered limp limb release, impact flex and resting head/hand/leg floor contacts into all six deaths |
 | `actions/scenario.ts` | game-like combos (shot → flinch/death + blood, armed patrol, alert + burst, reset) and "Export clips JSON" |
 | `panel.tsx` | preact panel: camera presets, speed/crossfade, action buttons, bone inspector |
 | `main.ts` | renderer, scene, orbit camera, rAF loop, hotkeys |
-| `characters.ts` | the panel's **Character** section: the Guard or the Sledge (the tutorial boss), a body colour (the hostage and co-op teammates are the guard in their colours), and two exports of what is on screen: a 3D model (`.glb`, skinned, unlit colours; pen outlines and hatching are shaders and stay out) and a model sheet (`.png`, front / three-quarter / side / back on white, for image AIs). Switching swaps `ctx.rig` and `ctx.player`, so always read them from `ctx`. With the Sledge selected, "His moves" lists his AK handling (the lab's own gun tools also work on him), his flying hammer (attack, shoot it down; it flies at a stand-in player 10 m in front of him) and his armour shedding. |
+| `characters.ts` | the panel's **Character** section: the Guard or Bulky Boy (the tutorial boss), a body colour (the hostage and co-op teammates are the guard in their colours), and two exports of what is on screen: a 3D model (`.glb`, skinned, unlit colours; pen outlines and hatching are shaders and stay out) and a model sheet (`.png`, front / three-quarter / side / back on white, for image AIs). Switching swaps `ctx.rig` and `ctx.player`, so always read them from `ctx`. With Bulky Boy selected, "His moves" lists his AK handling (the lab's own gun tools also work on him) and his armour shedding. |
 | `weapons/models/` | individual gun builders and shared ink primitives; grip origin and local muzzle/ejection markers. `gun()` batches every piece into one fill + one stroke mesh (+ one hull) per rigid unit and shares that geometry between all copies of a model: only groups registered in `parts` stay separately movable |
 | `weapons/guns.ts` | gun clips, firing/reload operations, moving parts, effects, interruption cleanup |
 | `weapons/poses.ts` | solves authored weapon holds into fixed-length arm animation keys |

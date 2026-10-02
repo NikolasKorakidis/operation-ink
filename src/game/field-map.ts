@@ -19,9 +19,9 @@ export function readProjection(svg: Element | null): MapProjection | null {
 const escape = (text: string) => text.replace(/[&<>"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]!)
 
 /**
- * A field map drawn from the level itself, for levels that bring no map of their own: the play area, every
- * building (anything with userData.footprint) hatched and named, the stations, the goal areas and the insertion
- * point, fitted to the map. North (-Z) is up.
+ * A field map drawn from the level itself, for levels that bring no map of their own: the play area, roads and
+ * water (userData.mapLines), every building (anything with userData.footprint) hatched and named, the stations,
+ * the goal areas and the insertion point, fitted to the map. North (-Z) is up.
  */
 export function fieldMap(ground: THREE.Object3D, world: MissionWorld): string {
   ground.updateMatrixWorld(true)
@@ -46,6 +46,16 @@ export function fieldMap(ground: THREE.Object3D, world: MissionWorld): string {
     buildings.push(`<path d="M${corners.join(' L')}Z" fill="url(#map-hatching)" stroke="var(--ink-light)"/>`)
     if (object.name) names.push(`<text x="${x(position.x)}" y="${z(position.z) - (d * scale) / 2 - 3}" text-anchor="middle">${escape(object.name.split(' · ')[0])}</text>`)
   })
+  // Roads and water marked on the level (userData.mapLines: { kind: 'road' | 'water', points: [x, z][] }[]).
+  const paths: string[] = []
+  ground.traverse(object => {
+    for (const line of (object.userData.mapLines ?? []) as { kind: 'road' | 'water'; points: [number, number][] }[]) {
+      const d = 'M' + line.points.map(([px, pz]) => `${x(px)},${z(pz)}`).join(' L')
+      paths.push(line.kind === 'water'
+        ? `<path d="${d}" fill="none" stroke="var(--ink-light)" stroke-width="${Math.max(2, 6 * scale).toFixed(1)}" opacity="0.55"/><path d="${d}" fill="none" stroke="var(--ink)" stroke-width="0.5" stroke-dasharray="1 2"/>`
+        : `<path d="${d}" fill="none" stroke="var(--ink)" stroke-width="0.9" stroke-dasharray="3 2"/>`)
+    }
+  })
   const stations = world.stations.filter(station => station.kind === 'objective').map(station =>
     `<circle cx="${x(station.point.x)}" cy="${z(station.point.z)}" r="2.6" fill="var(--ink)"/><text x="${x(station.point.x) + 5}" y="${z(station.point.z) - 5}">${escape(station.label)}</text>`)
   const areas = (world.goals ?? []).flatMap(goal => goal.kind === 'reach' || goal.kind === 'extract' ? [goal] : []).map(goal =>
@@ -56,7 +66,7 @@ export function fieldMap(ground: THREE.Object3D, world: MissionWorld): string {
     <path d="M6 6L454 5 455 254 5 255Z" fill="var(--paper)" stroke="var(--ink-rule)"/>
     <rect x="${x(minX)}" y="${z(minZ)}" width="${((maxX - minX) * scale).toFixed(1)}" height="${((maxZ - minZ) * scale).toFixed(1)}" fill="none" stroke="var(--ink-light)" stroke-dasharray="1 3"/>
     <path d="M18 32V15l-4 7m4-7 4 7" fill="none" stroke="var(--ink)"/><text x="16" y="45">N</text>
-    ${buildings.join('')}${names.join('')}${areas.join('')}${stations.join('')}
+    ${paths.join('')}${buildings.join('')}${names.join('')}${areas.join('')}${stations.join('')}
     <path d="M${x(sx) - 4} ${z(sz)}h8M${x(sx)} ${z(sz) - 4}v8" stroke="var(--ink)" stroke-width="1.2"/><text x="${x(sx) + 6}" y="${z(sz) + 4}">Insertion</text>
     <path id="field-player" d="M0 -5 3.5 4 0 2 -3.5 4Z" fill="var(--ink-deep)" stroke="var(--paper)" stroke-width="1"/>
   </svg>`

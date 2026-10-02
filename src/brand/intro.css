@@ -1,0 +1,18 @@
+/*
+ * The Sleeping Giant Studios ident (intro.ts). The film itself is painted on the canvas (cinematic.ts); this is only
+ * its frame: black, the "press any key" gate shown while the browser holds the sound back, and the skip hint.
+ */
+#brand-intro {
+  position: fixed; inset: 0; z-index: 50; overflow: hidden; background: #050505; color: #f3efe6; cursor: none;
+  --display: Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif;
+  --kanji: "Hiragino Mincho ProN", "Yu Mincho", YuMincho, "Noto Serif JP", serif;
+}
+#brand-intro.is-done { animation: brand-out 0.4s ease-in forwards; }
+@keyframes brand-out { to { opacity: 0; } }
+#brand-intro .brand-film { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#brand-intro .brand-gate { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 18px; cursor: pointer; }
+#brand-intro .brand-gate b { font: 600 46px/1 var(--kanji); color: #e3261d; text-shadow: 0 0 22px #e3261d66; }
+#brand-intro .brand-gate span { font: 400 16px/1 var(--display); letter-spacing: 0.5em; text-transform: uppercase; color: #9a958c; }
+#brand-intro.is-playing .brand-gate { display: none; }
+#brand-intro:not(.is-playing) .brand-skip { visibility: hidden; }
+#brand-intro .brand-skip { position: absolute; right: 24px; bottom: 20px; font: 400 12px/1 var(--display); letter-spacing: 0.4em; color: #ffffff40; text-transform: uppercase; mix-blend-mode: difference; }

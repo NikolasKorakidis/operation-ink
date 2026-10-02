@@ -9,8 +9,10 @@ import { drawPine } from './vegetation'
  *     Crawl wall      z −30.4 … −33.6  a wall across the field; the only way through is a low tunnel, crawled prone
  *   2 Armory          z −34 … −42   a table of rifles to pick up
  *   3 Firing range    z −42 … −104  booths, practice soldiers at three distances, one turned away for the knife
+ *     Grenade yard    x −27 … −15   left of the range: a throwing line, a frag pit, a wall to flash over, and a
+ *                     spotter's tower to smoke out
  *   4 Live fire       z −108 … −152 a walled yard with cover, where soldiers shoot back
- *   5 Boss field      z −156 … −230 open ground with broken blocks, where the Sledge waits
+ *   5 Boss field      z −156 … −230 open ground with broken blocks, where Bulky Boy waits
  * Everything is built in code in the game's paper-and-ink style, like the compound.
  */
 export const TRAINING = {
@@ -20,11 +22,15 @@ export const TRAINING = {
   /** Where each lesson points the player. */
   marks: {
     yard: [0, 0, -12] as Point, sandbags: [-5, 0, -18] as Point, corner: [6, 0, -27] as Point, crawl: [0, 0, -29.6] as Point, armory: [0, 0, -36.6] as Point,
-    range: [0, 0, -45] as Point, knife: [10.5, 0, -49] as Point, liveGate: [0, 0, -106] as Point, bossGate: [0, 0, -154] as Point, boss: [0, 0, -200] as Point,
+    range: [0, 0, -45] as Point, knife: [10.5, 0, -49] as Point,
+    grenades: [-21, 0, -48] as Point, fragPit: [-21, 0, -60] as Point, flashWall: [-21, 0, -72] as Point, smokeTower: [-21, 0, -94] as Point,
+    liveGate: [0, 0, -106] as Point, bossGate: [0, 0, -154] as Point, boss: [0, 0, -200] as Point,
   },
   /** The crawl tunnel through the wall before the armory: its span in x and z, and its clearance (m). */
   crawl: { x: 1.4, z0: -30.4, z1: -33.6, clearance: 0.72 },
-  /** Crossing this line (z) into the field wakes the Sledge. */
+  /** The grenade yard's spotter stands on his tower's platform, this high (m). */
+  spotterHeight: 3.2,
+  /** Crossing this line (z) into the field wakes Bulky Boy. */
   bossLine: -158,
 } as const
 
@@ -107,6 +113,21 @@ export function createTrainingGround() {
   props.box(0.15, 2.2, 4, 8.6, 1.1, -49.5, 'concrete', 'detail')
   props.box(0.15, 2.2, 4, 12.4, 1.1, -49.5, 'concrete', 'detail')
   props.box(3.95, 2.2, 0.15, 10.5, 1.1, -51.5, 'concrete', 'detail')
+  // Grenade yard, left of the range. A low sandbag wall to throw over, then three stations up the yard:
+  // a painted pit with three soldiers for the frag, a chest-high wall with two soldiers behind it for the
+  // flashbang, and a spotter's tower at the far end that sees the whole yard until a smoke goes up.
+  sandbags(props, -21, -48.6, 9, 2)
+  props.box(10, 0.05, 0.25, -21, 0.025, -47.9, 'roof', 'detail')
+  props.ring(3.2, 0.012, -21, -60.2, 'detail', 40)
+  props.ring(0.5, 0.012, -21, -60.2, 'detail', 16)
+  sandbags(props, -21, -71.4, 6.2, 4)
+  for (const [x, z] of [[-22, -94], [-20, -94], [-22, -96], [-20, -96]] as [number, number][]) props.beam([x, 0, z], [x, TRAINING.spotterHeight, z], 0.16, 'paper', 'detail')
+  props.box(2.8, 0.2, 2.8, -21, TRAINING.spotterHeight - 0.1, -95, 'paper', 'detail')
+  for (const [x0, z0, x1, z1] of [[-22.4, -93.6, -19.6, -93.6], [-22.4, -96.4, -19.6, -96.4], [-22.4, -93.6, -22.4, -96.4], [-19.6, -93.6, -19.6, -96.4]] as [number, number, number, number][]) {
+    props.beam([x0, TRAINING.spotterHeight + 0.95, z0], [x1, TRAINING.spotterHeight + 0.95, z1], 0.06, 'paper', 'detail')
+  }
+  // Dashes across the open lane the spotter watches.
+  for (let x = -26; x <= -16; x += 1.4) props.line([[x, 0.012, -84], [x + 0.7, 0.012, -84]], 'detail')
   // 4 · Live-fire yard: walled, with an opening, and crates and barriers to fight from.
   for (const [x0, x1] of [[-30, -1.4], [1.4, 30]]) props.box(x1 - x0, 3, 0.4, (x0 + x1) / 2, 1.5, -107, 'concrete', 'detail')
   for (const [x, z, w, d, h] of [[-5, -116, 2.4, 1.2, 1.1], [4.5, -119, 1.2, 2.6, 1.2], [-1, -125, 3.2, 0.5, 1.4], [-7, -131, 1.4, 1.4, 1.4],
@@ -146,8 +167,9 @@ export function createTrainingGround() {
   signpost(root, '2 · ARMORY', -6, -34.4, 0)
   signpost(root, '3 · FIRING RANGE', -11, -42.5, 0, 0.32)
   signpost(root, 'KNIFE', 13.8, -46.5, 0)
+  signpost(root, 'GRENADES · 4', -27.4, -46.2, 0, 0.3)
   signpost(root, '4 · LIVE FIRE', -5, -105.6, 0, 0.36)
-  signpost(root, '5 · THE SLEDGE', -5.5, -153.3, 0, 0.32)
+  signpost(root, '5 · BULKY BOY', -5.5, -153.3, 0, 0.32)
 
   // Pines around the outside of the fence.
   const trees = new Draft('Training ground · pines')

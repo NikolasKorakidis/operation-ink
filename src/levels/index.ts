@@ -5,6 +5,7 @@ import { createMissionWorld, prepareCompound } from '../game/world'
 import { createTrainingGround } from '../world/training-ground'
 import { createTutorialWorld } from '../game/tutorial-world'
 import { createProvingGround } from './proving-ground'
+import { createTown } from './town'
 import type { LevelId } from './catalog'
 import { fieldMap } from '../game/field-map'
 
@@ -25,6 +26,10 @@ const BUILDERS: Record<LevelId, Builder> = {
     const world = createMissionWorld(ground)
     prepareCompound(ground)
     return { ground, world }
+  },
+  town: ({ explore }) => {
+    const level = createTown()
+    return { ground: level.ground, world: explore ? null : level.world }
   },
   training: ({ explore }) => ({ ground: createTrainingGround(), world: explore ? null : createTutorialWorld() }),
   'proving-ground': ({ explore }) => {

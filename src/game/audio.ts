@@ -1,10 +1,10 @@
 import * as THREE from 'three'
 import type { SoundEvent } from './types'
 import type { HitReaction } from './hit-reactions'
-import { IGI_SAMPLES, IGI_VOICES } from './igi-samples'
+import { IGI_SAMPLES, IGI_VOICES, servedFile } from './igi-samples'
 
 /**
- * IGI effects take priority over the previous samples (see public/sounds/CREDITS.md).
+ * IGI effects take priority over the previous samples (see public/OST/CREDITS.md).
  * Procedural synthesis remains the fallback for kinds without a decoded sample.
  */
 const series = (name: string, count: number) => Array.from({ length: count }, (_, i) => `${name}_${i}`)
@@ -99,12 +99,10 @@ export class MissionAudio {
     if (this.loading || !this.context || this.disposed) return
     this.loading = true
     const context = this.context
-    // IGI ids keep their source names (igi/manifest.json) but ship as mono AAC; the looped
-    // alarm is FLAC because AAC tail padding would leave a gap at every loop (see CREDITS.md).
-    const served = (name: string) => name.endsWith('.wav') ? name.replace('.wav', name.includes('alarm_') ? '.flac' : '.m4a') : `${name}.m4a`
+    // Sound ids map to their files in public/OST (see servedFile).
     const fetchAll = (names: Iterable<string>) => Promise.all([...new Set(names)].map(async name => {
       try {
-        const response = await fetch(`${import.meta.env?.BASE_URL ?? '/'}sounds/${served(name)}`, { signal: this.loadAbort.signal })
+        const response = await fetch(`${import.meta.env?.BASE_URL ?? '/'}OST/${servedFile(name)}`, { signal: this.loadAbort.signal })
         if (!response.ok) return
         const buffer = await context.decodeAudioData(await response.arrayBuffer())
         if (!this.disposed && context === this.context) this.buffers.set(name, buffer)
@@ -483,15 +481,23 @@ export class MissionAudio {
       return
     }
     if (event.kind === 'crate-explosion') { this.explosion(event); return }
+    if (event.kind === 'charge-explosion') { this.explosion(event, 2.6, 1); return }
+    if (event.kind === 'c4-beep' || event.kind === 'c4-arm') { this.beep(event); return }
+    if (event.kind === 'frag-explosion') { this.explosion(event, 1.25, 0.45); return }
+    if (event.kind === 'flashbang') { this.explosion(event, 0.42, 0); this.crack(event); return }
+    if (event.kind === 'flash-ring') { this.ring(event.intensity ?? 3); return }
+    if (event.kind === 'smoke-hiss') { this.hiss(event); return }
+    // A grenade clinking off a wall or floor is a light impact.
+    if (event.kind === 'grenade-bounce') event = { ...event, kind: 'impact' }
     if (event.kind.includes('shot') || event.kind === 'damage') this.duckMusic()
     if (this.sample(event)) return
     // Climbing emits one sampled rung sound every 0.5s, never a synthetic tone.
     if (event.kind === 'ladder') return
     if (this.confirmation(event)) return
     const shot = event.kind.includes('shot'), horn = event.kind === 'horn', step = event.kind.endsWith('footstep')
-    const metal = ['door', 'reload', 'enemy-reload', 'reload-ready', 'weapon-pump', 'shell-load', 'switch', 'pickup', 'drop', 'empty', 'impact', 'enemy-down', 'knife-wall'].includes(event.kind)
-    // A blade cutting air: a short band of noise sweeping down in pitch.
-    const swish = event.kind === 'knife-slash' || event.kind === 'knife-stab'
+    const metal = ['door', 'reload', 'enemy-reload', 'reload-ready', 'weapon-pump', 'shell-load', 'switch', 'pickup', 'drop', 'empty', 'impact', 'enemy-down', 'knife-wall', 'grenade-pin'].includes(event.kind)
+    // A blade cutting air, or an arm throwing: a short band of noise sweeping down in pitch.
+    const swish = event.kind === 'knife-slash' || event.kind === 'knife-stab' || event.kind === 'grenade-throw'
     const duration = horn ? 1.8 : swish ? event.kind === 'knife-stab' ? 0.16 : 0.22 : shot ? event.kind.includes('sniper') ? 0.34 : 0.16 : step ? 0.08 : event.kind === 'empty' ? 0.045 : event.kind === 'callout' ? 0.18 : metal ? 0.11 : 0.28
     const t = context.currentTime
     const { gain, panner } = this.output(event)
@@ -512,7 +518,7 @@ export class MissionAudio {
     } else {
       const tone = source as OscillatorNode
       tone.type = horn ? 'sawtooth' : metal ? 'triangle' : 'sine'
-      const mechanical: Record<string, number> = { 'weapon-pump': 210, 'shell-load': 450, empty: 950, switch: 240, pickup: 590, reload: 330, 'enemy-reload': 330, 'reload-ready': 760 }
+      const mechanical: Record<string, number> = { 'grenade-pin': 1250, 'weapon-pump': 210, 'shell-load': 450, empty: 950, switch: 240, pickup: 590, reload: 330, 'enemy-reload': 330, 'reload-ready': 760 }
       const frequency = horn ? 136 : event.kind === 'damage' ? 90 : event.kind === 'enemy-hit' ? 150 * HIT_COLOR[event.zone ?? 'torso'].pitch : mechanical[event.kind] ?? (metal ? 420 : event.kind === 'callout' ? 320 : 720)
       tone.frequency.setValueAtTime(frequency, t)
       tone.frequency.exponentialRampToValueAtTime(horn ? 132 : frequency * (metal ? 0.5 : 1.5), t + duration)
@@ -523,18 +529,47 @@ export class MissionAudio {
     this.track(source, panner ? [filter, gain, panner] : [filter, gain], INCIDENTAL.has(event.kind) ? 'incidental' : undefined); source.start(t); source.stop(t + duration)
   }
 
-  /** A small blast: a dull thump falling in pitch under a burst of splintering noise that darkens as it dies. */
-  private explosion(event: SoundEvent) {
+  /**
+   * The C4's beep, as in CS: a short, hard square-wave pip that climbs a little in pitch as the fuse runs down
+   * (`intensity` 0 to 1); arming it is a quick three-note keypad chirp.
+   */
+  private beep(event: SoundEvent) {
+    if (!this.reserveSources(1)) return
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const arm = event.kind === 'c4-arm', notes = arm ? [1180, 1480, 1760] : [2050 + (event.intensity ?? 0) * 450]
+    const tone = context.createOscillator()
+    tone.type = 'square'
+    gain.gain.setValueAtTime(0.001, t)
+    notes.forEach((frequency, i) => {
+      const at = t + i * 0.09
+      tone.frequency.setValueAtTime(frequency, at)
+      gain.gain.setValueAtTime(0.001, at)
+      gain.gain.exponentialRampToValueAtTime(arm ? 0.12 : 0.2, at + 0.004)
+      gain.gain.exponentialRampToValueAtTime(0.001, at + (arm ? 0.07 : 0.085))
+    })
+    const filter = context.createBiquadFilter()
+    filter.type = 'lowpass'; filter.frequency.value = 5200
+    tone.connect(filter).connect(gain)
+    this.track(tone, panner ? [filter, gain, panner] : [filter, gain])
+    tone.start(t); tone.stop(t + notes.length * 0.09 + 0.05)
+  }
+
+  /**
+   * A blast: a dull thump falling in pitch under a burst of splintering noise that darkens as it dies. A crate's is
+   * small; a charge's (`duration`, `depth`) is long and deep and shakes the room.
+   */
+  private explosion(event: SoundEvent, duration = 0.95, depth = 0) {
     if (!this.reserveSources(2)) return
-    const context = this.context!, t = context.currentTime, duration = 0.95
+    const context = this.context!, t = context.currentTime
     const { gain, panner } = this.output(event)
     gain.gain.setValueAtTime(0.001, t)
     gain.gain.exponentialRampToValueAtTime(0.95, t + 0.006)
     gain.gain.exponentialRampToValueAtTime(0.001, t + duration)
     const thump = context.createOscillator()
     thump.type = 'sine'
-    thump.frequency.setValueAtTime(120, t)
-    thump.frequency.exponentialRampToValueAtTime(36, t + 0.5)
+    thump.frequency.setValueAtTime(120 - depth * 50, t)
+    thump.frequency.exponentialRampToValueAtTime(36 - depth * 14, t + 0.5 + depth)
     const noise = context.createBufferSource()
     noise.buffer = this.noise
     noise.playbackRate.value = 0.85
@@ -551,6 +586,57 @@ export class MissionAudio {
     this.duckMusic()
     thump.start(t); thump.stop(t + duration)
     noise.start(t); noise.stop(t + duration)
+  }
+
+  /** A flashbang's crack: a hard, bright snap of noise over the bang. */
+  private crack(event: SoundEvent) {
+    if (!this.reserveSources(1)) return
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    gain.gain.setValueAtTime(0.001, t)
+    gain.gain.exponentialRampToValueAtTime(1, t + 0.002)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.16)
+    const noise = context.createBufferSource(), filter = context.createBiquadFilter()
+    noise.buffer = this.noise; noise.playbackRate.value = 2.2
+    filter.type = 'highpass'; filter.frequency.value = 1800
+    noise.connect(filter).connect(gain)
+    this.track(noise, panner ? [filter, gain, panner] : [filter, gain])
+    noise.start(t); noise.stop(t + 0.16)
+  }
+
+  /** The ringing in the ears after a flashbang whites you out, fading over `seconds`; the music sinks under it. */
+  private ring(seconds: number) {
+    if (!this.reserveSources(1, true)) return
+    const context = this.context!, t = context.currentTime, length = THREE.MathUtils.clamp(seconds, 0.5, 8)
+    const { gain } = this.output({ kind: 'flash-ring' })
+    gain.gain.setValueAtTime(0.001, t)
+    gain.gain.exponentialRampToValueAtTime(0.09, t + 0.05)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + length)
+    const tone = context.createOscillator()
+    tone.type = 'sine'
+    tone.frequency.setValueAtTime(3300, t)
+    tone.frequency.linearRampToValueAtTime(3150, t + length)
+    tone.connect(gain)
+    this.track(tone, [gain])
+    this.duckMusic()
+    tone.start(t); tone.stop(t + length)
+  }
+
+  /** A smoke grenade pouring out: a long, soft hiss of filtered noise. */
+  private hiss(event: SoundEvent) {
+    if (!this.reserveSources(1)) return
+    const context = this.context!, t = context.currentTime, length = 2.2
+    const { gain, panner } = this.output(event)
+    gain.gain.setValueAtTime(0.001, t)
+    gain.gain.exponentialRampToValueAtTime(0.32, t + 0.08)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + length)
+    const noise = context.createBufferSource(), filter = context.createBiquadFilter()
+    noise.buffer = this.noise; noise.playbackRate.value = 1.1; noise.loop = true
+    filter.type = 'bandpass'; filter.Q.value = 0.8
+    filter.frequency.setValueAtTime(4200, t); filter.frequency.exponentialRampToValueAtTime(1600, t + length)
+    noise.connect(filter).connect(gain)
+    this.track(noise, panner ? [filter, gain, panner] : [filter, gain])
+    noise.start(t); noise.stop(t + length)
   }
 
   clear() {

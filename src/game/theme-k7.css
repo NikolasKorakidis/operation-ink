@@ -1,0 +1,298 @@
+/*
+ * The game's look outside the ink world: a manga-noir theme after killer7, with neon. Hard black panels inked with a
+ * bone-white rule and printed slightly off-register in red; condensed capitals; a vertical kanji on every page;
+ * screentone dots and manga speed lines; red neon that comes on when you rest on something. The menus never blink
+ * or move on their own. The HUD over the world follows: black plates, bone type, red marks.
+ * Menu rules are scoped to #walk-hud #walk-pause (two ids) so they outrank the paper defaults in game.css.
+ */
+:root {
+  --k7-black: #0a0a0a;
+  --k7-panel: #101010;
+  --k7-bone: #f3efe6;
+  --k7-red: #e3261d;
+  --k7-red-deep: #9e130d;
+  --k7-yellow: #ffd21a;
+  --k7-gray: #9a958c;
+  /* Condensed poster capitals, a plain sans for reading, and a mincho face for the kanji. System fonts only. */
+  --k7-display: Impact, Haettenschweiler, "Arial Narrow Bold", "Helvetica Neue Condensed Black", "Arial Black", sans-serif;
+  --k7-body: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --k7-kanji: "Hiragino Mincho ProN", "Yu Mincho", YuMincho, "Noto Serif JP", "MS Mincho", serif;
+  --red-neon: 0 0 2px #fff, 0 0 8px #ff3b30, 0 0 22px #ff2a1fcc, 0 0 46px #ff1a1066;
+  /* How long the pointer rests on a button before its neon comes on, and how slowly it comes on. */
+  --glow-delay: 2s;
+  --glow-in: 0.7s;
+  /* Screentone: fine dots, like a manga's printed grey. */
+  --k7-tone: radial-gradient(circle at 1.5px 1.5px, #ffffff1f 1.1px, transparent 1.6px) 0 0 / 6px 6px;
+}
+
+/* ---------------------------------------------------------------- the menus */
+
+#walk-hud #walk-pause {
+  --paper: var(--k7-black);
+  --paper-shade: #151515;
+  --ink: var(--k7-bone);
+  --ink-deep: #fff;
+  --ink-muted: var(--k7-gray);
+  --ink-light: #7a766e;
+  --ink-rule: #ffffff26;
+  /* Manga speed lines rushing to the middle, a red slash across, and the dark over the world. */
+  background:
+    repeating-conic-gradient(from 0deg at 50% 46%, #ffffff0b 0deg 0.9deg, transparent 0.9deg 5.5deg),
+    linear-gradient(112deg, transparent 0 61%, #e3261d1f 61% 67%, transparent 67%),
+    radial-gradient(ellipse at 50% 46%, #00000088 0%, #000000f2 72%);
+  backdrop-filter: blur(3px) grayscale(1) contrast(1.3);
+  -webkit-backdrop-filter: blur(3px) grayscale(1) contrast(1.3);
+  color: var(--ink);
+}
+body[data-escape] #walk-hud #walk-pause, body[data-death] #walk-hud #walk-pause { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+#walk-hud #walk-pause, #walk-hud #walk-pause * { font-family: var(--k7-body); }
+
+/* A panel from a manga page: black, ruled in bone, printed a few millimetres off in red behind. */
+#walk-hud #walk-pause .walk-card {
+  position: relative;
+  isolation: isolate;
+  background: var(--k7-panel);
+  border: 3px solid var(--k7-bone);
+  border-radius: 0;
+  outline: none;
+  box-shadow: 12px 12px 0 var(--k7-red), 0 40px 90px #000;
+  color: var(--ink);
+}
+/* Screentone in the top corner, fading into the panel. */
+#walk-hud #walk-pause .walk-card::before {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 46%; height: 160px;
+  background: var(--k7-tone);
+  -webkit-mask-image: radial-gradient(ellipse at 100% 0, #000 0%, transparent 72%);
+  mask-image: radial-gradient(ellipse at 100% 0, #000 0%, transparent 72%);
+  pointer-events: none;
+  z-index: -1;
+}
+/* The page's kanji, set vertically down the right edge, in red. */
+#walk-hud #walk-pause .walk-card::after {
+  content: attr(data-kanji);
+  position: absolute;
+  top: 22px; right: 14px;
+  writing-mode: vertical-rl;
+  font: 600 22px/1 var(--k7-kanji);
+  letter-spacing: 0.2em;
+  color: var(--k7-red);
+  text-shadow: 0 0 10px #e3261d55;
+  pointer-events: none;
+}
+
+/* Titles: poster capitals, leaning forward, printed off-register in red, with a red neon bloom. */
+#walk-hud #walk-pause .walk-card :is(h1, h2) {
+  font-family: var(--k7-display);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.015em;
+  color: var(--k7-bone);
+  text-shadow: 3px 3px 0 var(--k7-red), 0 0 24px #ff2a1f44;
+  transform: skewX(-7deg);
+  transform-origin: 0 100%;
+}
+#walk-hud #walk-pause .walk-card h1 { font-size: 58px; line-height: 0.95; margin-right: 30px; }
+#walk-hud #walk-pause .walk-card h2 { font-size: 44px; line-height: 0.98; margin-right: 30px; }
+@media (max-width: 540px) {
+  #walk-hud #walk-pause .walk-card h1 { font-size: 44px; }
+  #walk-hud #walk-pause .walk-card h2 { font-size: 36px; }
+}
+#walk-hud #walk-pause .walk-card :is(p, small, dt, dd, label, span, summary, li) { text-shadow: none; }
+#walk-hud #walk-pause .walk-card :is(p, small) { color: var(--ink-muted); }
+#walk-hud #walk-pause .walk-eyebrow { color: var(--k7-red); letter-spacing: 0.3em; }
+
+/* Buttons. The list is :where() so it adds no weight. Entries are black bars with a red tab; the names are poster capitals. */
+#walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button) {
+  position: relative;
+  border: 2px solid #ffffff2e;
+  border-radius: 0;
+  background: #161616;
+  color: var(--k7-bone);
+  text-shadow: none;
+  box-shadow: none;
+  /* Going dark is quick and has no delay; coming on is in the hover rule below. */
+  transition: border-color 0.15s, color 0.12s, background-color 0.12s, box-shadow 0.3s, text-shadow 0.3s;
+}
+#walk-hud #walk-pause .main-entry { border-left: 7px solid var(--k7-red); }
+#walk-hud #walk-pause .main-entry strong { font: 400 21px/1.05 var(--k7-display); letter-spacing: 0.04em; text-transform: uppercase; color: inherit; }
+#walk-hud #walk-pause .main-entry span { color: var(--k7-gray); font-size: 12px; }
+#walk-hud #walk-pause .main-entry::after { content: '▶'; color: var(--k7-red); font-size: 12px; transition: color 0.12s; }
+#walk-hud #walk-pause :where(.menu-primary, #walk-start) {
+  background: var(--k7-red);
+  border-color: var(--k7-red);
+  color: var(--k7-black);
+}
+#walk-hud #walk-pause :where(.menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter) {
+  font: 400 19px/1 var(--k7-display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+#walk-hud #walk-pause #walk-start span { color: inherit; }
+#walk-hud #walk-pause .menu-quiet { border-color: transparent; background: transparent; color: var(--k7-gray); }
+
+/* The neon behind a lit button: a blurred pool of red. */
+#walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button)::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  z-index: -1;
+  background: var(--k7-red);
+  filter: blur(18px);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+/* Pointing at a button turns it over at once, bone on black to black on bone. Resting on it for --glow-delay lights
+ * it in red neon, slowly and steadily; moving off turns it dark again. */
+#walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button):hover:not(:disabled) {
+  color: var(--k7-black);
+  background-color: var(--k7-bone);
+  border-color: var(--k7-bone);
+  outline: none;
+  box-shadow: 0 0 4px #ff3b30, 0 0 18px #ff2a1fa6, 0 0 42px #ff2a1f38;
+  transition: color 0.12s, background-color 0.12s, border-color 0.12s,
+    box-shadow var(--glow-in) ease var(--glow-delay), text-shadow var(--glow-in) ease var(--glow-delay);
+}
+#walk-hud #walk-pause .main-entry:hover:not(:disabled) { border-left-color: var(--k7-red); }
+#walk-hud #walk-pause .main-entry:hover:not(:disabled) span { color: #3a3732; }
+#walk-hud #walk-pause .main-entry:hover:not(:disabled)::after { color: var(--k7-black); }
+#walk-hud #walk-pause :where(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start, #vr-enter, .coop-join button, .coop-invite button):hover:not(:disabled)::before {
+  opacity: 0.55;
+  transition: opacity var(--glow-in) ease var(--glow-delay);
+}
+#walk-hud #walk-pause #walk-start:hover:not(:disabled) span { color: inherit; }
+#walk-hud #walk-pause .walk-card button:disabled { background: #141414; color: #5d5a55; border-color: #ffffff1a; box-shadow: none; text-shadow: none; }
+#walk-hud #walk-pause :is(.main-entry, .menu-primary, .menu-secondary, .menu-quiet, #walk-start):active:not(:disabled) { background-color: #d9d4c9; }
+
+/* Keyboard selection: a dashed red outline, only once the keyboard is used to move around (main.ts sets data-input). */
+#walk-hud #walk-pause .walk-card :is(button, summary, a):focus-visible { outline: none; }
+html[data-input="keys"] #walk-hud #walk-pause .walk-card :is(button, summary, a):focus-visible { outline: 2px dashed var(--k7-red); outline-offset: 4px; }
+
+/* Text links (Back, Main menu): small spaced capitals that light red when you rest on them. */
+#walk-hud #walk-pause :is(.mission-menu-links button, .menu-back, .walk-home) {
+  color: var(--k7-gray); background: transparent; border: 0;
+  font: 400 15px/1 var(--k7-display); letter-spacing: 0.12em; text-transform: uppercase;
+  transition: color 0.12s, text-shadow 0.3s;
+}
+#walk-hud #walk-pause :is(.mission-menu-links button, .menu-back, .walk-home):hover {
+  color: var(--k7-bone); text-decoration: none;
+  text-shadow: var(--red-neon);
+  transition: color 0.12s, text-shadow var(--glow-in) ease var(--glow-delay);
+}
+#walk-hud #walk-pause .mission-menu-links { border-top-color: #ffffff1f; }
+#walk-hud #walk-pause kbd { color: var(--k7-bone); }
+#walk-hud #walk-pause .menu-back kbd, #walk-hud #walk-pause .mission-keys kbd {
+  padding: 2px 7px; border: 1px solid var(--k7-bone); border-radius: 0; background: var(--k7-black);
+  font: 400 12px/1.2 var(--k7-display); letter-spacing: 0.08em; text-transform: uppercase;
+}
+#walk-hud #walk-pause :is(.mission-keys > div, .mission-settings label:has([type="checkbox"]), .mission-tips) { border-color: #ffffff1a; }
+#walk-hud #walk-pause .mission-keys dt { color: var(--k7-gray); }
+#walk-hud #walk-pause .mission-settings output { color: var(--k7-red); }
+#walk-hud #walk-pause input[type="range"], #walk-hud #walk-pause input[type="checkbox"] { accent-color: var(--k7-red); }
+#walk-hud #walk-pause :is(.coop-join input, .coop-invite input) { background: var(--k7-black); color: var(--ink); border: 2px solid #ffffff3a; border-radius: 0; }
+#walk-hud #walk-pause :is(.coop-join input, .coop-invite input):focus { outline: none; border-color: var(--k7-red); box-shadow: 0 0 12px #ff2a1f66; }
+
+/* The debrief: big poster numbers. */
+#walk-hud #walk-pause .mission-recap { border-top: 3px solid var(--k7-bone); }
+#walk-hud #walk-pause .mission-recap dt { font: 400 13px/1 var(--k7-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--k7-red); }
+#walk-hud #walk-pause .mission-recap dd { color: var(--k7-bone); font: 400 40px/1 var(--k7-display); text-shadow: 3px 3px 0 var(--k7-red); }
+#walk-hud #walk-pause #vr-panel { color: var(--ink-muted); }
+
+/* The briefing: a manga page. The map is a panel of its own; the mission's name is a title card in the corner. */
+#walk-hud #walk-pause .briefing .briefing-map {
+  background: var(--k7-tone), #070707;
+  border: 3px solid var(--k7-bone);
+  border-radius: 0;
+  box-shadow: 8px 8px 0 #e3261d55;
+}
+#walk-hud #walk-pause .field-map svg { filter: drop-shadow(0 0 1px #ff2a1f44); }
+#walk-hud #walk-pause .briefing .briefing-kicker { color: var(--k7-red); font: 400 14px/1 var(--k7-display); letter-spacing: 0.3em; text-transform: uppercase; }
+#walk-hud #walk-pause .briefing h2 { font-size: 52px; transform: skewX(-7deg); transform-origin: 100% 100%; margin-right: 0; }
+#walk-hud #walk-pause .briefing h3 {
+  display: inline-block; padding: 4px 10px 3px; background: var(--k7-red); color: var(--k7-black);
+  font: 400 15px/1 var(--k7-display); letter-spacing: 0.18em; transform: skewX(-8deg);
+}
+#walk-hud #walk-pause .briefing .briefing-body { border-top: 3px solid var(--k7-bone); }
+#walk-hud #walk-pause .briefing li strong { font: 400 19px/1.1 var(--k7-display); letter-spacing: 0.03em; text-transform: uppercase; }
+#walk-hud #walk-pause .briefing .briefing-main li::before { border: 0; background: var(--k7-bone); color: var(--k7-black); font: 400 15px/22px var(--k7-display); }
+#walk-hud #walk-pause .briefing .briefing-side li::before { border-color: var(--k7-red); }
+#walk-hud #walk-pause .briefing li.is-done::before { background: var(--k7-yellow); color: var(--k7-black); }
+#walk-hud #walk-pause .briefing .briefing-intel p { border-left: 3px solid var(--k7-red); color: #cfcac0; }
+#walk-hud #walk-pause .briefing .briefing-actions { background: linear-gradient(180deg, transparent, var(--k7-panel) 38%); }
+#walk-hud #walk-pause .walk-card[data-page="mission"]::after { top: auto; bottom: 120px; }
+
+/* The small corner buttons over the world (Main menu, map views): black tabs with a red edge. */
+.mode-button {
+  font: 400 14px/1 var(--k7-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 2px solid var(--k7-bone);
+  border-left: 6px solid var(--k7-red);
+  border-radius: 0;
+  background: var(--k7-black);
+  color: var(--k7-bone);
+  transition: color 0.12s, background-color 0.12s, box-shadow 0.3s;
+}
+.mode-button:focus-visible { outline: none; }
+html[data-input="keys"] .mode-button:focus-visible { outline: 2px dashed var(--k7-red); outline-offset: 3px; }
+.mode-button:hover {
+  background: var(--k7-bone);
+  color: var(--k7-black);
+  outline: none;
+  box-shadow: 0 0 4px #ff3b30, 0 0 16px #ff2a1f88;
+  transition: color 0.12s, background-color 0.12s, box-shadow var(--glow-in) ease var(--glow-delay);
+}
+
+/* Reduced Motion: the neon still comes on after the rest, but at once instead of fading in. */
+body[data-reduced-motion="true"] { --glow-in: 0s; }
+@media (prefers-reduced-motion: reduce) { :root { --glow-in: 0s; } }
+
+/* ---------------------------------------------------------------- the HUD over the world */
+
+/*
+ * In play the HUD is greys only: black plates, white and grey type, grey marks. Colour is kept for what must jump out
+ * of the world: the ? and ! over the guards (status-tags.css). The world's grade is a contrast lift and a vignette.
+ */
+:root { --hud-plate: #0d0d0deb; --hud-white: #f2f2f2; --hud-light: #bdbdbd; --hud-mid: #8a8a8a; --hud-dark: #4a4a4a; }
+body[data-mission="true"] #world { filter: contrast(1.18); }
+body[data-mission="true"]::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 50%, transparent 58%, #00000047 100%);
+}
+
+/* The mission list: a black plate with a grey edge. */
+.mission-objectives { border-left: 5px solid var(--hud-mid); background: var(--hud-plate); color: var(--hud-white); font-family: var(--k7-body); box-shadow: 5px 5px 0 #00000040; }
+.mission-objectives.is-intro { box-shadow: 0 0 0 100vmax #00000088, 8px 8px 0 var(--hud-dark); }
+.objectives-tab { font: 400 14px/1 var(--k7-display); letter-spacing: 0.14em; }
+.mission-objectives kbd { border-color: var(--hud-white); border-radius: 0; color: var(--hud-white); font: 400 11px/1 var(--k7-display); }
+.mission-objectives h2, .mission-objectives h3 { font: 400 12px/1 var(--k7-display); letter-spacing: 0.2em; color: var(--hud-mid); }
+.objective-main .objective-text b { font: 400 20px/1.05 var(--k7-display); letter-spacing: 0.03em; text-transform: uppercase; }
+.objective-text em, .objective-text small, .objectives-hint { color: var(--hud-mid); }
+.mission-objectives li.done { color: #6a6a6a; }
+.mission-objectives li.done b::after { background: var(--hud-light); height: 3px; }
+@keyframes objective-blink { 0% { background: var(--hud-white); color: #000; } 50% { background: transparent; color: var(--hud-white); } }
+@keyframes objective-blink-mark { 0% { background: var(--hud-white); } 50% { background: transparent; } }
+
+/* The F prompt: a black tab, the key a light grey block. */
+#action-prompt { background: var(--hud-plate); border: 2px solid var(--hud-white); border-radius: 0; color: var(--hud-white); box-shadow: 4px 4px 0 var(--hud-dark); }
+#action-prompt kbd { border: 0; border-radius: 0; background: var(--hud-light); color: #000; font: 400 16px/1 var(--k7-display); }
+#action-prompt strong { font: 400 16px/1 var(--k7-display); letter-spacing: 0.06em; text-transform: uppercase; }
+#action-prompt .action-icon { color: var(--hud-white); }
+
+/* The crosshair: a black dot in a white ring; a hit squares it. */
+.crosshair { border-color: var(--hud-white); background: #111; box-shadow: 0 0 0 1px #000; }
+.crosshair.confirmed-hit { background: #000; outline-color: var(--hud-white); }
+
+/* Notices: a black bar with a grey rule. */
+#mission-caption.visible-notice { border: 0; border-top: 3px solid var(--hud-mid); background: var(--hud-plate); color: var(--hud-white); font: 400 16px/1.25 var(--k7-display); letter-spacing: 0.05em; text-transform: uppercase; box-shadow: 5px 5px 0 #00000055; }
+.mission-threat span { border-top: 3px solid var(--hud-mid); background: var(--hud-plate); color: var(--hud-white); font: 400 13px/1.2 var(--k7-display); letter-spacing: 0.18em; }
+.magazine-count { font: 400 30px/1 var(--k7-display); letter-spacing: 0.02em; color: #111; text-shadow: 2px 2px 0 var(--hud-light); }
+body.mission-scoped .magazine-count { color: var(--hud-white); text-shadow: 2px 2px 0 var(--hud-dark); }

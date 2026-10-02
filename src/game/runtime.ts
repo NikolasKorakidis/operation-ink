@@ -1,31 +1,38 @@
 import * as THREE from 'three'
 import { BulletTrails, bulletNearMiss } from './bullet-trails'
-import { KNIFE, PLAYER_BULLET_DAMAGE, PLAYER_HEALTH, SPRINT_FOOTSTEP_RADIUS, fallDamage } from './balance'
+import { GRENADE_RULES, HOSTAGE, KNIFE, MOVE_SPEED, fragDamage, aimToggles, canSprint, PLAYER_BULLET_DAMAGE, PLAYER_HEALTH, SPRINT_FOOTSTEP_RADIUS, fallDamage } from './balance'
 import type { EnvironmentCamera } from '../camera'
 import type { FirstPersonController } from '../player/controller'
 import type { ActionTarget } from '../player/actions'
 import { isDoorFullyOpen, setDoorOpen } from '../world/doors'
 import { EnemyDirector } from './ai'
 import { FirstPersonWeapons } from './weapons'
+import { Grenades, type GrenadeSnapshot } from './grenades'
 import { MissionAudio } from './audio'
 import { MissionHUD } from './hud'
 import { MissionBlood, type BloodSnapshot } from './hit-reactions'
 import { MissionImpacts } from './impacts'
 import { CRATE_RULES, QuestCrates } from './crates'
 import { MissionIntro } from './mission-intro'
-import { deleteSave, readSave, writeSave } from './saves'
-import { FIRST_LEVEL, levelInfo } from '../levels/catalog'
+import { deleteSave, finishCampaignMission, readCampaign, readSave, setNextRun, startCampaign, takeRun, writeSave, type RunKind } from './saves'
+import { FIRST_LEVEL, campaignLevels, levelInfo } from '../levels/catalog'
+import { goTo } from '../modes'
 import { goalHint, goalObjectives, goalsComplete, goalUnlocked, updateGoals, type GoalSense } from './goals'
 import { missionObjectives } from './objectives'
 import { QuestRadios, RADIO_RULES } from './radios'
 import { TUTORIAL_FEEDBACK, TutorialMode } from './tutorial'
-import { FlyingHammer, type HammerSnapshot } from './flying-hammer'
 import { PlayerHitReactions, type PlayerBulletHit } from './player-hit-reactions'
 import { PlayerDeathSequence } from './player-death'
 import { EscapeCinematic } from './escape-cinematic'
 import { EscapeDust } from './escape-dust'
-import { advanceMission, applySharedMission, missionObjective, completeEscape, damageMission, sharedMission, shootMission, initialMission, loadedCount, stationLabel, useStation, type MissionState } from './mission'
+import { advanceMission, applySharedMission, missionObjective, completeEscape, damageMission, sharedMission, shootMission, initialMission, hurtHostage, loadedCount, stationLabel, useStation, type MissionState } from './mission'
 import { HostageEscort } from './hostages'
+import { Captives } from './captives'
+import { hostageAlong, hostagesNear, type HostageBody } from './hostage-harm'
+import type { HostageActor } from './hostage-actor'
+import { BossTags } from './boss-tags'
+import { StatusTags } from './status-tags'
+import { Charges } from './charges'
 import { SecuritySystem } from './security'
 import { RESCUE_LAYOUT } from './rescue-layout'
 import { updateRescueJeepDoor } from './rescue-jeep'
@@ -35,17 +42,21 @@ import { PlayerLean } from './lean'
 import { CoopPanel } from './coop-panel'
 import { CoopSession } from '../net/session'
 import type { CoopMessage, NetSound, PlayerPose } from '../net/hub'
-import type { EnemyPuppet, EnemySnapshot, MeleeAttack, MissionWorld, PlayerSense, Shot, SoundEvent, Station, StationKind, Vec3, WeaponItem, WeaponSnapshot } from './types'
+import type { EnemyPuppet, EnemySnapshot, MeleeAttack, MissionWorld, PlayerSense, Shot, SoundEvent, Station, StationKind, Vec3, WeaponItem, WeaponName, WeaponSnapshot } from './types'
 
 /** `doors` holds 0 for closed, or the side an open leaf swung to (1 / -1). Older saves used booleans. */
 /** Scroll distance for one weapon change, and the shortest gap between changes. */
 const WHEEL_NOTCH = 40, WHEEL_REPEAT_MS = 140
+/** A save to load once its level has been built, when Load game picked another level's save. */
+const PENDING_LOAD = 'stickman-load-level'
 
-type Checkpoint = { mission: MissionState; weapons: WeaponSnapshot; enemies: EnemySnapshot[]; doors: (number | boolean)[]; position: Vec3; quaternion: [number,number,number,number]; blood?: BloodSnapshot; hammer?: HammerSnapshot }
+type Checkpoint = { mission: MissionState; weapons: WeaponSnapshot; enemies: EnemySnapshot[]; doors: (number | boolean)[]; position: Vec3; quaternion: [number,number,number,number]; blood?: BloodSnapshot; grenades?: GrenadeSnapshot }
 
 export class MissionRuntime {
   state: MissionState
   readonly weapons: FirstPersonWeapons
+  /** Frag, flash and smoke grenades: key 4, thrown with the mouse (see grenades.ts). */
+  readonly grenades: Grenades
   readonly ai: EnemyDirector
   readonly audio = new MissionAudio()
   readonly blood: MissionBlood
@@ -58,8 +69,6 @@ export class MissionRuntime {
   readonly radios: QuestRadios
   /** The tutorial level's coach, damage numbers and boss bar; null in the mission. */
   readonly tutorial: TutorialMode | null
-  /** The boss's flying sledgehammer, an enemy of its own; null on a level without the boss. */
-  readonly hammer: FlyingHammer | null
   readonly bulletTrails: BulletTrails
   readonly playerHits = new PlayerHitReactions()
   readonly death = new PlayerDeathSequence()
@@ -68,6 +77,13 @@ export class MissionRuntime {
   readonly hud: MissionHUD
   /** The hostage and his escort: only on a level with a rescue. */
   readonly escort: HostageEscort | null
+  /** Prisoners a level holds, freed at their stations; null on a level without any. */
+  readonly captives: Captives | null
+  /** Health and armour over a boss's head, in missions (training has its own boss bar). */
+  private bossTags: BossTags | null
+  private statusTags: StatusTags | null
+  /** The level's timed charges (C4); null on a level without any. */
+  readonly charges: Charges | null
   readonly security: SecuritySystem
   readonly teammates: Teammates
   readonly coop: CoopSession
@@ -100,6 +116,16 @@ export class MissionRuntime {
   private initial: Checkpoint | null = null
   private active = false
   private aiming = false
+  /** How this level was entered: from the campaign (saves, leads on), as a free mission, or neither (see RunKind). */
+  private run: RunKind | null = null
+  /** The campaign's next mission once this one is won (null after the last). */
+  private nextLevel: string | null = null
+  /** This run's win has been handled (campaign progress, the next-mission offer). */
+  private won = false
+  /** Right click is down (aiming holds while it is, except with a toggled scope). */
+  private rightHeld = false
+  /** Until when (performance.now) the frames keep running after a hostage is killed, so he is seen to fall. */
+  private failingUntil = 0
   private stepTime = 0
   private interactionTime = 0
   private lastCaption = ''
@@ -132,8 +158,41 @@ export class MissionRuntime {
     this.bulletTrails = new BulletTrails(scene, 'Player bullet')
     this.escapeDust = new EscapeDust(scene)
     player.lookSensitivity = () => this.weapons.lookSensitivity
+    // CS-style: the knife is fastest, a sniper rifle about half; aiming slows you a little and stops a sprint.
+    player.canSprint = () => canSprint(this.aiming && this.weapons.canAim && !this.grenades?.equipped)
+    player.speedScale = () => {
+      const held = this.grenades?.equipped ? 'grenade' : this.weapons.current?.name ?? 'knife'
+      return MOVE_SPEED.weapon[held] * (this.aiming && this.weapons.canAim && !this.grenades?.equipped ? MOVE_SPEED.aimed : 1)
+    }
+    this.grenades = new Grenades({ scene, camera: camera.perspective, world: player.world, emit: event => this.emit(event, true),
+      // A guest's guards are the host's puppets; only solo play and the host hurt and blind them.
+      // (The AI is called first: `this.tutorial?.grenade(..., this.ai.blast(...))` skipped it outside training.)
+      blast: origin => {
+        if (this.role === 'guest') return
+        const hits = this.ai.blast(origin, this.coop.active ? this.coop.hub.selfId : undefined)
+        this.tutorial?.grenade('frag', hits)
+        this.blastQuestItems(origin, GRENADE_RULES.frag.radius * 0.45)
+        this.blastHostages(origin, GRENADE_RULES.frag.radius, fragDamage)
+      },
+      flash: origin => {
+        if (this.role === 'guest') return
+        const blinded = this.ai.flash(origin)
+        this.tutorial?.grenade('flash', blinded)
+      },
+      damagePlayer: (amount, origin) => this.damage(amount, origin),
+      onFlashed: seconds => this.audio.play({ kind: 'flash-ring', intensity: seconds }),
+      onEmpty: () => this.invalidate() })
+    // Training never runs out of grenades.
+    this.grenades.endless = !!world.tutorial
     this.ai = new EnemyDirector({ scene, world: player.world, doors: player.actions.doors, specs: world.enemies,
       emit: event => this.emit(event, false), damagePlayer: (amount, source, hit, playerId) => this.damageFromGuard(amount, source, hit, playerId),
+      supplies: () => this.crates.standing(),
+      mapSpan: Math.max(world.bounds.maxX - world.bounds.minX, world.bounds.maxZ - world.bounds.minZ),
+      bystander: (from, direction, reach, damage, weapon) => {
+        const hostage = hostageAlong(this.hostageBodies(), from, direction, reach)
+        if (hostage && damage) this.harmHostage(hostage.body, damage, hostage.head, hostage.point, direction, weapon)
+        return hostage?.distance ?? null
+      },
       onSurfaceHit: (point, direction, surface, weapon) => this.impacts.emit(point, direction, surface, weapon),
       dropWeapon: item => { this.weapons.addPickup(item); this.state.kills++; if (this.role === 'host') this.coop.send({ t: 'drop', item }) }, onHit: hit => {
         this.impactPoint = hit.point.clone(); this.blood.emitHit(hit)
@@ -143,7 +202,8 @@ export class MissionRuntime {
       onReact: reaction => { if (this.role === 'host') this.coop.send({ t: 'ereact', r: reaction }) },
       onFire: (index, end) => { if (this.role === 'host') this.coop.send({ t: 'efire', i: index, end: end.toArray() as Vec3 }) } })
     this.hud = new MissionHUD(world, {
-      retry: () => { if (this.coop.active) this.respawn(); else this.restart(); void this.audio.unlock(); this.player.requestControl() },
+      // The mission starts over; training picks up at its last checkpoint (the boss line, once Bulky Boy is awake).
+      retry: () => { if (this.coop.active) this.respawn(); else if (this.tutorial) this.retry(); else this.restart(); void this.audio.unlock(); this.player.requestControl() },
       restart: () => {
         // In co-op the host restarts everyone; a guest's own restart only returns them to the insertion point.
         if (this.role !== 'guest') this.restart()
@@ -153,6 +213,11 @@ export class MissionRuntime {
       },
       volume: value => this.audio.setVolume(value), mute: value => this.audio.setMuted(value),
       load: level => this.loadSaved(level),
+      newGame: () => { startCampaign(); this.enterLevel('campaign', FIRST_LEVEL) },
+      continueGame: () => this.continueCampaign(),
+      freeMission: level => this.enterLevel('free', level),
+      nextMission: () => { if (this.nextLevel) this.enterLevel(this.run === 'free' ? 'free' : 'campaign', this.nextLevel) },
+      objectives: () => this.objectiveList(),
       leaveWarning: () => {
         const room = this.coop.active ? ` You will leave co-op room ${this.coop.room}.` : ''
         // Leaving the tutorial loses nothing worth asking about.
@@ -169,13 +234,11 @@ export class MissionRuntime {
     this.hud.setObjectiveSource(goals
       ? { list: state => goalObjectives(state, goals, this.goalSense()), hint: state => goalHint(state, goals) }
       : { list: state => missionObjectives(state, totals), hint: missionObjective })
-    this.hammer = world.enemies.some(spec => spec.boss) ? new FlyingHammer(scene, event => this.audio.play(event)) : null
-    if (this.hammer) this.hammer.onHitPlayer = (amount, from) => {
-      this.damage(amount, from)
-      if (this.state.phase !== 'dead') this.hud.notify('The hammer hit you. Watch it rise and step aside.', 2.5)
-    }
+    this.ai.obscured = (from, to) => this.grenades.smokeBlocks(from, to)
     this.tutorial = world.tutorial ? new TutorialMode({
-      camera: camera.perspective, enemies: () => this.ai.enemies, hammer: () => this.hammer,
+      camera: camera.perspective, enemies: () => this.ai.enemies,
+      giveGrenades: () => this.grenades.give(),
+      lineOfSight: (from, to) => !this.player.world.visible(from, to, new THREE.Object3D()) ? 'wall' : this.grenades.smokeBlocks(from, to) ? 'smoke' : 'clear',
       wake: (ids, toward) => this.ai.wake(ids, toward),
       checkpoint: () => { if (this.ready) this.checkpoint = this.snapshot() },
       restart: () => { this.restart(); this.player.requestControl() },
@@ -201,6 +264,18 @@ export class MissionRuntime {
     })
     this.coopPanel = new CoopPanel(document.querySelector('.coop-slot')!, document.querySelector('#coop-status')!, this.coop)
     this.escort = world.rescue ? new HostageEscort(scene, player.world, player.actions.doors) : null
+    const rescue = world.goals?.find(goal => goal.kind === 'extract' && goal.captives)
+    this.captives = world.captives?.length ? new Captives(scene, world.captives, player.world, player.actions.doors, rescue?.kind === 'extract' ? rescue.area : undefined) : null
+    this.charges = world.charges?.length ? new Charges(scene, scene, world.charges, event => this.emit(event, false)) : null
+    if (this.charges) {
+      this.charges.onPlanted = spec => {
+        const station = this.world.stations.find(candidate => candidate.id === spec.plant)
+        if (station) this.finishUse(station)
+      }
+      this.charges.onExplode = (_spec, center) => this.chargeBlast(_spec, center)
+    }
+    this.bossTags = world.enemies.some(spec => spec.boss) && !world.tutorial ? new BossTags() : null
+    this.statusTags = new StatusTags()
     this.security = new SecuritySystem(player.world, world, this.ai, event => this.emit(event, false))
     this.syncWorld()
     player.actions.extraTargets = () => this.targets()
@@ -226,7 +301,9 @@ export class MissionRuntime {
       this.wheelTravel += wheel.deltaMode === 1 ? wheel.deltaY * 40 : wheel.deltaY
       const now = performance.now()
       if (Math.abs(this.wheelTravel) < WHEEL_NOTCH || now - this.wheelSwitchedAt < WHEEL_REPEAT_MS) return
-      if (this.weapons.cycle(Math.sign(this.wheelTravel)) && !this.weapons.canAim) this.aiming = false
+      // The wheel goes back to the guns from a grenade.
+      if (this.grenades.equipped) { if (this.grenades.busy) return; this.grenades.holster() }
+      if (this.weapons.cycle(Math.sign(this.wheelTravel))) this.aiming = this.rightHeld && this.weapons.canAim && !aimToggles(this.weapons.current?.name)
       this.wheelTravel = 0; this.wheelSwitchedAt = now
       this.invalidate()
     }, { ...options, passive: false })
@@ -235,18 +312,23 @@ export class MissionRuntime {
     window.addEventListener('mousedown', event => {
       if (!this.isActive() || event.target !== document.querySelector('#world')) return
       void this.audio.unlock()
+      // A grenade in hand takes both buttons: left throws, right lobs.
+      if (this.grenades.equipped) { this.grenades.press(event.button); this.invalidate(); return }
       if (event.button === 0) this.weapons.trigger(true)
       if (event.button === 2 && this.weapons.current?.name === 'knife') this.weapons.stab()
       else if (event.button === 2) {
-        // Hold right click to aim (and zoom); releasing it returns to the normal view.
-        this.aiming = this.weapons.canAim
+        // Hold right click to aim (and zoom); releasing it returns to the normal view. The sniper's scope toggles
+        // instead: one click puts it up, the next takes it down.
+        this.rightHeld = true
+        this.aiming = aimToggles(this.weapons.current?.name) ? !this.aiming && this.weapons.canAim : this.weapons.canAim
         if (this.weapons.current && !this.weapons.canAim) this.hud.notify("You can't aim with this weapon.", 2, true)
       }
       this.invalidate()
     }, options)
     window.addEventListener('mouseup', event => {
+      this.grenades.release(event.button)
       if (event.button === 0) this.weapons.trigger(false)
-      if (event.button === 2) { this.aiming = false; this.invalidate() }
+      if (event.button === 2) { this.rightHeld = false; if (!aimToggles(this.weapons.current?.name)) this.aiming = false; this.invalidate() }
     }, options)
     window.addEventListener('blur', () => this.cancelInput(), options)
     document.addEventListener('pointerlockchange', () => { if (!player.playing) this.cancelInput() }, options)
@@ -259,9 +341,11 @@ export class MissionRuntime {
     try {
       await this.ai.init()
       await this.escort?.init()
+      await this.captives?.init()
       if (this.disposed) return
       this.player.world.warm()
       this.escort?.sync(this.state)
+      this.captives?.sync(this.state)
       const supply = this.world.stations.find(s => s.kind === 'supply')
       if (supply) {
         const point = supply.point.clone().add(new THREE.Vector3(0.7, 0, 0.65))
@@ -280,9 +364,18 @@ export class MissionRuntime {
           stand: Math.atan2(facing.x, facing.z) })
       })
       this.placeAtInsertion()
+      // Missions start with a full grenade belt; training hands it out in its grenade lesson.
+      if (!this.world.tutorial) this.grenades.give()
       this.initial = this.snapshot()
       this.checkpoint = structuredClone(this.initial)
       this.ready = true; this.hud.ready(); this.invalidate()
+      // Entered from the campaign or the free missions: open on the briefing.
+      this.run = takeRun(this.world.level)
+      if (this.run) this.hud.setRun(this.run)
+      // Arriving from another level's Load game: load this level's save now.
+      let pending: string | null = null
+      try { pending = sessionStorage.getItem(PENDING_LOAD); sessionStorage.removeItem(PENDING_LOAD) } catch { /* no storage */ }
+      if (pending === this.world.level) this.loadSaved(pending)
       // An invite link (?join=ROOM) connects straight away and shows the room on the Co-op page.
       const room = new URLSearchParams(location.search).get('join')
       if (room) { this.hud.showCoop(); void this.coop.join(room) }
@@ -307,7 +400,7 @@ export class MissionRuntime {
   }
 
   private isActive() { return this.ready && this.state.phase === 'active' && !this.escape.active && this.player.enabled && this.player.playing && !this.player.immersive }
-  private cancelInput() { this.aiming = false; this.weapons.cancel(); this.leanKeys.clear() }
+  private cancelInput() { this.aiming = false; this.rightHeld = false; this.weapons.cancel(); this.grenades?.cancel(); this.leanKeys.clear() }
   private keyDown = (event: KeyboardEvent) => {
     if (this.escape.active) return
     const leanKey = event.code === 'KeyQ' || event.code === 'KeyE'
@@ -323,33 +416,57 @@ export class MissionRuntime {
     if (!this.isActive()) return
     // Hold Q / E to lean left / right, PUBG-style. (The sniper scope zooms with the mouse wheel.)
     if (leanKey) { event.preventDefault(); this.leanKeys.add(event.code); this.invalidate(); return }
+    const held = this.weapons.current?.name
     switch (event.code) {
       case 'KeyR': if (this.weapons.reload()) this.aiming = false; break
-      case 'Digit1': this.weapons.switchSlot(0); break
-      case 'Digit2': this.weapons.switchSlot(1); break
-      case 'Digit3': this.weapons.switchSlot(2); break
-      case 'KeyG': this.weapons.drop(this.player.body.position); break
+      case 'Digit1': case 'Digit2': case 'Digit3':
+        // Any gun slot puts the grenade away (not mid-throw, with the pin out).
+        if (this.grenades.busy) return
+        this.grenades.holster(); this.weapons.switchSlot(Number(event.code.slice(5)) - 1); break
+      case 'Digit4':
+        if (this.grenades.equip()) { this.weapons.cancel(); this.aiming = false }
+        else if (!this.grenades.equipped) this.hud.notify('No grenades left.', 2, true)
+        break
+      case 'KeyG': if (!this.grenades.equipped) this.weapons.drop(this.player.body.position); break
       default: return
     }
+    // A new weapon in hand is aimed only while right click is held, and never a toggled scope carried over.
+    if (this.weapons.current?.name !== held) this.aiming = this.rightHeld && !aimToggles(this.weapons.current?.name)
     if (!this.weapons.canAim) this.aiming = false
     event.preventDefault(); this.invalidate()
   }
 
+  /**
+   * A level's goal station's prompt, or none: a charge is planted only while you carry it; anything else once the
+   * goal it serves is unlocked.
+   */
+  private objectiveLabel(station: Station) {
+    const charge = this.charges?.plantStation(station.id)
+    if (charge) return this.charges!.carried(this.state, charge) ? station.label : null
+    const goals = this.world.goals ?? []
+    const goal = goals.find(candidate => candidate.kind === 'interact' && candidate.station === station.id
+      || candidate.kind === 'collect' && candidate.stations.includes(station.id))
+    return goal && !goalUnlocked(this.state, goals, goal) ? null : station.label
+  }
+
   private targets(): ActionTarget[] {
-    if (!this.isActive() || this.state.jeep === 'escaping') return []
+    if (!this.isActive() || this.state.jeep === 'escaping' || this.charges?.busy) return []
     const targets: ActionTarget[] = []
     for (const station of this.world.stations) {
       let label = stationLabel(this.state,station.kind,station.id)
       // A level's own goal station shows its own prompt, once its goal is unlocked.
-      if (station.kind === 'objective' && label) {
-        const goal = this.world.goals?.find(candidate => candidate.kind === 'interact' && candidate.station === station.id)
-        label = goal && !goalUnlocked(this.state, this.world.goals!, goal) ? null : station.label
-      }
+      if (station.kind === 'objective' && label) label = this.objectiveLabel(station)
       if (station.kind === 'jeep' && label === 'Board jeep' && this.gateOpening()) label = 'Gate opening'
       if (label) targets.push({ object: station.object, point: station.point, kind: 'mission', label,
         descending: false, use: () => this.use(station) })
     }
     for (const item of this.weapons.pickupTargets()) targets.push({ ...item, kind: 'pickup', descending: false, use: () => this.weapons.pickup(item.id) })
+    // Supply crates: take ammunition (F) while they last.
+    for (const crate of this.crates.standing()) targets.push({ object: crate.object, point: crate.position.clone().add(new THREE.Vector3(0, 0.75, 0)), kind: 'pickup',
+      label: 'Take ammo', descending: false, use: () => {
+        if (this.weapons.resupply()) { this.hud.notify('Ammunition restocked.', 2); return true }
+        this.hud.notify('You are full on ammunition.', 2, true); return false
+      } })
     return targets
   }
 
@@ -361,6 +478,19 @@ export class MissionRuntime {
       this.hud.notify('Wait for the exit gate to finish opening.', 3)
       return false
     }
+    // Planting a charge: hold still for its plant time; then the station counts as used (finishUse).
+    const charge = this.charges?.plantStation(station.id)
+    if (charge) {
+      if (!this.charges!.carried(this.state, charge)) { this.hud.notify(`You need the ${charge.name}.`, 3); return false }
+      this.weapons.cancel(); this.aiming = false
+      this.charges!.beginPlant(charge, this.player.body.position)
+      return true
+    }
+    return this.finishUse(station)
+  }
+
+  /** Use a station for real (after any planting): a guest asks the host; the host and solo change the mission. */
+  private finishUse(station: Station) {
     // The host's compound owns shared objectives, so a guest asks for them. Supplies heal only this player.
     if (this.role === 'guest' && station.kind !== 'supply') {
       this.coop.send({ t: 'use', id: this.coop.hub.selfId, kind: station.kind, station: station.id })
@@ -376,6 +506,14 @@ export class MissionRuntime {
   }
 
   private stationUsed(station: Station) {
+    // A charge's pickup and plant, and a file picked up: say so, and start a planted charge's fuse.
+    const charge = this.charges?.specs.find(spec => spec.plant === station.id || spec.pickup === station.id)
+    if (charge?.plant === station.id && !(charge.id in this.state.chargesPlanted)) {
+      this.state.chargesPlanted[charge.id] = this.state.elapsed
+      this.hud.notify(`${charge.name} planted. ${charge.fuse} seconds. Get clear!`, 4)
+    } else if (charge?.pickup === station.id) this.hud.notify(`You have the ${charge.name}. Plant it at the target.`, 5)
+    const collect = this.world.goals?.find(goal => goal.kind === 'collect' && goal.stations.includes(station.id))
+    if (collect?.kind === 'collect') this.hud.notify(`${collect.label}: ${collect.stations.filter(id => this.state.usedStations.includes(id)).length}/${collect.stations.length}`, 3)
     this.emit({ kind: station.kind === 'distraction' ? 'bell' : 'objective',
       position: station.point.clone(), radius: station.kind === 'distraction' ? 27 : 6 }, station.kind === 'distraction')
     if (station.kind === 'rally') this.escort?.rally(this.state)
@@ -425,16 +563,8 @@ export class MissionRuntime {
     let surface = this.player.world.raySurface(shot.origin, shot.direction, shot.range)
     let distance = surface?.distance ?? shot.range
     this.impactPoint = null
-    let hit = false
-    // The flying hammer, when it is nearer than any guard: the bullet rings off it.
-    const hammerAt = this.role !== 'guest' && this.hammer ? this.hammer.raycast(shot.origin, shot.direction, distance) : Infinity
-    if (hammerAt < Infinity && !this.ai.findHit(shot, hammerAt)) {
-      hit = true
-      distance = hammerAt; surface = null
-      this.impactPoint = shot.origin.clone().addScaledVector(shot.direction, hammerAt)
-      this.audio.play({ kind: 'knife-wall', position: this.impactPoint, radius: 18 })
-      this.hammer!.damage(shot.damage)
-    } else if (this.role === 'guest') {
+    let hit = false, hostageHit = false
+    if (this.role === 'guest') {
       // A guest aims at the guards it sees; the host applies the damage and replies with the reaction.
       const found = this.ai.findHit(shot, distance)
       if (found) {
@@ -444,24 +574,32 @@ export class MissionRuntime {
           distance: found.distance, direction: found.direction.toArray() as Vec3, origin: shot.origin.toArray() as Vec3, weapon: shot.weapon ?? 'ak', damage: shot.damage } })
       }
     } else {
-      this.ai.nearMiss(shot,distance)
-      hit=this.ai.hit(shot,distance)
+      // A hostage in the way takes the round instead of whatever is behind him.
+      const hostage = hostageAlong(this.hostageBodies(), shot.origin, shot.direction, distance)
+      const reach = hostage?.distance ?? distance
+      this.ai.nearMiss(shot,reach)
+      hit=this.ai.hit(shot,reach)
+      if (!hit && hostage) {
+        this.harmHostage(hostage.body, shot.damage, hostage.head, hostage.point, shot.direction, shot.weapon)
+        this.impactPoint = hostage.point
+        hostageHit = true
+      }
     }
     // A bullet that reaches a quest crate damages it; the host (or a solo player) decides when it breaks.
-    const crate = !hit && surface ? this.crates.at(surface.mesh) : null
+    const crate = !hit && !hostageHit && surface ? this.crates.at(surface.mesh) : null
     if (crate) {
       if (this.role === 'guest') this.coop.send({ t: 'crate', id: this.coop.hub.selfId, crate, damage: shot.damage })
       else this.hitCrate(crate, shot.damage)
     }
     // One bullet wrecks a radio, switched off or not.
-    const radio = !hit && !crate && surface ? this.radios.at(surface.mesh) : null
+    const radio = !hit && !hostageHit && !crate && surface ? this.radios.at(surface.mesh) : null
     if (radio) {
       if (this.role === 'guest') this.coop.send({ t: 'radio', id: this.coop.hub.selfId, radio })
       else this.hitRadio(radio)
     }
     if (hit) this.hitFlash = 0.15
     const end=this.impactPoint ?? shot.origin.clone().addScaledVector(shot.direction,distance)
-    const impact = !hit && surface ? () => {
+    const impact = !hit && !hostageHit && surface ? () => {
       this.audio.play({kind:'impact',position:end,radius:18})
       this.impacts.emit(end, shot.direction, surface, shot.weapon)
     } : undefined
@@ -487,6 +625,9 @@ export class MissionRuntime {
     this.coop.send({ t: 'shot', id: this.coop.hub.selfId, origin: attack.origin.toArray() as Vec3,
       end: attack.origin.clone().addScaledVector(attack.direction, KNIFE.range).toArray() as Vec3, weapon: 'knife' })
     if (!found || !shot) {
+      // The blade finds a hostage as easily as a guard.
+      const hostage = this.role !== 'guest' ? hostageAlong(this.hostageBodies(), attack.origin, attack.direction, wall) : null
+      if (hostage) { this.hitFlash = 0.15; this.harmHostage(hostage.body, attack.damage, hostage.head, hostage.point, attack.direction, 'knife'); return }
       if (wall < KNIFE.range) this.audio.play({ kind: 'knife-wall', position: attack.origin.clone().addScaledVector(attack.direction, wall), radius: 6 })
       return
     }
@@ -516,7 +657,7 @@ export class MissionRuntime {
       this.playerHits.clear(); this.deaths++
       const bulletDirection = hit?.direction ?? (source ? this.camera.perspective.position.clone().sub(source) : undefined)
       this.death.begin(this.camera.perspective, this.player.body.position, this.player.world, this.hud.reducedMotion, bulletDirection)
-      this.weapons.beginDeath()
+      this.weapons.beginDeath(); this.grenades?.holster()
       this.player.pause(); this.player.actions.reset(); this.cancelInput()
       this.player.body.velocity.set(0, 0, 0)
       this.audio.beginDeath()
@@ -528,10 +669,11 @@ export class MissionRuntime {
   private snapshot(): Checkpoint {
     return { mission:structuredClone(this.state),weapons:this.weapons.snapshot(),enemies:this.ai.snapshot(),
       doors:this.player.actions.doors.map(door=>door.userData.open?(door.userData.openSide===-1?-1:1):0),position:this.player.body.position.toArray() as Vec3,
-      quaternion:this.camera.perspective.quaternion.toArray() as [number,number,number,number], blood:this.blood.snapshot(), hammer:this.hammer?.snapshot() }
+      quaternion:this.camera.perspective.quaternion.toArray() as [number,number,number,number], blood:this.blood.snapshot(), grenades:this.grenades?.snapshot() }
   }
 
   private restore(saved: Checkpoint) {
+    this.won = false; this.nextLevel = null
     this.intro.clear(); this.introPending = true
     this.escape.reset(this.camera.perspective)
     this.escapeDust.clear()
@@ -542,8 +684,7 @@ export class MissionRuntime {
     this.player.movementLocked = false; this.gunfireUntil = 0
     this.player.actions.doors.forEach((door,i)=>{ const saved_=saved.doors[i]; setDoorOpen(door,Boolean(saved_),true,saved_===-1?-1:1) })
     this.player.world.refresh(); this.ai.restore(structuredClone(saved.enemies)); this.weapons.restore(structuredClone(saved.weapons)); this.blood.restore(saved.blood)
-    const boss = this.hammer && this.ai.enemies.find(enemy => enemy.spec.boss)
-    if (boss) this.hammer!.restore(saved.hammer, boss.position)
+    this.grenades?.restore(saved.grenades)
     this.player.body.teleport(new THREE.Vector3(...saved.position)); this.player.actions.syncCamera(this.camera.perspective)
     this.camera.perspective.quaternion.fromArray(saved.quaternion)
     this.safePosition.copy(this.player.body.position); this.safeQuaternion.copy(this.camera.perspective.quaternion)
@@ -569,20 +710,6 @@ export class MissionRuntime {
     if (position) this.ai.hear({ kind: 'impact', position, radius: RADIO_RULES.noiseRadius })
   }
 
-  /** The boss's flying hammer: it wakes and dies with him, and hunts the player while it can see them. */
-  private updateHammer(dt: number) {
-    const boss = this.hammer && this.ai.enemies.find(enemy => enemy.spec.boss)
-    if (!this.hammer || !boss) return
-    const world = this.player.world, eye = this.camera.perspective.position
-    this.hammer.update(dt, {
-      owner: { position: boss.position, awake: boss.state !== 'reserve', alive: boss.state !== 'dead' },
-      target: { eye, feet: this.player.body.position, alive: this.state.phase === 'active' },
-      rayDistance: (origin, direction, max) => world.rayDistance(origin, direction, max),
-      visible: (from, to) => { const to_ = to.clone().sub(from), length = to_.length(); return world.rayDistance(from, to_.normalize(), length) >= length - 0.1 },
-      reducedMotion: this.hud.reducedMotion,
-    })
-  }
-
   /**
    * Shows the crates and radios as the (possibly host-shared) mission state has them, blowing up newly broken
    * ones, and moves the debris.
@@ -604,13 +731,160 @@ export class MissionRuntime {
     return writeSave({ level: this.world.level, elapsed: this.state.elapsed, objective: this.objectiveHint() }, this.snapshot())
   }
 
+  /** Things picked up at their stations (files, a charge) are gone once taken. */
+  private syncCollectibles() {
+    for (const station of this.world.stations ?? []) {
+      if (station.object?.userData.collectible) station.object.visible = !this.state.usedStations.includes(station.id)
+    }
+  }
+
+  /** A blast breaks the quest crates and wrecks the radios within `radius` of it. */
+  /** Every hostage body on the level that can still be hurt: the compound's (not yet in the jeep) and the captives. */
+  private hostageBodies(): HostageBody[] {
+    const bodies: HostageBody[] = []
+    ;(this.state?.hostages ?? []).forEach((hostage, index) => {
+      const actor = this.escort?.actors[index]
+      if (actor && hostage.status !== 'loaded') bodies.push({ id: hostage.id, name: 'The hostage', seated: hostage.status === 'captive', actor })
+    })
+    if (this.captives) bodies.push(...this.captives.bodies(this.state))
+    return bodies
+  }
+
+  /**
+   * A hostage is hit (host and solo decide; guests' rounds pass through): he bleeds and flinches, or falls and the
+   * mission is lost. `amount` is the weapon's damage; a head hit counts HOSTAGE.head times.
+   */
+  private harmHostage(body: HostageBody, amount: number, head: boolean, point: THREE.Vector3, direction: THREE.Vector3, weapon?: WeaponName) {
+    if (this.role === 'guest' || this.invincible) return
+    const result = hurtHostage(this.state, body.id, head ? amount * HOSTAGE.head : amount, body.name)
+    if (!result) return
+    const actor = body.actor as HostageActor
+    this.blood.emitHit({ zone: head ? 'head' : 'torso', point: point.clone(), direction: direction.clone(), lethal: result === 'killed', weapon })
+    this.audio.play({ kind: 'enemy-hit', zone: head ? 'head' : 'torso', position: point.clone(), radius: 20 })
+    if (result === 'hurt') {
+      if (!body.seated) actor.hurt(head)
+      this.hud.notify(`${body.name} is hit! Hold your fire.`, 2.5, true)
+      return
+    }
+    actor.die(head, body.seated)
+    this.failingUntil = performance.now() + 1700
+    this.hud.notify(this.state.failure ?? 'A hostage was killed.', 5)
+    this.cancelInput(); this.player.movementLocked = true
+    if (this.role === 'host') this.sendWorld()
+    // Let him fall, then the failure page with its retry.
+    window.setTimeout(() => { if (this.state.phase === 'dead' && this.state.failure && !this.disposed) { this.player.movementLocked = false; this.player.pause(); this.invalidate() } }, 1600)
+    this.invalidate()
+  }
+
+  /** A blast: hostages within `radius` take `damage(distance)` unless a wall shields them. */
+  private blastHostages(center: THREE.Vector3, radius: number, damage: (distance: number) => number) {
+    if (this.role === 'guest') return
+    for (const { body, chest, distance } of hostagesNear(this.hostageBodies(), center, radius)) {
+      if (!this.player.world.visible(center.clone().add(new THREE.Vector3(0, 0.3, 0)), chest, body.actor.root)) continue
+      this.harmHostage(body, damage(distance), false, chest, chest.clone().sub(center).normalize())
+    }
+  }
+
+  private blastQuestItems(origin: THREE.Vector3, radius: number) {
+    for (const id of this.crates.crates.keys()) {
+      const center = this.crates.center(id)
+      if (center && center.distanceTo(origin) < radius) this.hitCrate(id, 999)
+    }
+    for (const id of this.radios.radios.keys()) {
+      const center = this.radios.center(id)
+      if (center && center.distanceTo(origin) < radius) this.hitRadio(id)
+    }
+  }
+
+  /** A charge has gone off: hurt this player by how close they stood, and (host, solo) kill the guards in reach. */
+  private chargeBlast(spec: import('./types').ChargeSpec, center: THREE.Vector3) {
+    const distance = this.player.body.position.distanceTo(center)
+    if (this.state.phase === 'active' && distance < spec.blast.radius) {
+      const share = THREE.MathUtils.clamp((distance - spec.blast.lethal) / (spec.blast.radius - spec.blast.lethal), 0, 1)
+      this.damage(distance < spec.blast.lethal ? 999 : THREE.MathUtils.lerp(70, 10, share), center)
+    }
+    if (this.role === 'guest') return
+    this.ai.enemies.forEach((enemy, index) => {
+      if (enemy.state === 'dead' || enemy.state === 'reserve' || enemy.position.distanceTo(center) > spec.blast.radius * 0.8) return
+      const point = enemy.position.clone().add(new THREE.Vector3(0, 1.2, 0)), direction = point.clone().sub(center).normalize()
+      this.ai.applyHit({ origin: center, direction, range: spec.blast.radius, damage: 3000, weapon: 'shotgun' },
+        { index, zone: 'torso', point, bone: 'chest', distance: point.distanceTo(center), direction })
+    })
+    this.ai.hear({ kind: 'crate-explosion', position: center.clone(), radius: 150 })
+    this.blastQuestItems(center, spec.blast.radius * 0.7)
+    this.blastHostages(center, spec.blast.radius, distance => distance < spec.blast.lethal ? 999 : THREE.MathUtils.lerp(70, 10,
+      THREE.MathUtils.clamp((distance - spec.blast.lethal) / (spec.blast.radius - spec.blast.lethal), 0, 1)))
+  }
+
   /** Whether this level keeps saves: campaign missions do, training and developer levels don't. */
-  private get saved() { return levelInfo(this.world.level)?.kind === 'campaign' }
+  private get saved() { return levelInfo(this.world.level)?.kind === 'campaign' && this.run !== 'free' }
+
+  /** The objectives as the mission state stands (the briefing lists them). */
+  private objectiveList() {
+    const goals = this.world.goals
+    return goals ? goalObjectives(this.state, goals, this.goalSense())
+      : missionObjectives(this.state, { crates: this.crates.crates.size, radios: [...this.radios.radios.keys()] })
+  }
+
+  /**
+   * Go into a mission from the menu, from the campaign or as a free mission: on its briefing, fresh. This level is
+   * reset in place; another is switched to, told how it was entered.
+   */
+  private enterLevel(kind: RunKind, level: string) {
+    if (level === this.world.level && !this.coop.active) {
+      this.run = kind
+      if (this.state.elapsed > 0 || this.state.phase !== 'active') this.restart()
+      this.hud.setRun(kind)
+      this.invalidate()
+      return
+    }
+    if (this.run !== 'free') this.saveProgress()
+    setNextRun(kind, level)
+    goTo(level === FIRST_LEVEL ? 'mission' : `level:${level}`)
+  }
+
+  /** Load game: carry on the campaign at its mission, from that mission's checkpoint if it has one. */
+  private continueCampaign() {
+    const mission = readCampaign()?.mission
+    if (!mission) return
+    if (!readSave(mission)) { this.enterLevel('campaign', mission); return }
+    if (mission !== this.world.level) setNextRun('campaign', mission)
+    else { this.run = 'campaign'; this.hud.setRun('campaign') }
+    this.loadSaved(mission)
+  }
+
+  /** Entered from the campaign or the free missions (and not loading a checkpoint): it opens on its briefing. */
+  get opensOnBriefing() { return !!this.run && !this.player.playing }
+
+  /** A mission won, however it was won (goals, the compound's escape): handled once. */
+  private checkWon() {
+    if (this.state.phase === 'complete' && !this.won) { this.won = true; this.missionWon() }
+  }
+
+  /**
+   * A mission won: the next one is offered, and comes up by itself after the debrief. In the campaign (or a campaign
+   * level opened without a menu entry) the campaign moves on too; a free mission leads to the next free mission.
+   */
+  private missionWon() {
+    if (levelInfo(this.world.level)?.kind !== 'campaign' || this.world.tutorial) return
+    if (this.run === 'free') {
+      const order = campaignLevels().map(level => level.id)
+      this.nextLevel = order[order.indexOf(this.world.level) + 1] ?? null
+      // The last mission played free has nothing after it: just Play again.
+      if (!this.nextLevel) return
+    } else {
+      this.run = 'campaign'
+      this.nextLevel = finishCampaignMission(this.world.level)
+      deleteSave(this.world.level)
+    }
+    this.hud.setComplete(this.nextLevel)
+  }
   private objectiveHint() { return this.world.goals ? goalHint(this.state, this.world.goals) : missionObjective(this.state) }
 
   /** What the level's goals read from the world (see goals.ts). */
   private goalSense(players: readonly THREE.Vector3[] = []): GoalSense {
-    return { players, enemies: this.ai.enemies, totals: { crates: this.crates.crates.size, radios: this.radios.radios.size },
+    return { players, enemies: this.ai.enemies, totals: { crates: this.crates.crates.size, radios: this.radios.radios.size }, captives: this.captives?.positions(this.state),
+      chargePickups: Object.fromEntries((this.world.charges ?? []).map(spec => [spec.id, spec.pickup])),
       radiosOut: [...this.radios.radios.keys()].filter(id => this.state.disabledRadios.includes(id) || this.state.destroyedRadios.includes(id)).length }
   }
 
@@ -638,6 +912,13 @@ export class MissionRuntime {
 
   /** Continue a saved mission: its checkpoint becomes the current one and play resumes from it. */
   loadSaved(level: string) {
+    // Another mission's save: keep this one, switch to that level, and load it there once it's built.
+    if (level !== this.world.level && levelInfo(level)?.kind === 'campaign' && !this.coop.active) {
+      this.saveProgress()
+      try { sessionStorage.setItem(PENDING_LOAD, level) } catch { /* the level opens without its save */ }
+      goTo(`level:${level}`)
+      return
+    }
     const saved = level === this.world.level ? readSave<Checkpoint>(level) : null
     if (!saved || this.coop.active || !this.ready) { this.hud.notify('That saved mission could not be loaded.', 4); return }
     this.restore(saved)
@@ -647,9 +928,17 @@ export class MissionRuntime {
   }
 
   /** Open the menu on the saved games (Load game from the tutorial). */
-  showLoad() { this.hud.showLoad() }
+  showLoad() { this.continueCampaign() }
 
-  retry() { if(this.checkpoint) { this.restore(this.checkpoint); this.hud.notify('Mission reset.',3) } }
+  retry() {
+    if (!this.checkpoint) return
+    this.restore(this.checkpoint)
+    if (!this.tutorial) { this.hud.notify('Mission reset.', 3); return }
+    // Training keeps its lessons, and you go back in at full health.
+    this.state.health = PLAYER_HEALTH.max
+    this.tutorial.retry()
+    this.hud.notify(this.tutorial.atBoss ? 'Back at Bulky Boy. Full health.' : 'Back at the last checkpoint.', 3)
+  }
   restart() {
     if(!this.initial) return
     this.checkpoint=structuredClone(this.initial); this.deaths=0; this.restore(this.initial)
@@ -678,7 +967,11 @@ export class MissionRuntime {
       }
       this.player.world.refresh()
     }
-    if (resetEscort) this.escort?.sync(this.state)
+    if (resetEscort) {
+      this.escort?.sync(this.state); this.captives?.sync(this.state)
+      this.charges?.clearEffects(); this.charges?.sync(this.state, true)
+    }
+    this.syncCollectibles()
     this.security.sync(this.state)
     if (this.state.alarm !== 'active') this.audio.setAlarm(false)
   }
@@ -742,6 +1035,8 @@ export class MissionRuntime {
       this.hud.notify('Hostage safely extracted.', 8)
       deleteSave(this.world.level)
     }
+    // The compound is won out here, during the drive: the campaign moves on just the same.
+    this.checkWon()
     this.escape.applyCamera(this.camera.perspective)
     this.audio.setActive(playing && !this.escape.menuVisible)
     this.audio.setAlarm(false); this.audio.update(this.camera.perspective)
@@ -803,22 +1098,24 @@ export class MissionRuntime {
           yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y})
         const danger = this.gunfireUntil > this.state.elapsed
         this.escort?.update(dt, this.state, body.position, danger)
+        this.captives?.update(dt, this.state, danger, body.position)
         this.checkGoals([body.position])
         this.updateJeepDoor(dt)
         this.blood.update(dt)
         this.impacts.update(dt)
         this.updateCrates(dt)
-        this.updateHammer(dt)
         this.tutorial?.update(dt, { position: body.position, speed: Math.hypot(body.velocity.x, body.velocity.z), grounded: body.grounded,
           traversing: this.player.actions.traversing, stance: body.stance, lean: this.lean.amount, aiming: this.aiming,
-          weapon: this.weapons.current?.name ?? null, slot: this.weapons.selected, slots: this.weapons.slots, reloading: this.weapons.reloading })
+          weapon: this.weapons.current?.name ?? null, slot: this.weapons.selected, slots: this.weapons.slots, reloading: this.weapons.reloading,
+          grenade: this.grenades?.equipped ? this.grenades.selected : null })
       }
       const speed=Math.hypot(body.velocity.x,body.velocity.z)
       if(speed>0.5 && body.grounded || this.player.actions.climbing) {
         this.stepTime+=dt
         // Guards only hear sprinting feet, and only up close; walking is silent to them but the player hears it.
         // Crouched and prone movement makes no footstep sound at all.
-        const climbing = this.player.actions.climbing, sprinting = !climbing && speed > 5, lowered = !climbing && body.stance !== 'stand'
+        // Sprinting is relative to what you carry: a sniper's sprint is slower than a knife's walk is fast.
+        const climbing = this.player.actions.climbing, sprinting = !climbing && speed > 5 * body.speedScale, lowered = !climbing && body.stance !== 'stand'
         if(this.stepTime>(climbing?0.5:sprinting?0.3:0.48)) {
           this.stepTime=0
           if (!lowered) this.emit({kind:climbing?'ladder':'footstep',position:body.position.clone(),radius:climbing?5:sprinting?SPRINT_FOOTSTEP_RADIUS:6},!!climbing||sprinting)
@@ -857,7 +1154,12 @@ export class MissionRuntime {
       const body = this.player.body
       this.steadiness.update(reactionActive ? dt : 0, { speed: Math.hypot(body.velocity.x, body.velocity.z), airborne: !body.grounded && !this.player.actions.traversing,
         stance: body.stance, aiming: this.aiming && this.weapons.canAim, scoped: this.weapons.scoped, weapon: this.weapons.current?.name ?? null, reducedMotion: this.hud.reducedMotion })
-      this.weapons.update(dt,{active:reactionActive&&this.interactionTime===0,climbing:this.player.actions.traversing,
+      const handsFree = reactionActive && this.interactionTime === 0 && !this.player.actions.traversing
+      const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
+      if (this.grenades?.update(dt, { active: handsFree, eye, forward: this.camera.perspective.getWorldDirection(new THREE.Vector3()),
+        velocity: this.player.body.velocity, reducedMotion: this.hud.reducedMotion })) this.invalidate()
+      // With a grenade out the guns are put away.
+      this.weapons.update(dt,{active:reactionActive&&this.interactionTime===0&&!this.grenades?.equipped,climbing:this.player.actions.traversing,
         moving:this.player.body.velocity.length(),aiming:this.aiming,reducedMotion:this.hud.reducedMotion,feet:this.player.body.position,hitPose,
         aimOffset:this.steadiness.sway,spread:this.steadiness.spread})
       this.showAimOffset()
@@ -871,12 +1173,27 @@ export class MissionRuntime {
       this.hitFlash-=dt
     }
     this.tutorial?.frame(dt, this.player.playing && this.player.enabled && !this.player.immersive)
+    this.checkWon()
+    const tagsShown = this.player.playing && this.player.enabled && !this.player.immersive
+    const seen = (point: THREE.Vector3, target: THREE.Object3D) => this.player.world.visible(this.camera.perspective.position, point, target)
+    this.bossTags?.update(dt, this.camera.perspective, this.ai.enemies as never, tagsShown, seen)
+    this.statusTags?.update(dt, this.camera.perspective, this.ai.enemies as never, tagsShown, seen)
+    this.charges?.update(this.player.playing ? dt : 0, this.state, this.player.body.position, this.role !== 'guest',
+      this.player.playing && this.player.enabled && !this.player.immersive, this.hud.reducedMotion)
+    if (this.charges) this.syncCollectibles()
     const crosshair=document.querySelector<HTMLElement>('.crosshair')!
     crosshair.classList.toggle('confirmed-hit', this.hitFlash > 0)
     this.hud.update(dt,this.state,{playing:this.player.playing,enabled:this.player.enabled&&!this.player.immersive,
-      weapon:this.weapons.current,reloading:this.weapons.reloading,
+      weapon:this.grenades?.equipped ? null : this.weapons.current,reloading:this.weapons.reloading,
       position:this.player.body.position,yaw:new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion,'YXZ').y,deaths:this.deaths,ready:this.ready})
-    return active || this.death.running || coop
+    // A hostage just killed: keep drawing while he falls (and his blood spreads), until the failure page.
+    const failing = performance.now() < this.failingUntil
+    if (failing && !active) {
+      this.captives?.update(dt, this.state)
+      this.escort?.follow(dt, this.state, false)
+      this.blood.update(dt)
+    }
+    return active || this.death.running || coop || failing
   }
 
   /** 'solo' until a co-op room is open; then the host runs the compound and guests mirror it. */
@@ -972,6 +1289,7 @@ export class MissionRuntime {
     this.security.update(dt, this.state, players.filter(player => player.alive).map(player => player.eye), true)
     this.ai.update(dt, players)
     this.escort?.update(dt, this.state, this.escortLeader(players), this.gunfireUntil > this.state.elapsed)
+    this.captives?.update(dt, this.state, this.gunfireUntil > this.state.elapsed, players.find(player => player.alive)?.feet)
     this.checkGoals(players.filter(player => player.alive).map(player => player.feet))
     this.updateJeepDoor(dt)
     this.blood.update(dt); this.impacts.update(dt); this.updateCrates(dt)
@@ -992,6 +1310,7 @@ export class MissionRuntime {
     if (this.state.phase === 'active') advanceMission(this.state, dt)
     this.ai.follow(dt, this.hostEnemies)
     this.escort?.follow(dt, this.state, this.hostCower)
+    this.captives?.update(dt, this.state, this.hostCower)
     this.updateJeepDoor(dt)
     this.blood.update(dt); this.impacts.update(dt); this.updateCrates(dt)
     this.security.sync(this.state)
@@ -1088,7 +1407,7 @@ export class MissionRuntime {
   }
 
   finishFrame() { this.playerHits.removeCamera(); this.lean.remove() }
-  dispose() { this.tutorial?.dispose();this.hammer?.dispose();this.coopPanel.dispose();this.coop.dispose();this.teammates.dispose();this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort?.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.crates.dispose();this.intro.clear();this.radios.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
+  dispose() { this.tutorial?.dispose();this.grenades.dispose();this.coopPanel.dispose();this.coop.dispose();this.teammates.dispose();this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort?.dispose();this.captives?.dispose();this.bossTags?.dispose();this.statusTags?.dispose();this.charges?.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.crates.dispose();this.intro.clear();this.radios.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.speedScale=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
 }
 
 const netSound = (event: SoundEvent): NetSound => ({ kind: event.kind, position: event.position?.toArray() as Vec3 | undefined, radius: event.radius, text: event.text,

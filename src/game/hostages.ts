@@ -118,6 +118,8 @@ export class HostageEscort {
     state.hostages.forEach((hostage, index) => {
       const actor = this.actors[index], motion = this.travel[index]
       if (!actor || !motion) return
+      // Shot dead: he lies where he fell.
+      if (actor.dead) { actor.animate(elapsed, false, false, false, false); return }
       const position = new THREE.Vector3(...hostage.position)
       let moving = false
       let moveSpeed = 0
@@ -200,6 +202,7 @@ export class HostageEscort {
     state.hostages.forEach((hostage, index) => {
       const actor = this.actors[index]
       if (!actor) return
+      if (actor.dead) { actor.animate(elapsed, false, false, false, false); return }
       actor.advanceRelease(elapsed, hostage.status === 'captive')
       const target = new THREE.Vector3(...hostage.position), before = actor.root.position.clone()
       if (before.distanceTo(target) > 4) actor.root.position.copy(target)

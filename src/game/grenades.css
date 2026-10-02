@@ -1,0 +1,15 @@
+/* The grenade belt over the magazine, the flashbang's whiteout and the white inside a smoke cloud. */
+.grenade-belt { position: absolute; right: 26px; bottom: 100px; display: flex; gap: 6px; align-items: flex-end; color: var(--ink); filter: drop-shadow(0 0 2px var(--paper, #fff)); }
+.grenade-belt kbd { align-self: center; min-width: 14px; padding: 1px 4px; border: 1px solid currentColor; border-bottom-width: 2px; border-radius: 3px; background: #fff; font: 600 10px/1 var(--notes, sans-serif); text-align: center; }
+.grenade-slot { position: relative; display: grid; justify-items: center; gap: 1px; opacity: .8; }
+.grenade-slot svg { width: 16px; height: 23px; fill: #fff; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
+.grenade-slot svg .band { fill: #bdbdbd; }
+.grenade-slot b { font: 700 11px/1 var(--notes, sans-serif); font-variant-numeric: tabular-nums; }
+.grenade-slot.is-empty { opacity: .3; }
+.grenade-slot.is-selected { opacity: 1; }
+.grenade-slot.is-selected::after { content: ''; position: absolute; left: -3px; right: -3px; bottom: -5px; border-bottom: 2px solid currentColor; }
+.grenade-slot.is-selected svg { stroke-width: 2; }
+body.mission-scoped .grenade-belt { color: #fff; }
+@media (max-width: 800px) { .grenade-belt { right: 16px; bottom: 92px; } }
+
+.flash-whiteout, .smoke-veil { position: fixed; inset: 0; z-index: 1; pointer-events: none; background: #fff; }

@@ -1,6 +1,6 @@
 import type { StationKind, Vec3 } from './types'
 import { CAMERA_TERMINALS, RESCUE_LAYOUT } from './rescue-layout'
-import { PLAYER_HEALTH } from './balance'
+import { HOSTAGE, PLAYER_HEALTH } from './balance'
 
 export const SIGNALS_COMPUTER_ID = CAMERA_TERMINALS.office
 
@@ -20,6 +20,12 @@ export type MissionState = {
   disabledRadios: string[]; destroyedRadios: string[]
   /** The level's goals that are done (see goals.ts), and the 'objective' stations used. */
   goalsDone: string[]; usedStations: string[]
+  /** Timed charges (MissionWorld.charges): when each was planted (mission time), and which have gone off. */
+  chargesPlanted: Record<string, number>; chargesExploded: string[]
+  /** Hostages' health by id (the compound's hostage-N, a level's captive ids); missing means unhurt. See hurtHostage. */
+  hostageHealth: Record<string, number>
+  /** Why the mission was lost when it was not the player dying (a hostage killed); shown on the failure page. */
+  failure: string | null
 }
 /** A fresh run. Only the compound has hostages; other levels pass none. */
 export const initialMission = (hostageSpawns: readonly Vec3[] = RESCUE_LAYOUT.hostageSpawns): MissionState => ({
@@ -28,7 +34,8 @@ export const initialMission = (hostageSpawns: readonly Vec3[] = RESCUE_LAYOUT.ho
   hostages: hostageSpawns.map((position, index) => ({ id: `hostage-${index + 1}`, status: 'captive', position: [...position], routeIndex: index < 2 ? 1 : 0 })),
   jeep: 'waiting', escapeProgress: 0, detentionFound: false, cellsReached: false,
   health: 100, lastDamageAt: 0, lastBulletAt: null, elapsed: 0, supplies: [], distractionUntil: 0, shots: 0, kills: 0, detections: 0,
-  brokenCrates: [], disabledRadios: [], destroyedRadios: [], goalsDone: [], usedStations: [],
+  brokenCrates: [], disabledRadios: [], destroyedRadios: [], goalsDone: [], usedStations: [], chargesPlanted: {}, chargesExploded: [],
+  hostageHealth: {}, failure: null,
 })
 /** A radio is out of action once it is switched off or destroyed. */
 export const radioOut = (state: MissionState, id: string) => state.disabledRadios.includes(id) || state.destroyedRadios.includes(id)
@@ -91,7 +98,7 @@ export function useStation(state: MissionState, kind: StationKind, id: string): 
 }
 
 export function missionObjective(state: MissionState) {
-  if (state.phase === 'dead') return 'Rescue interrupted. Retry the insertion checkpoint.'
+  if (state.phase === 'dead') return state.failure ? `${state.failure} Retry the checkpoint.` : 'Rescue interrupted. Retry the insertion checkpoint.'
   if (state.phase === 'complete') return 'Hostage extracted. Mission complete.'
   if (state.jeep === 'escaping') return 'Escape the compound'
   if (releasedCount(state) < state.hostages.length) {
@@ -138,7 +145,7 @@ export function shootMission(state: MissionState, amount: number) {
 /** Mission fields the co-op host owns. Health, death, supplies and shot count stay with each player. */
 export const SHARED_MISSION_KEYS = ['camerasOff', 'alarm', 'alarmElapsed', 'silencedElapsed', 'alarmPosition',
   'reservesDispatched', 'gateOpen', 'hostages', 'jeep', 'escapeProgress', 'detentionFound', 'cellsReached', 'elapsed', 'distractionUntil',
-  'kills', 'detections', 'brokenCrates', 'disabledRadios', 'destroyedRadios', 'goalsDone', 'usedStations'] as const satisfies readonly (keyof MissionState)[]
+  'kills', 'detections', 'brokenCrates', 'disabledRadios', 'destroyedRadios', 'goalsDone', 'usedStations', 'chargesPlanted', 'chargesExploded', 'hostageHealth', 'failure'] as const satisfies readonly (keyof MissionState)[]
 export type SharedMission = Pick<MissionState, typeof SHARED_MISSION_KEYS[number]>
 
 export function sharedMission(state: MissionState): SharedMission {
@@ -151,4 +158,24 @@ export function applySharedMission(state: MissionState, shared: SharedMission) {
   Object.assign(state, structuredClone(shared))
   state.detentionFound ||= found
   state.cellsReached ||= reached
+  // A hostage killed on the host's side loses the mission for everyone.
+  if (state.failure) state.phase = 'dead'
+}
+
+/** A hostage's health now (full until hurt). */
+export const hostageHealth = (state: MissionState, id: string) => state.hostageHealth?.[id] ?? HOSTAGE.health
+export const hostageAlive = (state: MissionState, id: string) => hostageHealth(state, id) > 0
+
+/**
+ * Hurt a hostage. Returns 'killed' when this blow kills him: the mission is then lost, with `name` in the reason.
+ * A dead hostage, or a mission already over, takes no more.
+ */
+export function hurtHostage(state: MissionState, id: string, amount: number, name = 'A hostage'): 'hurt' | 'killed' | null {
+  if (state.phase !== 'active' || amount <= 0 || !hostageAlive(state, id)) return null
+  state.hostageHealth ??= {}
+  state.hostageHealth[id] = Math.max(0, hostageHealth(state, id) - amount)
+  if (state.hostageHealth[id] > 0) return 'hurt'
+  state.phase = 'dead'
+  state.failure = `${name} was killed.`
+  return 'killed'
 }

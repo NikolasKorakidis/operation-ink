@@ -4,7 +4,6 @@ import { Player } from './player'
 import { loadStickman, setOutlineResolution } from './rig'
 import type { Ctx } from './registry'
 import { api as guns } from './weapons/guns'
-import type { FlyingHammer } from '../game/flying-hammer'
 
 /**
  * The characters the game builds, all on the one stickman skeleton, so every lab clip plays on each. The hostage
@@ -12,7 +11,7 @@ import type { FlyingHammer } from '../game/flying-hammer'
  */
 export const CHARACTERS = [
   { id: 'guard', label: 'Guard', note: 'The stickman soldier (also the hostage and teammates, in their colours)', file: 'stickman-guard' },
-  { id: 'sledge', label: 'The Sledge', note: 'Tutorial boss: a giant riot breacher with an AK, and a sledgehammer that flies on its own', file: 'the-sledge' },
+  { id: 'bulky', label: 'Bulky Boy', note: 'Tutorial boss: a giant armoured riot breacher with an AK', file: 'bulky-boy' },
 ] as const
 export type CharacterId = typeof CHARACTERS[number]['id']
 
@@ -29,9 +28,7 @@ export const COLORS = [
 type Actor = { root: THREE.Group; player: Player; gun?: THREE.Object3D; makeBoss?: () => void; dispose?: () => void; breakArmor?: (instant?: boolean) => void; armorLeft?: (left: number) => void
   dropPlates?: (dt: number) => void }
 /** What the lab is showing: which character in which colour, and the game actor behind it (none for the plain guard). */
-type Current = { id: CharacterId; color: number; actor: Actor | null; loading: boolean; armor: number; down?: boolean
-  /** The Sledge's flying hammer, and whether it should attack (`once`, or `again` and again). */
-  hammer?: FlyingHammer | null; attack?: 'once' | 'again' | null }
+type Current = { id: CharacterId; color: number; actor: Actor | null; loading: boolean; armor: number; down?: boolean }
 
 const current = (ctx: Ctx): Current => ctx.fx.character ??= { id: 'guard', color: 0x000000, actor: null, loading: false, armor: 1 }
 export const characterOf = (ctx: Ctx) => current(ctx).id
@@ -39,7 +36,7 @@ export const colorOf = (ctx: Ctx) => current(ctx).color
 
 /**
  * Show another character in place of the one on screen. Guns and blood are cleared, the new character plays
- * the idle loop in the chosen colour, and the camera reframes to its size (the Sledge stands twice as tall).
+ * the idle loop in the chosen colour, and the camera reframes to its size (Bulky Boy stands twice as tall).
  */
 export async function switchCharacter(ctx: Ctx, id: CharacterId, controls?: OrbitControls) {
   const state = current(ctx)
@@ -52,7 +49,7 @@ export async function switchCharacter(ctx: Ctx, id: CharacterId, controls?: Orbi
       root = rig.root
       player = new Player(root)
     } else {
-      // The game's own actor, so the Sledge's armour is exactly what the game shows.
+      // The game's own actor, so Bulky Boy's armour is exactly what the game shows.
       const { EnemyActor } = await import('../game/actors')
       // His AK is the lab's own (equipped below), so every lab gun tool works on him; the actor's copy stays hidden.
       const enemy = await EnemyActor.create('ak')
@@ -68,8 +65,6 @@ export async function switchCharacter(ctx: Ctx, id: CharacterId, controls?: Orbi
     ctx.player.stop(0)
     ctx.scene.remove(ctx.rig.root)
     state.actor?.dispose?.()
-    state.hammer?.dispose()
-    state.hammer = null
     const { fade } = ctx.player
     ctx.rig = rig
     ctx.player = player
@@ -78,13 +73,9 @@ export async function switchCharacter(ctx: Ctx, id: CharacterId, controls?: Orbi
     root.rotation.set(0, 0, 0)
     ctx.scene.add(root)
     player.play(ctx.clips.idle, { loop: true, fade: 0 })
-    Object.assign(state, { id, actor, armor: 1, down: false, attack: null })
-    if (id === 'sledge') {
-      // His AK in hand, and his hammer hovering at his side, as in the fight.
-      guns(ctx).equip('ak')
-      const { FlyingHammer } = await import('../game/flying-hammer')
-      state.hammer = new FlyingHammer(ctx.scene)
-    }
+    Object.assign(state, { id, actor, armor: 1, down: false })
+    // His AK in hand, as in the fight.
+    if (id === 'bulky') guns(ctx).equip('ak')
     setColor(ctx, state.color)
     if (controls) frame(ctx, controls)
   } finally { state.loading = false }
@@ -168,7 +159,7 @@ export function exportSheet(ctx: Ctx, renderer: THREE.WebGLRenderer) {
   draw.fillStyle = '#ffffff'
   draw.fillRect(0, 0, sheet.width, sheet.height)
   const camera = new THREE.PerspectiveCamera(24, width / height, 0.05, 100)
-  // Fit every view to the character's real extent, raised hammer included, turning about its middle.
+  // Fit every view to the character's real extent, turning about its middle.
   const box = new THREE.Box3(), part = new THREE.Box3()
   ctx.rig.root.updateMatrixWorld(true)
   ctx.rig.root.traverseVisible(object => {
@@ -212,35 +203,21 @@ export function exportSheet(ctx: Ctx, renderer: THREE.WebGLRenderer) {
   sheet.toBlob(blob => { if (blob) download(blob, `${fileName(ctx)}-model-sheet.png`) }, 'image/png')
 }
 
-/** The Sledge in the lab: his shot-off gear falls, and his hammer flies, at a stand-in target in front of him. */
+/** Bulky Boy in the lab: his shot-off gear falls and comes to rest on the ground. */
 export function update(dt: number, ctx: Ctx) {
   const state = ctx.fx.character as Current | undefined
-  if (!state?.actor || state.id !== 'sledge') return
+  if (!state?.actor || state.id !== 'bulky') return
   // Gear that has been shot off falls and comes to rest on the ground.
   state.actor.dropPlates?.(Math.min(dt, 0.05))
-  const hammer = state.hammer
-  if (!hammer) return
-  const before = hammer.state
-  // A player standing 10 m in front of him: the hammer only goes for them when asked to.
-  const feet = new THREE.Vector3(0, 0, 10 * state.actor.root.scale.y / 2)
-  hammer.update(dt, {
-    owner: { position: state.actor.root.position, awake: true, alive: !state.down },
-    target: state.attack ? { eye: feet.clone().setY(1.6), feet, alive: true } : null,
-    // The lab floor is the only thing to hit.
-    rayDistance: (origin, direction, max) => direction.y < -1e-6 ? Math.min(max, origin.y / -direction.y) : max,
-    visible: () => true,
-    reducedMotion: false,
-  })
-  if (before === 'windup' && hammer.state === 'flying' && state.attack === 'once') state.attack = null
 }
 
-const sledge = (ctx: Ctx) => {
+const bulky = (ctx: Ctx) => {
   const state = current(ctx)
-  return state.id === 'sledge' && state.actor ? state as Current & { actor: Actor } : null
+  return state.id === 'bulky' && state.actor ? state as Current & { actor: Actor } : null
 }
 /** Play one of his body clips; `once` returns to the idle afterwards. The lab's gun tools take his arms back after. */
 const play = (ctx: Ctx, clip: string, once = false) => {
-  const state = sledge(ctx)
+  const state = bulky(ctx)
   if (!state) return
   if (state.down) getUp(ctx)
   if (once) void ctx.player.play(ctx.clips[clip], { once: true }).then(done => { if (done) ctx.player.play(ctx.clips.idle, { loop: true }) })
@@ -248,26 +225,25 @@ const play = (ctx: Ctx, clip: string, once = false) => {
 }
 /** Run one of the lab's gun tools on him, his AK back in hand first. */
 const gun = (ctx: Ctx, use: (api: ReturnType<typeof guns>) => void) => {
-  const state = sledge(ctx)
+  const state = bulky(ctx)
   if (!state) return
   if (state.down) getUp(ctx)
   const api = guns(ctx)
   if (api.current?.userData.name !== 'ak') api.equip('ak')
   use(api)
 }
-/** Every plate back on, standing, AK in hand, and his hammer mended and back at his side. */
+/** Every plate back on, standing, AK in hand. */
 const getUp = (ctx: Ctx) => {
-  const state = sledge(ctx)
+  const state = bulky(ctx)
   if (!state) return
   ;(state.actor as unknown as { refitArmor(): void }).refitArmor()
-  Object.assign(state, { armor: 1, down: false, attack: null })
-  state.hammer?.restore(undefined, state.actor.root.position)
+  Object.assign(state, { armor: 1, down: false })
   guns(ctx).equip('ak')
 }
 
-/** The Sledge's moves, listed under his character in the lab panel. */
-export const SLEDGE_MOVES: { label: string; note: string; run: (ctx: Ctx) => void }[] = [
-  { label: 'Stand · AK lowered', note: 'His idle, AK at the low ready, the hammer circling at his side', run: ctx => gun(ctx, api => api.lower()) },
+/** Bulky Boy's moves, listed under his character in the lab panel. */
+export const BULKY_MOVES: { label: string; note: string; run: (ctx: Ctx) => void }[] = [
+  { label: 'Stand · AK lowered', note: 'His idle, AK at the low ready', run: ctx => gun(ctx, api => api.lower()) },
   { label: 'Aim the AK', note: 'Shouldered, as he does when he sees you', run: ctx => gun(ctx, api => api.aim()) },
   { label: 'Fire one shot', note: 'One round; in the fight his rounds hit harder than a guard\'s', run: ctx => gun(ctx, api => api.fire()) },
   { label: 'Full auto (on/off)', note: 'Bursts of AK fire', run: ctx => gun(ctx, api => api.toggleAuto()) },
@@ -275,26 +251,18 @@ export const SLEDGE_MOVES: { label: string; note: string; run: (ctx: Ctx) => voi
   { label: 'Walk', note: 'Patrolling', run: ctx => play(ctx, 'walk') },
   { label: 'Run · charge', note: 'How he closes in on you', run: ctx => play(ctx, 'run') },
   { label: 'Flinch', note: 'His stagger when a critical hit lands or his armour breaks', run: ctx => play(ctx, 'flinchBody', true) },
-  { label: 'Hammer · attack', note: 'It rises, aims, and flies end over end at a stand-in player 10 m in front of him; one hit takes half your health',
-    run: ctx => { const state = sledge(ctx); if (state?.hammer?.alive) { state.attack = 'once'; state.hammer.attackNow() } } },
-  { label: 'Hammer · attack again and again (on/off)', note: 'Keeps attacking, to study the flight', run: ctx => {
-    const state = sledge(ctx); if (!state?.hammer?.alive) return
-    state.attack = state.attack === 'again' ? null : 'again'
-    if (state.attack) state.hammer.attackNow()
-  } },
-  { label: 'Hammer · shoot it down', note: 'Its health gone: it drops out of the air', run: ctx => { sledge(ctx)?.hammer?.damage(Infinity) } },
   { label: 'Shoot armour off (next piece)', note: 'Pouches, then helmet, then vest, as in the fight', run: ctx => {
-    const state = sledge(ctx); if (!state || state.armor <= 0) return
+    const state = bulky(ctx); if (!state || state.armor <= 0) return
     state.armor = Math.max(0, state.armor - 1 / 3 - 1e-6)
     state.actor.armorLeft?.(state.armor)
     if (state.armor <= 0) state.actor.breakArmor?.()
   } },
-  { label: 'Fall · his hammer falls too', note: 'His death: the AK drops, and the hammer falls out of the air', run: ctx => {
-    const state = sledge(ctx); if (!state) return
+  { label: 'Fall', note: 'His death: the AK drops', run: ctx => {
+    const state = bulky(ctx); if (!state) return
     state.down = true
     guns(ctx).release()
     void ctx.player.play(ctx.clips.dieBody, { once: true, fade: 0.1 })
   } },
-  { label: 'Get back up · armour on', note: 'Reset him: every piece back on, AK in hand, the hammer mended', run: getUp },
+  { label: 'Get back up · armour on', note: 'Reset him: every piece back on, AK in hand', run: getUp },
 ]
 export const actions: { group: string; label: string; run: (ctx: Ctx) => void }[] = []

@@ -1,4 +1,25 @@
-/** Curated samples extracted by scripts/extract-igi-audio.py; provenance in sounds/igi/manifest.json. */
+/**
+ * Every recording lives in public/OST, in a folder for what it is (see public/OST/README.md). Sound ids keep their
+ * source names: `igi/<name>.wav` for the Project IGI bank (provenance in public/OST/igi-manifest.json), plain `<name>`
+ * for the older CC0 fallbacks. `servedFile` is the path a sound id is fetched from, under OST/.
+ */
+const FOLDERS: [RegExp, string][] = [
+  [/^(walk_gravel|walk_ladder|step_gravel)_/, 'sfx/footsteps'],
+  [/^(bul_|hit_world|hit_flesh)/, 'sfx/impacts'],
+  [/^(bodyfall|body_fall|door)/, 'sfx/foley'],
+  [/^alarm_/, 'sfx/alarms'],
+  [/^(detected|ai_hit)_/, 'voice/guards'],
+  [/^player_hit_/, 'voice/player'],
+  [/./, 'sfx/weapons'],
+]
+export function servedFile(id: string) {
+  const name = id.replace(/^igi\//, '').replace(/\.wav$/, '')
+  // IGI recordings ship as mono AAC; the looped alarm is FLAC because AAC tail padding would leave a gap at every loop.
+  const extension = name.startsWith('alarm_') ? 'flac' : 'm4a'
+  return `${FOLDERS.find(([pattern]) => pattern.test(name))![1]}/${name}.${extension}`
+}
+
+/** Curated samples extracted by scripts/extract-igi-audio.py. */
 const files = (...names: string[]) => names.map(name => `igi/${name}.wav`)
 const series = (prefix: string, count: number, padding = 1) =>
   files(...Array.from({ length: count }, (_, i) => `${prefix}${String(i + 1).padStart(padding, '0')}`))

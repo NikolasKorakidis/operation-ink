@@ -23,7 +23,9 @@ export type EnemySpec = { id: string; name: string; position: Vec3; patrol: Vec3
   /** The armoured brute: huge, slow, immune to instant kills. */
   boss?: boolean
   /** Starts in reserve and only a script wakes it (never the alarm). */
-  held?: boolean }
+  held?: boolean
+  /** The squad he belongs to: alerted together, they hunt you together. Without it, guards near each other form one (DETECTION.squadLink). */
+  squad?: string }
 /**
  * The mission on a level: where the player starts, who is there, what can be used, and what has to be done.
  * `level` is the level's id (levels/catalog.ts): saves are kept under it. `goals` are the mission's objectives
@@ -34,7 +36,20 @@ export type MissionWorld = { level: string; root: THREE.Group; stations: Station
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number }; tutorial?: boolean
   goals?: import('./goals').GoalSpec[]
   briefing?: Briefing
+  /** Prisoners held on the level, freed by using a station (game/captives.ts). */
+  captives?: CaptiveSpec[]
+  /** Timed charges: picked up at one station, planted at another, then they go off (game/charges.ts). */
+  charges?: ChargeSpec[]
   rescue?: { gate: THREE.Group; jeep: THREE.Group; cameras: { id: string; pivot: THREE.Group; lamp: THREE.Mesh }[]; cellDoors: THREE.Group[] } }
+/**
+ * A timed charge, like CS's bomb: taken at `pickup` (a collectible 'objective' station), planted at `plant` (holding
+ * still for `plantTime` seconds), then it ticks for `fuse` seconds and goes off at `blast.center`: lethal within
+ * `blast.lethal` m, hurting out to `blast.radius`. It hides the objects named in `destroys` and shows `wreck`.
+ */
+export type ChargeSpec = { id: string; name: string; pickup: string; plant: string; fuse: number; plantTime: number
+  blast: { center: Vec3; radius: number; lethal: number }; destroys: string[]; wreck?: string }
+/** A prisoner: where he sits (on a chair the level places there), which way he faces, and the station that frees him. */
+export type CaptiveSpec = { id: string; name?: string; position: Vec3; facing: number; station: string }
 /**
  * The mission's page in the menu. `premise` is the line under the title before play; `won` and `outro` the title
  * and line once the mission is complete; `tips` the route tips. `map` is the field map's SVG; without it one is drawn from the level's
@@ -51,6 +66,15 @@ export type WeaponSnapshot = { slots: (WeaponItem | null)[]; selected: number; p
 export type EnemyState = 'idle' | 'patrol' | 'guard' | 'suspicious' | 'investigate' | 'combat' | 'search' | 'dead' | 'reserve'
 export type EnemySnapshot = { id: string; position: Vec3; yaw: number; health: number; state: EnemyState; suspicion: number; lastKnown: Vec3 | null; timer: number; waypoint: number; [key: string]: unknown }
 export type AIContext = { scene: THREE.Scene; world: CollisionWorld; doors: THREE.Group[]; specs: EnemySpec[]; emit: EmitSound; damagePlayer: (amount: number, source: THREE.Vector3, hit?: import('./player-hit-reactions').PlayerBulletHit, playerId?: number) => void; dropWeapon: (item: WeaponItem) => void; onHit?: (hit: import('./hit-reactions').HitReaction) => void; onReact?: (reaction: EnemyReaction) => void; onFire?: (index: number, end: THREE.Vector3) => void; onSurfaceHit?: (point: THREE.Vector3, direction: THREE.Vector3, surface?: import('../player/collision').SurfaceHit, weapon?: WeaponName) => void
+  /**
+   * A hostage along a guard's round, within `reach` m: returns how far along he is, or null. With `damage` the round
+   * hits him (the runtime hurts him); without, it only asks, so the guard can hold fire rather than shoot through him.
+   */
+  bystander?: (from: THREE.Vector3, direction: THREE.Vector3, reach: number, damage?: number, weapon?: WeaponName) => number | null
+  /** The supply crates still standing, where a guard out of ammunition restocks: an id and the floor point by it. */
+  supplies?: () => { id: string; position: THREE.Vector3 }[]
+  /** The level's longest side (m): a sniper sees half of it (DETECTION.sniper). */
+  mapSpan?: number
   /** Critical hits are on (the tutorial): see CRITICAL_HITS. */
   criticals?: boolean
   /**

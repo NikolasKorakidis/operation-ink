@@ -114,7 +114,8 @@ export function mirrorReactionClip(clip: THREE.AnimationClip, rig: Rig) {
 }
 
 type Droplet = { position: Vec3; velocity: Vec3; radius: number; age: number }
-type Stain = { position: Vec3; size: number; angle: number; stamp: number; grow?: number }
+/** A blood mark: on the floor, or (with `normal`, the way the surface faces) up a wall. */
+type Stain = { position: Vec3; size: number; angle: number; stamp: number; grow?: number; normal?: Vec3 }
 type ShotgunBurst = { targetId: string; direction: Vec3; elapsed: number; next: number }
 /** A piece of an exploding head: a `pop` swells and fades where the head was; a `chunk` flies and falls. */
 type Gob = { kind: 'pop' | 'chunk'; position: Vec3; velocity: Vec3; radius: number; age: number; life: number; dark: boolean }
@@ -149,11 +150,13 @@ export class MissionBlood {
   private position = new THREE.Vector3()
   private velocity = new THREE.Vector3()
   private orientation = new THREE.Quaternion()
+  private wallTurn = new THREE.Quaternion()
+  private wallNormal = new THREE.Vector3()
   private scale = new THREE.Vector3()
   private disposed = false
   private regions = new Map<string, CollisionWorld>()
 
-  constructor(scene: THREE.Scene, private world: Pick<CollisionWorld, 'floor' | 'rayDistance'> & Partial<Pick<CollisionWorld, 'region'>>,
+  constructor(scene: THREE.Scene, private world: Pick<CollisionWorld, 'floor' | 'rayDistance'> & Partial<Pick<CollisionWorld, 'region' | 'raySurface'>>,
     private followBody?: (targetId: string) => THREE.Vector3 | null) {
     this.root.name = 'Mission blood effects'
     this.root.userData.noCollision = true
@@ -214,6 +217,8 @@ export class MissionBlood {
     const shotgun = hit.weapon === 'shotgun', knife = hit.weapon === 'knife'
     const forward = hit.direction.clone().normalize()
     this.spray(hit.point, forward, shotgun ? (hit.lethal ? 144 : 64) : knife ? (hit.lethal ? 150 : 80) : hit.lethal ? 72 : 48, hit.lethal, shotgun)
+    // Blood on the wall behind: the round carries it on to whatever is there.
+    this.wallSplash(hit.point, forward, hit.lethal, shotgun, knife)
     // A blade opens a wound rather than punching through: a second arc sprays out sideways.
     if (knife) this.spray(hit.point, forward.clone().cross(new THREE.Vector3(0, 1, 0)).normalize().addScaledVector(forward, 0.4).normalize(), hit.lethal ? 90 : 40, hit.lethal)
     const followsFall = shotgun && hit.lethal && hit.targetId && this.followBody
@@ -281,6 +286,52 @@ export class MissionBlood {
     }
   }
 
+  /**
+   * The splash a hit throws onto the wall behind the body, if one is within reach along the shot: a big mark where
+   * the round's line meets it (a kill's bigger, a shotgun's biggest) and smaller spatter round it.
+   */
+  private wallSplash(point: THREE.Vector3, forward: THREE.Vector3, lethal: boolean, shotgun: boolean, knife: boolean) {
+    const reach = knife ? 1.2 : shotgun ? 3.4 : lethal ? 2.8 : 2
+    const world = this.nearby(point)
+    const surface = world.raySurface?.(point, forward, reach)
+    if (!surface || Math.abs(surface.normal.y) > 0.7) return
+    // Nearer walls take more of it.
+    const near = 1 - surface.distance / reach * 0.55
+    const main = (shotgun ? 0.42 : lethal ? 0.34 : 0.18) * near
+    this.wallStain(surface.point, surface.normal, main, Math.floor(this.random() * 16))
+    const normal = surface.normal.clone().normalize()
+    const side = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(side, normal)
+    for (let i = 0, count = shotgun ? 9 : lethal ? 6 : 3; i < count; i++) {
+      const angle = this.random() * Math.PI * 2, spread = (0.18 + this.random() * 0.55) * (shotgun ? 1.4 : 1)
+      // Spatter runs out from the main mark, a little more downward than up.
+      const offset = side.clone().multiplyScalar(Math.cos(angle) * spread).addScaledVector(up, Math.sin(angle) * spread * (Math.sin(angle) > 0 ? 0.7 : 1))
+      this.wallStain(surface.point.clone().add(offset), normal, main * (0.18 + this.random() * 0.3), 24 + Math.floor(this.random() * 8))
+    }
+  }
+
+  /**
+   * A mark on a wall at `point`, facing `normal`. It is kept on the wall: a mark that would hang past the wall's edge
+   * (a doorway, a corner) is made smaller until it fits, and one with no wall under it is not made.
+   */
+  private wallStain(point: THREE.Vector3, normal: THREE.Vector3, size: number, stamp: number) {
+    const world = this.nearby(point)
+    const n = normal.clone().normalize()
+    const onWall = (at: THREE.Vector3) => world.rayDistance(at.clone().addScaledVector(n, 0.06), n.clone().negate(), 0.12) < 0.12
+    if (!onWall(point)) return
+    const side = new THREE.Vector3().crossVectors(n, Math.abs(n.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize()
+    const up = new THREE.Vector3().crossVectors(side, n)
+    let limit = size
+    for (const direction of [side, side.clone().negate(), up, up.clone().negate()]) {
+      while (limit >= 0.018 && !onWall(point.clone().addScaledVector(direction, limit * 1.8))) limit *= 0.6
+    }
+    if (limit < 0.018) return
+    const lift = 0.004 + (this.stains.length % 8) * 0.0002
+    this.stains.push({ position: point.clone().addScaledVector(n, lift).toArray() as Vec3, size: limit, angle: this.random() * Math.PI * 2, stamp,
+      normal: n.toArray() as Vec3 })
+    if (this.stains.length > this.stainLimit) this.reindexStains(this.stains.slice(-this.stainLimit))
+    else this.stainsDirtyFrom = Math.min(this.stainsDirtyFrom, this.stains.length - 1)
+  }
+
   private stain(point: THREE.Vector3, size: number, stamp: number, grow?: number) {
     const world = this.nearby(point)
     const floor = world.floor(point, 0.025, Math.max(0.5, point.y + 5))
@@ -322,6 +373,8 @@ export class MissionBlood {
     const mark = this.stains[index]
     this.position.fromArray(mark.position)
     this.orientation.setFromAxisAngle(STAIN_UP, mark.angle)
+    // A wall mark: the flat stamp turned to face out of the wall, then spun about that.
+    if (mark.normal) this.orientation.premultiply(this.wallTurn.setFromUnitVectors(STAIN_UP, this.wallNormal.fromArray(mark.normal)))
     this.scale.set(mark.size, 1, mark.size * 1.15)
     this.marks.setMatrixAt(index, this.matrix.compose(this.position, this.orientation, this.scale))
     this.marks.setColorAt(index, this.stainColor)
@@ -372,9 +425,14 @@ export class MissionBlood {
       const hit = distance > 0 ? world.rayDistance(before.clone().addScaledVector(travel.normalize(), -padding), travel, distance + padding) - padding : distance
       drop.age += delta
       if (hit < distance) {
-        const impact = before.addScaledVector(travel, Math.max(0, hit))
+        const impact = before.clone().addScaledVector(travel, Math.max(0, hit))
         const floor = world.floor(impact, 0.04, 0.12)
         if (Number.isFinite(floor) && Math.abs(impact.y - floor) < 0.1) this.stain(impact, drop.radius * 2.1, 24 + Math.floor(this.random() * 8))
+        else {
+          // It struck a wall: it splats there.
+          const surface = world.raySurface?.(before.clone().addScaledVector(travel, -padding), travel, distance + padding * 2)
+          if (surface) this.wallStain(surface.point, surface.normal, drop.radius * 2.4, 24 + Math.floor(this.random() * 8))
+        }
         continue
       }
       const floor = world.floor(this.position, Math.max(0.05, -this.velocity.y * delta + 0.03), 0.12)

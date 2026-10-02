@@ -5,6 +5,12 @@ import { GAIT_SPEED } from '../lab/gait'
 // Faster mission running, with stride/cadence adaptation shared with the lab.
 export const ENEMY_RUN_SPEED = GAIT_SPEED.run * 1.5
 export const HOSTAGE_RUN_SPEED = 2.6
+/**
+ * Hostages (the compound's and every level's prisoners) can be hurt: by guards' stray rounds, by your own bullets,
+ * knife and grenades, and by charges. `health` is what each starts with; a head hit counts `head` times. If one dies
+ * the mission is lost. Guards hold fire rather than shoot through a hostage at you; their misses can still hit one.
+ */
+export const HOSTAGE = { health: 100, head: 3 } as const
 
 /** Ordinary jumps and drops up to about 2.3 m are safe; taller falls scale with impact energy. */
 export function fallDamage(landingSpeed: number) {
@@ -30,8 +36,27 @@ export const AIM_STEADINESS = {
   aimed: 0.6,
 } as const
 
-/** Guards never hear walking (or sneaking) feet; sprinting carries only this far, in metres. */
-export const SPRINT_FOOTSTEP_RADIUS = 6
+/**
+ * How fast you move with each thing in your hands, CS-style: the knife is fastest, then each weapon is slower the
+ * bigger it is, down to the sniper rifle at about half. Walking and sprinting both scale; you can sprint while aiming,
+ * at `aimed` of that.
+ */
+export const MOVE_SPEED = {
+  weapon: { knife: 1, grenade: 0.98, pistol: 0.95, silenced: 0.95, smg: 0.9, shotgun: 0.8, ak: 0.75, sniper: 0.55 } as Record<WeaponName | 'grenade', number>,
+  aimed: 0.85,
+} as const
+
+/** Aiming stops a sprint: with right click held (or the sniper's scope up) you walk at most. */
+export const canSprint = (aiming: boolean) => !aiming
+/** Weapons whose aim is a toggle, like a sniper scope: right click raises it and leaves it up until you click again. */
+export const TOGGLE_AIM: readonly string[] = ['sniper']
+export const aimToggles = (weapon?: string | null) => !!weapon && TOGGLE_AIM.includes(weapon)
+
+/**
+ * Guards never hear walking (or sneaking) feet; sprinting carries this far in the open, in metres (through a wall,
+ * about 0.42 of it: see ai.ts audible). A guard who hears running comes at it fast, ready to fight.
+ */
+export const SPRINT_FOOTSTEP_RADIUS = 16
 
 export const PLAYER_HEALTH = { max: 100, bulletHits: 4, bulletImmunity: 1, regenDelay: 5, regenPerSecond: 40 } as const
 export const PLAYER_BULLET_DAMAGE = PLAYER_HEALTH.max / PLAYER_HEALTH.bulletHits
@@ -71,6 +96,14 @@ export const ENEMY_WEAPONS = {
   sniper: { magazine: 5, reload: 2.9, damage: 32, burst: 1, gap: 1.35, pause: [2.0, 2.6] },
 } as const
 
+/**
+ * Guards' ammunition: a full magazine and `spare` more on them. Out of everything, a guard runs to the nearest supply
+ * crate still standing and restocks there (so blowing the crates up starves them); with none left he takes cover and
+ * stops shooting. You can restock at the crates too: each gun's spare ammunition back up to `player` magazines.
+ * A sniper rifle taken from a guard holds one magazine and nothing more.
+ */
+export const AMMO = { spare: 2, player: 3, supplyReach: 1.3 } as const
+
 /** Chance a player's head shot blows the guard's head apart (always lethal). Other weapons never do. */
 export const HEAD_BURST_CHANCE: Partial<Record<WeaponName, number>> = { pistol: 0.1, silenced: 0.1, smg: 0.1, ak: 0.25, sniper: 1 }
 
@@ -83,32 +116,16 @@ export const criticalChance = (weapon: WeaponName | undefined, zone: HitZone) =>
   Math.min(1, (CRITICAL_HITS.chance[weapon ?? 'ak'] ?? 0) * (zone === 'head' ? CRITICAL_HITS.headBonus : 1))
 
 /**
- * The Sledge: a giant black riot breacher in an ink-grey helmet, plate vest and pouches, who fights with an AK like
+ * Bulky Boy: a giant black riot breacher in an ink-grey helmet, plate vest and pouches, who fights with an AK like
  * his guards (`damage` times their rounds). His gear is his armour: while it holds it soaks body hits from any side
  * and only `bleed` of the damage reaches him; the pouches are shot off at two thirds, the helmet at one third, the
  * vest when it breaks. Head shots go straight through. Sniper rounds hit him for `sniper` times their damage instead
  * of killing outright. He is a better shot than his guards: `accuracy` is added to their hit chance, and he takes
  * `aimDelay` of their aiming time before his first round.
  */
-export const BOSS_RULES = { health: 1150, armor: 800, bleed: 0.3, sniper: 2.2, speed: 0.8, scale: 2.05, damage: 1.6, accuracy: 0.12, aimDelay: 0.5 } as const
-
-/**
- * The Sledge's flying sledgehammer, an enemy of its own (see flying-hammer.ts). It circles beside him, and every
- * `cooldown` seconds (plus up to `cooldownJitter`) rises for `windUp` seconds and flings itself at a player within
- * `range` it can see, spinning, at `speed` m/s. Passing within `reach` of the body (measured from its middle) takes half the player's health; a
- * miss into a wall sticks it there for `stuck` seconds. It has its own `health`, and falls when shot down or when he
- * dies. Its model is 1 m long; `scale` makes it a giant's hammer.
- */
-export const HAMMER_RULES = {
-  health: 350,
-  scale: 2.3,
-  orbit: { radius: 2.1, height: 3.6, rate: 0.7, bob: 0.25 },
-  range: 42, cooldown: 4.2, cooldownJitter: 1.6, firstAttack: 2.5,
-  windUp: 0.85, speed: 21, flight: 2.4, spin: 13, returnSpeed: 11,
-  stuck: 1.3,
-  reach: 1.1,
-  damage: PLAYER_HEALTH.max / 2,
-} as const
+export const BOSS_RULES = { health: 1150, armor: 800, bleed: 0.3, sniper: 2.2, speed: 0.9, scale: 2.05, damage: 1.6, accuracy: 0.12, aimDelay: 0.5,
+  /** He hears this many times further than a guard, and in a fight he walks at you until he is this close (m), firing as he comes. */
+  hearing: 2.2, closeIn: 7 } as const
 
 /** Player sniper rounds are lethal on any confirmed hit (the boss excepted). */
 export function hitDamage(weapon: WeaponName | undefined, zone: HitZone, baseDamage: number, boss = false) {
@@ -118,6 +135,27 @@ export function hitDamage(weapon: WeaponName | undefined, zone: HitZone, baseDam
 }
 
 /** Responsive combat: reaction runs alongside weapon presentation, never after it. */
+/**
+ * How guards spot you. A soldier sees `soldier` m while calm and `engaged` m once he has seen you; a sniper sees
+ * `sniper` of the level's longest side (no less than `sniperMin`, no more than `sniperMax`). A guard who spots you is
+ * not sure at first: a yellow ? over him fills for `notice` seconds while he keeps you in view, then he is alerted
+ * (a red !) and fights. Inside `pointBlank` m, or already hunting you (suspicion `hunting` and up: he heard you run,
+ * was shot at), he is alerted at once and fires almost straight away. Out of view, the ? drains `forget` times as
+ * fast as it filled. Guards within `squadLink` m of each other (and `squadRise` m in height) form a squad, unless the
+ * level names squads (EnemySpec.squad): one alerted, the whole squad is, and they share where you are.
+ */
+export const DETECTION = {
+  soldier: 45, engaged: 70, sniper: 0.5, sniperMin: 110, sniperMax: 220,
+  notice: 3, pointBlank: 8, hunting: 0.7, forget: 0.5, quickShot: 0.3,
+  /** How fast the ? fills against someone low: crouched 20% slower, prone half as fast. */
+  stance: { crouch: 0.8, prone: 0.5 },
+  squadLink: 28, squadRise: 7,
+  /** How close each kind of fighter pushes in before he plants himself: shotguns rush right in, SMGs to mid range. */
+  closeIn: { shotgun: 5, smg: 9, other: 9 },
+  /** How far out riflemen take their flanking positions (m from where you were), and how far round to the side (degrees). */
+  flank: { distance: [16, 26] as const, angle: 75 },
+} as const
+
 export const ENEMY_COMBAT = {
   passiveRange: 20,
   sniperPassiveRange: 28,
@@ -161,4 +199,48 @@ export function startingLoadout(): (WeaponItem | null)[] {
     { id: 'player-silenced', name: 'silenced', magazine: 12, reserve: 36 },
     null,
   ]
+}
+
+/**
+ * Counter-Strike grenades. You carry at most one frag, two flashbangs and one smoke (`carry`). Hold left click to
+ * pull the pin and let go for a full overhand throw; right click lobs it underhand; both together throw medium.
+ * Nothing cooks: a frag or flash goes off `fuse` seconds after it leaves the hand, a smoke once it comes to rest.
+ * Grenades bounce off walls (`bounce` keeps that much of the speed into the wall, `friction` along it) and roll to a stop.
+ * - frag: full `damage` within `full` metres, falling off to nothing at `radius`; walls shelter you. It hurts you too.
+ * - flash: anyone with a clear line to it is blinded. Facing it from within `near` metres blinds for `blind`
+ *   seconds, then the white fades over `fade`; looking away or standing far off cuts both down, to nothing past `range`.
+ * - smoke: a cloud `radius` metres across its widest, centred `rise` above where it lies, that grows for `grow`
+ *   seconds, hides everything inside and behind it for `last` seconds, and thins away over `fade`.
+ */
+export type GrenadeKind = 'frag' | 'flash' | 'smoke'
+export const GRENADE_RULES = {
+  order: ['frag', 'flash', 'smoke'] as const,
+  carry: { frag: 1, flash: 2, smoke: 1 } as Record<GrenadeKind, number>,
+  label: { frag: 'Frag grenade', flash: 'Flashbang', smoke: 'Smoke grenade' } as Record<GrenadeKind, string>,
+  throw: { full: 19, medium: 13, lob: 7.5, inherit: 0.6, gravity: 12, radius: 0.06, bounce: 0.42, friction: 0.72, roll: 5.5 },
+  /** Seconds: the pin coming out, the throwing swing (the grenade leaves at `release`), and drawing the next one. */
+  timing: { draw: 0.4, pin: 0.28, swing: 0.34, release: 0.11, next: 0.45 },
+  fuse: { frag: 1.6, flash: 1.6, smoke: 3.5 } as Record<GrenadeKind, number>,
+  frag: { radius: 10.5, full: 2.5, damage: 170, hearing: 90 },
+  flash: { near: 8, range: 32, blind: 4.2, fade: 2.6, hearing: 55 },
+  smoke: { settle: 0.35, radius: 3.9, rise: 1.6, grow: 1.4, last: 18, fade: 2.5, hearing: 14 },
+} as const
+
+/** Frag damage at `distance` metres from the blast, before walls. */
+export function fragDamage(distance: number) {
+  const { radius, full, damage } = GRENADE_RULES.frag
+  if (!(distance < radius)) return 0
+  return damage * Math.min(1, 1 - (distance - full) / (radius - full))
+}
+
+/**
+ * How badly a flashbang blinds someone, from 0 (not at all) to 1 (full): `angle` is between where they look and the
+ * flash (radians), `distance` how far it is. Seconds blind and seconds of fade are this times `blind` and `fade`.
+ */
+export function flashStrength(angle: number, distance: number) {
+  const { near, range } = GRENADE_RULES.flash
+  if (!(distance < range)) return 0
+  const facing = angle <= 0.95 ? 1 : angle >= 2.6 ? 0.1 : 1 - 0.9 * (angle - 0.95) / (2.6 - 0.95)
+  const far = distance <= near ? 1 : 1 - 0.75 * (distance - near) / (range - near)
+  return facing * far
 }

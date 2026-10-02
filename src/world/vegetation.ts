@@ -5,15 +5,15 @@ import { penRandom, penSeed } from '../render/ballpoint'
 export const treeSeed = (x: number, z: number) => penSeed(`pine:${x}:${z}`)
 export const treeRadius = (height: number) => height * .30
 
-/** The original three-tier pine, with small, repeatable variations in its proportions. */
-export function drawPine(g: Draft, x: number, z: number, maxHeight: number, seed: number) {
+/** The original three-tier pine, with small, repeatable variations in its proportions. `base` is the ground height. */
+export function drawPine(g: Draft, x: number, z: number, maxHeight: number, seed: number, base = 0) {
   const random = penRandom(seed)
   const range = (low: number, high: number) => low + random() * (high - low)
   const height = maxHeight * range(.88, 1)
   const width = range(.78, 1)
   const leanX = range(-.018, .018), leanZ = range(-.018, .018)
   const point = (px: number, py: number, pz: number): Point =>
-    [x + height * (px + leanX * py), height * py, z + height * (pz + leanZ * py)]
+    [x + height * (px + leanX * py), base + height * py, z + height * (pz + leanZ * py)]
 
   const trunkRadius = range(.015, .021)
   const trunk = new THREE.CylinderGeometry(trunkRadius * .68, trunkRadius, .43, 20)
@@ -23,7 +23,7 @@ export function drawPine(g: Draft, x: number, z: number, maxHeight: number, seed
   }
   trunk.computeVertexNormals()
   g.solid(trunk, [0, 0, 0], 'paper', false, [0, 0, 0], true)
-  g.ring(trunkRadius * height, 0, x, z, 'landscape', 24)
+  g.ring(trunkRadius * height, base, x, z, 'landscape', 24)
 
   for (let tier = 0; tier < 3; tier++) {
     const radius = (.255 - tier * .052) * width * range(.93, 1.04)
@@ -68,6 +68,43 @@ export function drawPine(g: Draft, x: number, z: number, maxHeight: number, seed
       g.line([tip, end], 'landscape')
     }
     g.line(Array.from({ length: 40 }, (_, i) => surface(i / 40 * Math.PI * 2, 1, .001)), 'landscape', true)
+  }
+  return height
+}
+
+/**
+ * A broadleaf tree, as the town plan draws them: a short trunk and a round, lumpy crown outlined in pen with a few
+ * loose scallops for the leaves. `base` is the ground height. Returns the tree's height.
+ */
+export function drawOak(g: Draft, x: number, z: number, maxHeight: number, seed: number, base = 0) {
+  const random = penRandom(seed)
+  const range = (low: number, high: number) => low + random() * (high - low)
+  const height = maxHeight * range(.85, 1)
+  const trunkTop = height * range(.36, .44), radius = height * range(.3, .36)
+  const centre = trunkTop + radius * .78
+  const trunk = new THREE.CylinderGeometry(height * .028, height * .042, trunkTop + radius * .3, 16)
+  g.solid(trunk, [x, base + (trunkTop + radius * .3) / 2, z], 'paper', false, [0, 0, 0], true)
+  g.ring(height * .042, base, x, z, 'landscape', 20)
+  // The crown: a sphere pushed in and out a little so it reads as foliage, not a ball.
+  const crown = new THREE.IcosahedronGeometry(1, 3)
+  const vertices = crown.getAttribute('position')
+  const phase = range(0, Math.PI * 2), squash = range(.82, .95)
+  for (let i = 0; i < vertices.count; i++) {
+    const vx = vertices.getX(i), vy = vertices.getY(i), vz = vertices.getZ(i)
+    const angle = Math.atan2(vz, vx)
+    const lump = 1 + .07 * Math.sin(angle * 5 + phase + vy * 3) + .04 * Math.sin(vy * 7 - phase)
+    vertices.setXYZ(i, x + vx * radius * lump, base + centre + vy * radius * squash * lump, z + vz * radius * lump)
+  }
+  crown.computeVertexNormals()
+  g.solid(crown, [0, 0, 0], 'green', false, [0, 0, 0], true)
+  // Leaf scallops: short curved strokes around the crown's waist and upper half.
+  for (let ring = 0; ring < 3; ring++) {
+    const y = base + centre + radius * squash * [-.15, .25, .6][ring], r = radius * [1.01, .97, .78][ring]
+    const count = 9 - ring * 2
+    for (let k = 0; k < count; k++) {
+      const a = k / count * Math.PI * 2 + phase + ring
+      g.line([0, .1, .2].map(t => [x + Math.cos(a + t) * r, y - Math.sin(t * 10) * .12, z + Math.sin(a + t) * r] as Point), 'landscape')
+    }
   }
   return height
 }

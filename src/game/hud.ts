@@ -52,7 +52,7 @@ export class MissionHUD {
   private objectiveSource: ObjectiveSource = { list: () => [], hint: () => '' }
   reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
 
-  constructor(world: MissionWorld, callbacks: { retry: () => void; restart: () => void; volume: (value: number) => void; mute: (value: boolean) => void; load?: (level: string) => void; leaveWarning?: () => string | null }) {
+  constructor(world: MissionWorld, callbacks: ConstructorParameters<typeof MissionMenu>[3] & { volume: (value: number) => void; mute: (value: boolean) => void }) {
     document.body.dataset.mission = 'true'
     document.body.dataset.reducedMotion = String(this.reducedMotion)
     document.title = 'Stickman: Ghost Ink'
@@ -65,6 +65,7 @@ export class MissionHUD {
     $('#world').setAttribute('aria-label', 'Stickman: Ghost Ink tactical mission. Mouse to look, WASD move, left click fire, right click toggle aim, F interact, R reload, M field map, Escape pause.')
     const briefing = world.briefing ?? { title: 'The mission', premise: '', won: 'Mission complete.', outro: 'You made it out.', tips: [] }
     this.menu = new MissionMenu(this.start, { ...briefing, map: briefing.map ?? fieldMap(world.root, world) }, this.reducedMotion, callbacks)
+    this.menu.setLevel(world.level)
     this.mapDot = document.querySelector('#field-player')!
     this.mapProjection = readProjection(this.mapDot.closest('svg'))
     this.root.id = 'mission-hud'
@@ -135,7 +136,9 @@ export class MissionHUD {
   ready() { this.menu.ready() }
   showMap() { this.menu.showMap() }
   showCoop() { this.menu.showCoop() }
-  showLoad() { this.menu.showLoad() }
+  /** How this level was entered, and a campaign mission won (see MissionMenu). */
+  setRun(kind: import('./saves').RunKind | null) { this.menu.setRun(kind) }
+  setComplete(next: string | null) { this.menu.setComplete(next) }
   /** Aim drift in normalized screen coordinates (as from Vector3.project), applied to the crosshair and scope reticle. */
   setAimOffset(ndcX: number, ndcY: number) {
     const x = ndcX * window.innerWidth / 2, y = -ndcY * window.innerHeight / 2

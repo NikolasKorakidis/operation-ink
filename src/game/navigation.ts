@@ -189,7 +189,9 @@ export class EnemyNavigation {
     from = from.clone(); to = to.clone()
     if (yield* this.segmentJob(from, to)) return [to.clone()]
     const cell = this.cellSize
-    const level = Math.round(from.y * 2) / 2
+    // The floor this search is on, to the nearest 10 cm: every cell's floor must be within 0.38 m of it. (Half-metre
+    // steps lost the ground beside a 0.28 m building plinth or a doorstep: 0.3 rounded up to 0.5.)
+    const level = Math.round(from.y * 10) / 10
     const sample = (x: number, z: number) => {
       const id = `${x},${z},${level}`
       if (!this.samples.has(id)) this.samples.set(id, this.floor(new THREE.Vector3(x * cell, level, z * cell)))

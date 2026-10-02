@@ -17,6 +17,10 @@ export class HostageActor {
   private mode = ''
   private standingFor = 0
   private boardingFor = 0
+  /** Seconds left of a flinch from a hit; while it plays, nothing else does. */
+  private reacting = 0
+  /** Shot dead: he has fallen and stays down. */
+  dead = false
 
   private constructor(readonly rig: Rig, private clips: Record<string, THREE.AnimationClip>) {
     this.root = rig.root
@@ -39,8 +43,8 @@ export class HostageActor {
 
   static async create() {
     const rig = await loadStickman()
-    const [idle, motion, behavior] = await Promise.all([
-      import('../lab/clips/idle'), import('../lab/clips/locomotion'), import('../lab/clips/behavior'),
+    const [idle, motion, behavior, damage] = await Promise.all([
+      import('../lab/clips/idle'), import('../lab/clips/locomotion'), import('../lab/clips/behavior'), import('../lab/clips/damage'),
     ])
     const seated: Pose = {
       ...idle.hang, hips: [0, 0, 0], spine: [5, 0, 0], chest: [3, 0, 0], head: [12, 0, 0],
@@ -75,7 +79,10 @@ export class HostageActor {
     const board = makeClip('hostage-sit-down', [...standKeys].reverse().map(key => ({
       ...key, t: (STAND_UP_SECONDS - key.t) / STAND_UP_SECONDS * BOARD_SECONDS,
     })))
-    return new HostageActor(rig, { ...idle.clips, ...motion.clips, cower: behavior.clips.cowerHold, seated: chairIdle, stand, board })
+    return new HostageActor(rig, { ...idle.clips, ...motion.clips, cower: behavior.clips.cowerHold, seated: chairIdle, stand, board,
+      slumped: makeClip('hostage-slumped', [{ t: 0, pose: seated, root: [0, -0.371, -0.371] },
+        { t: 0.5, pose: { ...seated, spine: [26, 0, 6], chest: [18, 0, 4], head: [48, 0, 18], 'upper_arm.L': [-82, -6, 0], 'upper_arm.R': [-82, 6, 0] }, root: [0, -0.39, -0.371] }]),
+      flinch: damage.clips.flinchBody, flinchHead: damage.clips.flinchHead, die: damage.clips.dieBody, dieHead: damage.clips.dieHead })
   }
 
   get canWalk() { return this.standingFor >= STAND_UP_SECONDS }
@@ -84,7 +91,25 @@ export class HostageActor {
     this.standingFor = captive ? 0 : Math.min(STAND_UP_SECONDS, this.standingFor + dt)
   }
 
+  /** Hit but alive: a flinch (from the head, if that is where it struck), then back to what he was doing. */
+  hurt(head = false) {
+    if (this.dead) return
+    const clip = this.clips[head ? 'flinchHead' : 'flinch']
+    this.reacting = clip.duration
+    this.mode = 'flinch'
+    void this.player.play(clip, { fade: 0.05, once: true })
+  }
+
+  /** Killed: he falls and stays down; tied to his chair, he slumps in it. */
+  die(head = false, seated = false) {
+    if (this.dead) return
+    this.dead = true
+    this.mode = 'dead'
+    void this.player.play(this.clips[seated ? 'slumped' : head ? 'dieHead' : 'die'], { fade: 0.08, once: true })
+  }
+
   restore(captive: boolean, loaded = false) {
+    this.dead = false; this.reacting = 0
     this.player.stop(0)
     this.rig.resetPose()
     this.mode = ''
@@ -93,6 +118,7 @@ export class HostageActor {
   }
 
   animate(dt: number, moving: boolean, cowering: boolean, seated: boolean, captive: boolean, speed = HOSTAGE_RUN_SPEED) {
+    if (this.dead || (this.reacting -= dt) > 0) { this.player.update(dt); return }
     if (seated) this.boardingFor = Math.min(BOARD_SECONDS, this.boardingFor + dt)
     // Keep the shared running stride in sync with actual escort travel.
     const mode = captive ? 'seated' : seated ? this.boardingFor < BOARD_SECONDS ? 'board' : 'seated' : !this.canWalk ? 'stand' : cowering ? 'cower' : moving ? 'run' : 'idle'

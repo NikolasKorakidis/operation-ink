@@ -12,7 +12,7 @@ Open the local Vite URL and select **Begin mission**. Controls are in the game m
 - `npm run build` — type-check and build for production.
 - `npm test` — run all logic checks.
 
-[MIT](LICENSE) covers the source code. Audio has separate terms; Project I.G.I. recordings are not licensed for reuse here. See [sound credits](public/sounds/CREDITS.md).
+[MIT](LICENSE) covers the source code. Audio has separate terms; Project I.G.I. recordings are not licensed for reuse here. See [sound credits](public/OST/CREDITS.md).
 
 ## Working with coding agents
 
