@@ -95,6 +95,14 @@ for (const info of LEVEL_CATALOG) {
     assert(within(v(captive.position)), label(`captive ${captive.id} is inside the bounds`))
   }
 
+  // Charges: picked up and planted at 'objective' stations that exist, going off inside the play area.
+  for (const charge of world.charges ?? []) {
+    for (const id of [charge.pickup, charge.plant]) assert(world.stations.some(station => station.id === id && station.kind === 'objective'), label(`charge ${charge.id} uses an 'objective' station ${id}`))
+    assert(within(v(charge.blast.center)) && charge.blast.lethal < charge.blast.radius, label(`charge ${charge.id} goes off inside the play area`))
+    for (const name of charge.destroys) assert(scene.getObjectByName(name), label(`charge ${charge.id} destroys ${name}, which exists`))
+    if (charge.wreck) assert(scene.getObjectByName(charge.wreck), label(`charge ${charge.id}'s wreck exists`))
+  }
+
   // Goals: real targets, sensible order, and reachable areas.
   const goals = world.goals ?? []
   const goalIds = new Set(goals.map(goal => goal.id))
@@ -103,6 +111,8 @@ for (const info of LEVEL_CATALOG) {
   scene.traverse(object => { if (object.userData.questCrate) crates++; if (object.userData.questItem === 'radio') radios++ })
   for (const goal of goals) {
     for (const id of goal.after ?? []) assert(goalIds.has(id), label(`goal ${goal.id} comes after a goal that exists (${id})`))
+    if (goal.kind === 'collect') for (const id of goal.stations) assert(world.stations.some(station => station.id === id && station.kind === 'objective'), label(`goal ${goal.id} collects at an 'objective' station ${id}`))
+    if (goal.kind === 'detonate') assert(world.charges?.some(charge => charge.id === goal.charge), label(`goal ${goal.id} sets off a charge that exists (${goal.charge})`))
     if (goal.kind === 'interact') assert(world.stations.some(station => station.id === goal.station && station.kind === 'objective'), label(`goal ${goal.id} uses an 'objective' station ${goal.station}`))
     if (goal.kind === 'eliminate' && goal.enemies !== 'all') for (const id of goal.enemies) assert(ids.has(id), label(`goal ${goal.id} targets an enemy that exists (${id})`))
     if (goal.kind === 'destroy') assert((goal.items === 'crates' ? crates : radios) > 0, label(`goal ${goal.id} has ${goal.items} to destroy`))
@@ -125,6 +135,7 @@ for (const info of LEVEL_CATALOG) {
     const sense = (players: THREE.Vector3[]): GoalSense => ({ players, enemies, totals: { crates, radios }, radiosOut: radios })
     state.brokenCrates = Array.from({ length: crates }, (_, i) => `crate-${i}`)
     state.usedStations = world.stations.map(station => station.id)
+    state.chargesExploded = (world.charges ?? []).map(charge => charge.id)
     updateGoals(state, goals, sense(targets.map(target => target.point)))
     assert(goalsComplete(state, goals), label(`doing everything wins the mission (done: ${state.goalsDone.join(', ')})`))
     assert(goalObjectives(state, goals, sense([])).length === goals.length && goalHint(state, goals), label('the goals list in the objectives panel'))

@@ -12,8 +12,9 @@ export type Point = [number, number, number]
  * (olive and brown radios, wooden crates).
  */
 export type Fill = 'paper' | 'roof' | 'concrete' | 'glass' | 'green' | 'rock' | QuestFill
-export type QuestFill = 'olive' | 'umber' | 'wood' | 'timber'
-export const QUEST_COLORS: Record<QuestFill, number> = { olive: 0x5f7d34, umber: 0x5a3a20, wood: 0xb07a43, timber: 0x7d5129 }
+/** `folder` is the blue of intel files (the hostage's blue); `timber` also paints C4 charges. */
+export type QuestFill = 'olive' | 'umber' | 'wood' | 'timber' | 'folder'
+export const QUEST_COLORS: Record<QuestFill, number> = { olive: 0x5f7d34, umber: 0x5a3a20, wood: 0xb07a43, timber: 0x7d5129, folder: 0x2878d0 }
 const questFills = Object.keys(QUEST_COLORS) as QuestFill[]
 export type Stroke = 'edge' | 'detail' | 'mesh' | 'landscape'
 

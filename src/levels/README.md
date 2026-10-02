@@ -27,7 +27,7 @@ The compound (`src/world/compound.ts` and `src/game/world.ts`) and the training 
 | Builder | From | Gives you |
 | --- | --- | --- |
 | `building({ name, x, z, width, depth, height, type, angle })` | `world/architecture.ts` | A walkable building: walls, windows, roof, entry door, steps and furnished interior. Also its dark room, window daylight, door daylight and caged lamps. `type`: barracks, warehouse, utility, service. The name picks the interior: "administration" (desks with radios, briefing table), "gatehouse" (radio post), "hut B" (medical); a warehouse gets two quest crates. |
-| `storeyed({ name, x, z, width, depth, floors, roof, door, stairs, balcony, roofLadder, base, furnish })` | `world/storeys.ts` | A building of several storeys: switchback stairs guards and players both climb, a gable or walkable flat roof (with `roofLadder`), a front balcony, furniture per floor through `furnish`, and every floor its own dark room with windows and lamps. `base` raises it onto a hill. |
+| `storeyed({ name, x, z, width, depth, floors, roof, door, stairs, balcony, roofLadder, base, furnish, sign, chimneys })` | `world/storeys.ts` | A building of several storeys: switchback stairs guards and players both climb, a gable or walkable flat roof (with `roofLadder`), a front balcony, furniture per floor through `furnish`, and every floor its own dark room with windows and lamps. `base` raises it onto a hill. |
 | `terrain(name, bounds, step, height)`, `waterSurface`, `bankBarrier`, `groundLine` | `world/terrain.ts` | Ground shaped by a height function (river channels, hills), water drawn in pen, invisible banks so water is crossed only where `open(x, z)` (a bridge), and inked lines along the ground (road edges, banks). Anything standing on shaped ground sits at `height(x, z)`. |
 | `container`, `truck`, `crates`, `platform` | `world/architecture.ts` | Cover and props. |
 | `fence(name, points, height)` | `world/industrial.ts` | Wire fence along a polyline. Blocks walking, not sight or shots. |
@@ -56,7 +56,8 @@ Marker conventions the game picks up anywhere in the scene:
 | `enemies` | Built with `enemy(type, id, position, options)` from `game/enemy-types.ts`. Types: `rifleman`, `gunner`, `breacher`, `sidearm`, `marksman`, `bulky` (Bulky Boy, the armoured boss), `dummy`. Give `patrol` (a loop of points, starting where he stands) to make him walk, `facing` to aim a post, and `reserve` (plus `alarmExit`) for alarm reinforcements. |
 | `stations` | Things the player uses with F. For a goal, use kind `'objective'`; its `label` is the prompt. |
 | `goals` | The mission: see below. |
-| `captives` | Prisoners: `{ id, position, facing, station }`. The blue stickman sits tied to a chair (place one at `position`) until the station is used, then stands. Pair it with an `interact` goal on the same station. |
+| `captives` | Prisoners: `{ id, position, facing, station }`. The blue stickman sits tied to a chair (`captiveChair` in `world/captive-chair.ts`, at the same position and facing) until the station is used; then he stands and follows the nearest player, cowering in gunfire. Pair it with an `interact` goal on the same station. |
+| `charges` | Timed charges, CS-style C4: `{ id, name, pickup, plant, fuse, plantTime, blast, destroys, wreck }`. Taken at the `pickup` station, planted at `plant` by holding still, then a beeping countdown and a blast that kills within `blast.lethal`, hides `destroys` and shows `wreck`. `c4Package` in `game/charges.ts` is the model. |
 | `briefing` | The pause page: title, premise, `won`/`outro` (the end page), route tips. Leave `map` out and one is drawn from the level. |
 
 ## Goals (`game/goals.ts`)
@@ -67,6 +68,8 @@ Marker conventions the game picks up anywhere in the scene:
 | `eliminate` | The listed enemies are dead (`'all'` means every non-dummy enemy). |
 | `destroy` | The level's quest crates or radios are out of action (all of them, or `count`). |
 | `interact` | The `'objective'` station is used. |
+| `collect` | Every one of these `'objective'` stations is used (picking up files); the count shows. Mark a station's object `userData.collectible` and it vanishes once taken (`intelFolder` in `levels/town/buildings.ts` makes a blue file). |
+| `detonate` | A timed charge (`charges`) has gone off. `steps` give the line while it is to be found, carried and ticking. |
 | `extract` | A player is inside the area once every other main goal is done. |
 
 - `main: false` makes a side goal: it shows and counts, but never blocks the win.

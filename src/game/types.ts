@@ -36,7 +36,16 @@ export type MissionWorld = { level: string; root: THREE.Group; stations: Station
   briefing?: Briefing
   /** Prisoners held on the level, freed by using a station (game/captives.ts). */
   captives?: CaptiveSpec[]
+  /** Timed charges: picked up at one station, planted at another, then they go off (game/charges.ts). */
+  charges?: ChargeSpec[]
   rescue?: { gate: THREE.Group; jeep: THREE.Group; cameras: { id: string; pivot: THREE.Group; lamp: THREE.Mesh }[]; cellDoors: THREE.Group[] } }
+/**
+ * A timed charge, like CS's bomb: taken at `pickup` (a collectible 'objective' station), planted at `plant` (holding
+ * still for `plantTime` seconds), then it ticks for `fuse` seconds and goes off at `blast.center`: lethal within
+ * `blast.lethal` m, hurting out to `blast.radius`. It hides the objects named in `destroys` and shows `wreck`.
+ */
+export type ChargeSpec = { id: string; name: string; pickup: string; plant: string; fuse: number; plantTime: number
+  blast: { center: Vec3; radius: number; lethal: number }; destroys: string[]; wreck?: string }
 /** A prisoner: where he sits (on a chair the level places there), which way he faces, and the station that frees him. */
 export type CaptiveSpec = { id: string; name?: string; position: Vec3; facing: number; station: string }
 /**

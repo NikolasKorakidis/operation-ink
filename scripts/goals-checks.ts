@@ -48,3 +48,35 @@ const all: GoalSpec[] = [{ id: 'clear', kind: 'eliminate', enemies: 'all', label
 const crowd = [{ spec: { id: 'x' }, state: 'dead' as EnemyState }, { spec: { id: 'dummy', dummy: true }, state: 'patrol' as EnemyState }]
 assert.deepEqual(updateGoals(initialMission([]), all, { players: [], enemies: crowd, totals: { crates: 0, radios: 0 }, radiosOut: 0 }), ['clear'])
 console.log('PASS Goals: order, locking, shared stations, side goals, counts and winning')
+
+// Collect: each station used counts, all of them finish it. Detonate: done when its charge has gone off; its line
+// follows the charge from finding it to getting clear.
+{
+  const { chargeStage } = await import('../src/game/goals')
+  const { beepInterval } = await import('../src/game/charges')
+  const files: GoalSpec[] = [{ id: 'files', kind: 'collect', stations: ['a', 'b', 'c'], label: 'Collect the files' },
+    { id: 'depot', kind: 'detonate', charge: 'c4', label: 'Destroy the depot', steps: { find: 'Find it', carry: 'Plant it', armed: 'Run' } }]
+  const state = initialMission([])
+  const sense: GoalSense = { players: [], enemies: [], totals: { crates: 0, radios: 0 }, radiosOut: 0, chargePickups: { c4: 'pickup' } }
+  const charge = { id: 'c4', pickup: 'pickup' }
+  state.usedStations.push('a', 'c')
+  assert.deepEqual(goalObjectives(state, files, sense)[0].progress, [2, 3], 'Two files of three')
+  assert.deepEqual(updateGoals(state, files, sense), [])
+  state.usedStations.push('b')
+  assert.deepEqual(updateGoals(state, files, sense), ['files'], 'The third file finishes it')
+  assert.equal(goalObjectives(state, files, sense)[1].detail, 'Find it')
+  assert.equal(chargeStage(state, charge), 'find')
+  state.usedStations.push('pickup')
+  assert.equal(chargeStage(state, charge), 'carried')
+  assert.equal(goalObjectives(state, files, sense)[1].detail, 'Plant it', 'Carrying the charge, the line says to plant it')
+  state.chargesPlanted.c4 = 12
+  assert.equal(chargeStage(state, charge), 'armed')
+  assert.equal(goalObjectives(state, files, sense)[1].detail, 'Run')
+  assert.deepEqual(updateGoals(state, files, sense), [], 'A ticking charge has not done it yet')
+  state.chargesExploded.push('c4')
+  assert.deepEqual(updateGoals(state, files, sense), ['depot'], 'The blast does')
+  assert(SHARED_MISSION_KEYS.includes('chargesPlanted') && SHARED_MISSION_KEYS.includes('chargesExploded'), 'Co-op shares the charges')
+  // The beeps quicken as the fuse runs down: a second apart at first, a tenth at the end.
+  assert(Math.abs(beepInterval(10, 10) - 1) < 1e-9 && beepInterval(0, 10) < 0.1 && beepInterval(3, 10) < beepInterval(7, 10))
+}
+console.log('PASS Collect goals count their stations; a charge goal follows its charge to the blast; the beeps quicken')

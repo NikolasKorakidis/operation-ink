@@ -199,6 +199,8 @@ export class MissionMenu {
           <div><dt>Prone (toggle)</dt><dd><kbd>Z</kbd></dd></div>
           <div><dt>Jump</dt><dd><kbd>Space</kbd></dd></div>
           <div><dt>Knife · sidearm · rifle</dt><dd><kbd>1 · 2 · 3 / Wheel</kbd></dd></div>
+          <div><dt>Grenade · again for the next kind</dt><dd><kbd>4</kbd></dd></div>
+          <div><dt>Throw · lob (grenade out)</dt><dd><kbd>Left · right click</kbd></dd></div>
           <div><dt>Drop weapon</dt><dd><kbd>G</kbd></dd></div>
           <div><dt>Scope zoom</dt><dd><kbd>Wheel</kbd></dd></div>
           <div><dt>Lean left · right (hold)</dt><dd><kbd>Q · E</kbd></dd></div>

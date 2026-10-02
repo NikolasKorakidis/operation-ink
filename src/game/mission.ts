@@ -20,6 +20,8 @@ export type MissionState = {
   disabledRadios: string[]; destroyedRadios: string[]
   /** The level's goals that are done (see goals.ts), and the 'objective' stations used. */
   goalsDone: string[]; usedStations: string[]
+  /** Timed charges (MissionWorld.charges): when each was planted (mission time), and which have gone off. */
+  chargesPlanted: Record<string, number>; chargesExploded: string[]
 }
 /** A fresh run. Only the compound has hostages; other levels pass none. */
 export const initialMission = (hostageSpawns: readonly Vec3[] = RESCUE_LAYOUT.hostageSpawns): MissionState => ({
@@ -28,7 +30,7 @@ export const initialMission = (hostageSpawns: readonly Vec3[] = RESCUE_LAYOUT.ho
   hostages: hostageSpawns.map((position, index) => ({ id: `hostage-${index + 1}`, status: 'captive', position: [...position], routeIndex: index < 2 ? 1 : 0 })),
   jeep: 'waiting', escapeProgress: 0, detentionFound: false, cellsReached: false,
   health: 100, lastDamageAt: 0, lastBulletAt: null, elapsed: 0, supplies: [], distractionUntil: 0, shots: 0, kills: 0, detections: 0,
-  brokenCrates: [], disabledRadios: [], destroyedRadios: [], goalsDone: [], usedStations: [],
+  brokenCrates: [], disabledRadios: [], destroyedRadios: [], goalsDone: [], usedStations: [], chargesPlanted: {}, chargesExploded: [],
 })
 /** A radio is out of action once it is switched off or destroyed. */
 export const radioOut = (state: MissionState, id: string) => state.disabledRadios.includes(id) || state.destroyedRadios.includes(id)
@@ -138,7 +140,7 @@ export function shootMission(state: MissionState, amount: number) {
 /** Mission fields the co-op host owns. Health, death, supplies and shot count stay with each player. */
 export const SHARED_MISSION_KEYS = ['camerasOff', 'alarm', 'alarmElapsed', 'silencedElapsed', 'alarmPosition',
   'reservesDispatched', 'gateOpen', 'hostages', 'jeep', 'escapeProgress', 'detentionFound', 'cellsReached', 'elapsed', 'distractionUntil',
-  'kills', 'detections', 'brokenCrates', 'disabledRadios', 'destroyedRadios', 'goalsDone', 'usedStations'] as const satisfies readonly (keyof MissionState)[]
+  'kills', 'detections', 'brokenCrates', 'disabledRadios', 'destroyedRadios', 'goalsDone', 'usedStations', 'chargesPlanted', 'chargesExploded'] as const satisfies readonly (keyof MissionState)[]
 export type SharedMission = Pick<MissionState, typeof SHARED_MISSION_KEYS[number]>
 
 export function sharedMission(state: MissionState): SharedMission {

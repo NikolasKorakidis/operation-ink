@@ -4,7 +4,7 @@ import { Capsule } from 'three/addons/math/Capsule.js'
 import { EnemyActor, type ActorPostureSnapshot } from './actors'
 import type { Posture } from '../lab/postures'
 import { EnemyNavigation } from './navigation'
-import { BOSS_RULES, CRITICAL_HITS, ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as COMBAT, HEAD_BURST_CHANCE, WEAPON_RULES, criticalChance, hitDamage, shotgunDamageMultiplier } from './balance'
+import { BOSS_RULES, CRITICAL_HITS, ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as COMBAT, GRENADE_RULES, HEAD_BURST_CHANCE, WEAPON_RULES, criticalChance, flashStrength, fragDamage, hitDamage, shotgunDamageMultiplier } from './balance'
 import { rayCapsuleDistance, reactionClipName, type HitReaction, type HitZone } from './hit-reactions'
 import { playerHitTarget, type PlayerBulletHit } from './player-hit-reactions'
 import type { AIContext, EnemyPuppet, EnemyReaction, EnemySnapshot, EnemySpec, EnemyState, PlayerSense, Shot, SoundEvent, Vec3, WeaponName } from './types'
@@ -121,6 +121,8 @@ export type Enemy = {
   scanCooldown: number
   scanYaw: number
   defensiveTimer: number
+  /** Seconds still blinded by a flashbang: he sees nothing and stands rubbing his eyes. */
+  blind: number
   /** Co-op: the player this guard is engaging; undefined in solo play. */
   targetId?: number
 }
@@ -130,7 +132,7 @@ const vector = (value: unknown) => Array.isArray(value) && value.length === 3 &&
 const number = (value: unknown, fallback = 0) => typeof value === 'number' && Number.isFinite(value) ? value : fallback
 const NUMBERS = ['repath', 'stuck', 'senseTimer', 'lostFor', 'shotTimer', 'shots', 'magazine', 'reloadTimer', 'calloutTimer', 'communicationTimer', 'wait',
   'patrolStop', 'visitedWaypoints', 'distanceWalked', 'footstepDistance', 'pathFailures', 'tacticTimer', 'burst', 'aimTime', 'blockedFor', 'contactMemory', 'suppress', 'settledFor', 'hitPause', 'moveSpeed', 'searchIndex',
-  'scanTimer', 'scanDuration', 'scanCooldown', 'scanYaw', 'defensiveTimer', 'armor', 'respawnTimer'] as const
+  'scanTimer', 'scanDuration', 'scanCooldown', 'scanYaw', 'defensiveTimer', 'armor', 'respawnTimer', 'blind'] as const
 
 export class EnemyDirector {
   readonly enemies: Enemy[] = []
@@ -145,6 +147,8 @@ export class EnemyDirector {
   private reserveDestination: THREE.Vector3 | null = null
   private elapsed = 0
   readonly bulletTrails: BulletTrails
+  /** Whether something other than walls hides `to` from `from` (smoke grenades); set by the mission. */
+  obscured: ((from: THREE.Vector3, to: THREE.Vector3) => boolean) | null = null
 
   constructor(private context: AIContext, private actorFactory: (weapon: WeaponName) => Promise<EnemyActor> = EnemyActor.create) {
     this.navigation = new EnemyNavigation(context.world, context.doors, context.emit)
@@ -174,7 +178,7 @@ export class EnemyDirector {
         reserveRoute: false, alarmResponse: false, alarmExit: null, post: null, visitedWaypoints: 0, distanceWalked: 0, footstepDistance: 0, pathFailures: 0,
         tactic: 'hold', tacticTimer: 0, tacticPoint: null, burst: 0, aimTime: 0, blockedFor: 0, contactMemory: 0, suppress: 0, settledFor: 0, hitPause: 0, moveSpeed: 0,
         searchPoints: [], searchIndex: 0, woundArm: false, woundLeg: false, deathClip: 'dieBody', headless: false, speaker: i % 4, noticedBodies: [],
-        scanTimer: 0, scanDuration: 0, scanCooldown: 0, scanYaw: 0, defensiveTimer: 0,
+        scanTimer: 0, scanDuration: 0, scanCooldown: 0, scanYaw: 0, defensiveTimer: 0, blind: 0,
       }
       if (spec.boss) actor.makeBoss?.()
       // Training targets carry no weapon to drop.
@@ -273,14 +277,68 @@ export class EnemyDirector {
   }
 
   private sees(enemy: Enemy, player: PlayerSense) {
-    if (!player.alive) return false
+    if (!player.alive || enemy.blind > 0) return false
     const origin = this.eye(enemy)
     const sniper = enemy.spec.role === 'sniper'
     const range = enemy.contactMemory > 0 ? (sniper ? COMBAT.sniperEngagedRange : COMBAT.engagedRange) :
       (sniper ? COMBAT.sniperPassiveRange : COMBAT.passiveRange)
     if (!insideVisionCone(origin, enemy.yaw, player.eye, range, enemy.state === 'combat' ? 70 : 55)) return false
-    return this.context.world.visible(origin, player.eye, ignore) ||
-      this.context.world.visible(origin, player.feet.clone().add(new THREE.Vector3(0, Math.min(0.95, bodyHeight(player) * 0.58), 0)), ignore)
+    const body = player.feet.clone().add(new THREE.Vector3(0, Math.min(0.95, bodyHeight(player) * 0.58), 0))
+    return [player.eye, body].some(point => this.context.world.visible(origin, point, ignore) && !this.obscured?.(origin, point))
+  }
+
+  /**
+   * A flashbang going off at `origin`: everyone with a clear line to it is blinded, for longer the more squarely they
+   * face it and the closer they are (see flashStrength). Blinded guards stop where they are, see nothing, and afterwards
+   * come to look where it went off. Returns who was blinded and for how long.
+   */
+  flash(origin: THREE.Vector3) {
+    const blinded: { id: string; seconds: number; strength: number }[] = []
+    for (const enemy of this.enemies) {
+      if (enemy.state === 'reserve' || enemy.state === 'dead' || enemy.health <= 0) continue
+      const eye = this.eye(enemy), toward = origin.clone().sub(eye)
+      if (!this.context.world.visible(eye, origin, ignore) || this.obscured?.(eye, origin)) continue
+      const distance = toward.length(), facing = new THREE.Vector3(Math.sin(enemy.yaw), 0, Math.cos(enemy.yaw))
+      const strength = flashStrength(facing.angleTo(toward.normalize()), distance)
+      if (strength <= 0.02) continue
+      const seconds = GRENADE_RULES.flash.blind * strength + GRENADE_RULES.flash.fade * strength * 0.5
+      enemy.blind = Math.max(enemy.blind, seconds)
+      blinded.push({ id: enemy.spec.id, seconds, strength })
+      if (enemy.spec.dummy) { enemy.actor.react('flinchHead', false); continue }
+      // Hands to his eyes and rooted to the spot; the boss shrugs it off quicker.
+      enemy.canSee = false; enemy.aimTime = 0; enemy.senseTimer = 0; enemy.moveSpeed = 0; enemy.settledFor = 0
+      enemy.hitPause = Math.max(enemy.hitPause, seconds * (enemy.spec.boss ? 0.5 : 0.85))
+      enemy.actor.react('flinchHead', false)
+      enemy.lastKnown = origin.clone().setY(enemy.position.y)
+      enemy.suspicion = 1
+      if (enemy.state !== 'combat') this.enter(enemy, 'investigate')
+      this.say(enemy, "I can't see!", 'hurt', true)
+    }
+    return blinded
+  }
+
+  /**
+   * A frag grenade going off at `origin`: every guard within its radius and not sheltered by a wall takes
+   * fragDamage, as a body hit (armour soaks it first). Thrown by player `by` in co-op. Returns who was hit and how hard.
+   */
+  blast(origin: THREE.Vector3, by?: number) {
+    const hit: { id: string; damage: number; lethal: boolean }[] = []
+    const from = origin.clone().add(new THREE.Vector3(0, 0.25, 0))
+    for (let index = 0; index < this.enemies.length; index++) {
+      const enemy = this.enemies[index]
+      if (enemy.state === 'reserve' || enemy.state === 'dead' || enemy.health <= 0) continue
+      const scale = enemy.actor.root.scale.y
+      const points = [0.25, 1.1, 1.6].map(height => enemy.position.clone().add(new THREE.Vector3(0, height * scale, 0)))
+      const chest = points[1], distance = Math.min(...points.map(point => point.distanceTo(origin)))
+      const damage = fragDamage(distance)
+      if (damage <= 0 || !points.some(point => this.context.world.visible(from, point, ignore))) continue
+      const direction = chest.clone().sub(origin).setY(Math.max(0.15, chest.y - origin.y)).normalize()
+      const before = enemy.health
+      this.applyHit({ origin: from, direction, range: GRENADE_RULES.frag.radius, damage, by },
+        { index, zone: 'torso', point: chest, bone: undefined, distance, direction }, true)
+      hit.push({ id: enemy.spec.id, damage: before - enemy.health, lethal: enemy.health <= 0 })
+    }
+    return hit
   }
 
   /** How long a guard aims before the first round; Bulky Boy is quicker. */
@@ -293,7 +351,7 @@ export class EnemyDirector {
     const floor = this.navigation.floor(enemy.position)
     if (floor) enemy.position.copy(floor)
     Object.assign(enemy, { health: enemy.spec.health ?? ENEMY_HEALTH, armor: enemy.spec.armor ?? 0, respawnTimer: 0, headless: false,
-      yaw: enemy.spec.facing ?? 0, state: 'guard', hitPause: 0, deathClip: 'dieBody' })
+      yaw: enemy.spec.facing ?? 0, state: 'guard', hitPause: 0, blind: 0, deathClip: 'dieBody' })
     enemy.actor.root.position.copy(enemy.position)
     enemy.actor.root.rotation.y = enemy.yaw
     enemy.actor.restore('guard')
@@ -406,6 +464,7 @@ export class EnemyDirector {
     this.bulletTrails.update(dt)
     for (const enemy of this.enemies) {
       if (enemy.state === 'reserve') continue
+      enemy.blind = Math.max(0, enemy.blind - dt)
       if (enemy.state === 'dead') {
         enemy.actor.update(dt, 'dead', false)
         if (enemy.spec.respawn && (enemy.respawnTimer += dt) >= enemy.spec.respawn) this.revive(enemy)
@@ -1174,7 +1233,8 @@ export class EnemyDirector {
     return found ? this.applyHit(shot, found) : false
   }
 
-  applyHit(shot: Shot, found: NonNullable<ReturnType<EnemyDirector['findHit']>>) {
+  /** `explosive`: a frag blast, which is never critical and throws the dead back like buckshot. */
+  applyHit(shot: Shot, found: NonNullable<ReturnType<EnemyDirector['findHit']>>, explosive = false) {
     const nearest = this.enemies[found.index]
     if (!nearest || nearest.health <= 0 || nearest.state === 'reserve' || nearest.state === 'dead') return false
     const best = found, normalized = found.direction
@@ -1184,7 +1244,7 @@ export class EnemyDirector {
     // A head shot can blow the head apart, by weapon (see HEAD_BURST_CHANCE); that always kills. Not the boss's.
     const burstChance = best.zone === 'head' && !boss ? HEAD_BURST_CHANCE[shot.weapon ?? 'ak'] ?? 0 : 0
     const headBurst = burstChance >= 1 || (burstChance > 0 && this.random(nearest) < burstChance)
-    const critChance = this.context.criticals && !headBurst ? criticalChance(shot.weapon, best.zone) : 0
+    const critChance = this.context.criticals && !headBurst && !explosive ? criticalChance(shot.weapon, best.zone) : 0
     const critical = critChance > 0 && this.random(nearest) < critChance
     // A blade in the back always kills, except the boss.
     let damage = headBurst || shot.weapon === 'knife' && fromBehind && !boss ? nearest.health
@@ -1210,9 +1270,10 @@ export class EnemyDirector {
       damage: Math.max(before - nearest.health, damage), armorDamage: soaked, critical, armorBroken }
     nearest.scanTimer = 0
     nearest.actor.root.userData.alertScan = undefined
-    const clip = reactionClipName(reaction, fromBehind), travel = lethal && shot.weapon === 'shotgun' ? this.shotgunTravel(nearest, normalized) : 1
-    // The boss shrugs off ordinary hits; only a critical one or losing his armour staggers him.
-    const staggers = !boss || lethal || critical || armorBroken
+    const clip = explosive ? lethal ? 'dieShotgun' : 'flinchBody' : reactionClipName(reaction, fromBehind)
+    const travel = lethal && (shot.weapon === 'shotgun' || explosive) ? this.shotgunTravel(nearest, normalized) : 1
+    // The boss shrugs off ordinary hits; only a critical one, a blast or losing his armour staggers him.
+    const staggers = !boss || lethal || critical || armorBroken || explosive
     if (staggers) nearest.actor.react(clip, lethal, normalized, travel)
     if (!lethal && staggers) { nearest.hitPause = nearest.actor.reactionRemaining || 0.6; nearest.settledFor = 0; nearest.moveSpeed = 0 }
     if (lethal) nearest.deathClip = nearest.actor.deathClip

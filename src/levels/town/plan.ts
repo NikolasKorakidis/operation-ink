@@ -20,9 +20,12 @@ export const TOWN = {
   riverHalfWidth: 3, bank: 1.6, riverDepth: 1.6, waterLevel: -0.65,
   bridge: { x: -2, z: -52, length: 12.5, width: 5 },
   hill: { x: 56, z: 33, plateau: 12.5, radius: 23, height: 4.5 },
-  spawn: [-68, 0.05, 30] as Vec3,
-  lookAt: [-44, 1.6, 22] as Vec3,
-  graveyard: { minX: -74.7, maxX: -44.1, minZ: 10.8, maxZ: 36, gap: { minZ: 19.5, maxZ: 24.5 } },
+  /** You come in from outside the fence behind the graveyard: through a gap cut in the fence, over the west ditch on a footbridge, and in by the graveyard's back gate. */
+  spawn: [-106, 0.05, 23.4] as Vec3,
+  lookAt: [-74, 1.6, 23.4] as Vec3,
+  fenceCut: { z: 23.4, half: 2.4 },
+  footbridge: { x: -86.7, z: 23.4, length: 14.5, width: 2.2 },
+  graveyard: { minX: -74.7, maxX: -44.1, minZ: 10.8, maxZ: 36, gap: { minZ: 19.5, maxZ: 24.5 }, backGate: { minZ: 22, maxZ: 24.8 } },
   church: { x: -46, z: -10 },
   silo: { x: -33, z: -37 },
   waterTower: { x: 36, z: -58 },
@@ -67,9 +70,12 @@ export const ROADS: { name: string; path: PlanPath; width: number }[] = [
   { name: 'Manor drive', path: [[46, 9], [44, 20], [47.5, 30]], width: 3 },
   { name: 'Orchard lane', path: [[47, -12], [55, -10], [70, -9]], width: 3 },
   { name: 'North bank road', path: [[-2, -58.5], [-20, -61], [-36, -62], [-47, -63], [-47, -82]], width: 4 },
+  { name: 'Back path', path: [[-109, 23.4], [-94.5, 23.4]], width: 2 },
+  { name: 'Graveyard back path', path: [[-79, 23.4], [-74.8, 23.4]], width: 2 },
   { name: 'Water tower track', path: [[0, -58.5], [16, -59], [30, -58]], width: 3 },
 ]
 
-/** Whether a point is on the bridge, where the river can be crossed. */
+/** Whether a point is on the stone bridge or the footbridge, where the river can be crossed. */
 export const onBridge = (x: number, z: number) =>
   Math.abs(x - TOWN.bridge.x) < TOWN.bridge.width / 2 + 0.2 && Math.abs(z - TOWN.bridge.z) < TOWN.bridge.length / 2
+  || Math.abs(z - TOWN.footbridge.z) < TOWN.footbridge.width / 2 + 0.2 && Math.abs(x - TOWN.footbridge.x) < TOWN.footbridge.length / 2

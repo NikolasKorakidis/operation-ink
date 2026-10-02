@@ -144,3 +144,47 @@ export function startingLoadout(): (WeaponItem | null)[] {
     null,
   ]
 }
+
+/**
+ * Counter-Strike grenades. You carry at most one frag, two flashbangs and one smoke (`carry`). Hold left click to
+ * pull the pin and let go for a full overhand throw; right click lobs it underhand; both together throw medium.
+ * Nothing cooks: a frag or flash goes off `fuse` seconds after it leaves the hand, a smoke once it comes to rest.
+ * Grenades bounce off walls (`bounce` keeps that much of the speed into the wall, `friction` along it) and roll to a stop.
+ * - frag: full `damage` within `full` metres, falling off to nothing at `radius`; walls shelter you. It hurts you too.
+ * - flash: anyone with a clear line to it is blinded. Facing it from within `near` metres blinds for `blind`
+ *   seconds, then the white fades over `fade`; looking away or standing far off cuts both down, to nothing past `range`.
+ * - smoke: a cloud `radius` metres across its widest, centred `rise` above where it lies, that grows for `grow`
+ *   seconds, hides everything inside and behind it for `last` seconds, and thins away over `fade`.
+ */
+export type GrenadeKind = 'frag' | 'flash' | 'smoke'
+export const GRENADE_RULES = {
+  order: ['frag', 'flash', 'smoke'] as const,
+  carry: { frag: 1, flash: 2, smoke: 1 } as Record<GrenadeKind, number>,
+  label: { frag: 'Frag grenade', flash: 'Flashbang', smoke: 'Smoke grenade' } as Record<GrenadeKind, string>,
+  throw: { full: 15.5, medium: 10.5, lob: 6.2, inherit: 0.6, gravity: 12, radius: 0.06, bounce: 0.42, friction: 0.72, roll: 5.5 },
+  /** Seconds: the pin coming out, the throwing swing (the grenade leaves at `release`), and drawing the next one. */
+  timing: { draw: 0.4, pin: 0.28, swing: 0.34, release: 0.11, next: 0.45 },
+  fuse: { frag: 1.6, flash: 1.6, smoke: 3.5 } as Record<GrenadeKind, number>,
+  frag: { radius: 9, full: 1.5, damage: 140, hearing: 75 },
+  flash: { near: 8, range: 32, blind: 4.2, fade: 2.6, hearing: 55 },
+  smoke: { settle: 0.35, radius: 3.9, rise: 1.6, grow: 1.4, last: 18, fade: 2.5, hearing: 14 },
+} as const
+
+/** Frag damage at `distance` metres from the blast, before walls. */
+export function fragDamage(distance: number) {
+  const { radius, full, damage } = GRENADE_RULES.frag
+  if (!(distance < radius)) return 0
+  return damage * Math.min(1, 1 - (distance - full) / (radius - full))
+}
+
+/**
+ * How badly a flashbang blinds someone, from 0 (not at all) to 1 (full): `angle` is between where they look and the
+ * flash (radians), `distance` how far it is. Seconds blind and seconds of fade are this times `blind` and `fade`.
+ */
+export function flashStrength(angle: number, distance: number) {
+  const { near, range } = GRENADE_RULES.flash
+  if (!(distance < range)) return 0
+  const facing = angle <= 0.95 ? 1 : angle >= 2.6 ? 0.1 : 1 - 0.9 * (angle - 0.95) / (2.6 - 0.95)
+  const far = distance <= near ? 1 : 1 - 0.75 * (distance - near) / (range - near)
+  return facing * far
+}

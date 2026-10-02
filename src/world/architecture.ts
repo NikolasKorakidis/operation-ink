@@ -138,8 +138,10 @@ export function roof(g: Draft, w: number, d: number, eave: number, rise: number,
   for (const side of [-1, 1]) {
     const points: Point[] = [[x - W, edgeY, z + side * D], [x + W, edgeY, z + side * D],
       [x + W, top, z], [x - W, top, z]]
-    g.face(points, 'roof')
-    g.face(points.map(([px, py, pz]): Point => [px, py - 0.14, pz]), 'roof', false)
+    // Collision is one-sided: the top face must face up (so it can be stood on), the underside down.
+    const upward = side > 0 ? points : [...points].reverse()
+    g.face(upward, 'roof')
+    g.face([...upward].reverse().map(([px, py, pz]): Point => [px, py - 0.14, pz]), 'roof', false)
     g.face([points[0], points[1], [x + W, edgeY - 0.14, z + side * D],
       [x - W, edgeY - 0.14, z + side * D]], 'paper', 'detail')
     for (const end of [-1, 1]) g.face([[x + end * W, edgeY, z + side * D], [x + end * W, top, z],

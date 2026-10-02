@@ -1,4 +1,4 @@
-import { Draft, type Point } from '../render/ink'
+import { Draft, wallText, type Point } from '../render/ink'
 import { WALL_THICKNESS, groundOutline, interiorRoomOutline, piercedWall, roof, steps, windowFrame, type WallOpening } from './architecture'
 import { createDoor } from './doors'
 import { Furnishing } from './interiors'
@@ -37,6 +37,10 @@ export interface StoreyedSpec {
   /** How many caged lamps hang on each floor (default: one per 7 m of width). */
   lamps?: number
   windowSpacing?: number
+  /** Lettering over the front door, like a shop sign. */
+  sign?: string
+  /** Chimneys on a gable roof (default 2). */
+  chimneys?: number
 }
 
 /**
@@ -136,8 +140,13 @@ export function storeyed(spec: StoreyedSpec) {
     for (const o of front) windowFrame(walls, o.centre, y + o.bottom, d / 2 + 0.025, o.width, o.height)
     for (const o of back) windowFrame(walls, o.centre, y + o.bottom, -d / 2 - 0.025, o.width, o.height)
     for (const side of [-1, 1]) for (const o of ends) windowFrame(walls, side * (w / 2 + 0.025), y + o.bottom, o.centre, o.width, o.height, true)
-    // A ledge between storeys.
-    if (level > 0) walls.box(w + 0.12, 0.12, d + 0.12, 0, y - 0.04, 0, 'paper', 'detail')
+    // A ledge between storeys: a band round the outside of the walls only (never across the stairwell).
+    if (level > 0) {
+      for (const side of [-1, 1]) {
+        walls.box(w + 0.24, 0.14, 0.12, 0, y - 0.04, side * (d / 2 + 0.06), 'paper', 'detail')
+        walls.box(0.12, 0.14, d, side * (w / 2 + 0.06), y - 0.04, 0, 'paper', 'detail')
+      }
+    }
     windowsOf.push({ level, wall: 'front', panes: front }, { level, wall: 'back', panes: back }, { level, wall: 'west', panes: ends }, { level, wall: 'east', panes: ends })
     interiorRoomOutline(walls, w - 2 * WALL_THICKNESS, d - 2 * WALL_THICKNESS, y, levels[level + 1] - 0.2)
   }
@@ -154,6 +163,22 @@ export function storeyed(spec: StoreyedSpec) {
   }
   g.add(cover.finish())
 
+  // Detail: pilasters on the corners, chimneys on a gable roof, and a sign over the door.
+  const trim = new Draft(`${spec.name} · trim`)
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) trim.box(0.32, top - PLINTH + (roofKind === 'flat' ? 1 : 0), 0.32, sx * (w / 2 + 0.02), (top + PLINTH + (roofKind === 'flat' ? 1 : 0)) / 2, sz * (d / 2 + 0.02), 'paper', 'detail')
+  if (roofKind === 'gable') {
+    const count = spec.chimneys ?? 2
+    for (let i = 0; i < count; i++) {
+      const cx = count === 1 ? w * 0.25 : -w / 2 + w * (i + 0.5) / count * 0.9 + w * 0.05, cz = -d * 0.12
+      const roofAt = top + rise * (1 - Math.abs(cz) / (d / 2 + 0.4)) + 0.14
+      trim.box(0.7, roofAt - top + 1.2, 0.7, cx, (top + roofAt + 1.2) / 2, cz, 'paper', 'detail')
+      trim.box(0.85, 0.14, 0.85, cx, roofAt + 1.27, cz, 'paper', 'detail')
+      trim.hatch([cx - 0.33, roofAt + 0.2, cz + 0.36], [0.66, 0, 0], [0, 0.8, 0], { spacing: 0.12, inset: 0.04 })
+    }
+  }
+  if (spec.sign) trim.add(wallText(spec.sign, [spec.door?.x ?? 0, PLINTH + 3.05, d / 2 + 0.04], 0.5))
+  g.add(trim.finish())
+
   // The front door and its steps.
   const doors: ReturnType<typeof createDoor>[] = []
   if (spec.door) {
@@ -161,6 +186,14 @@ export function storeyed(spec: StoreyedSpec) {
     doors.push(door)
     g.add(door)
     steps(g, doorX, d / 2 + 0.29, doorWidth + 0.6, PLINTH, 2)
+    // A little canopy over the door on two brackets.
+    const canopy = new Draft(`${spec.name} · door canopy`)
+    canopy.face([[doorX - doorWidth / 2 - 0.5, PLINTH + 2.75, d / 2], [doorX + doorWidth / 2 + 0.5, PLINTH + 2.75, d / 2],
+      [doorX + doorWidth / 2 + 0.5, PLINTH + 2.55, d / 2 + 1], [doorX - doorWidth / 2 - 0.5, PLINTH + 2.55, d / 2 + 1]], 'roof')
+    canopy.face([[doorX - doorWidth / 2 - 0.5, PLINTH + 2.55, d / 2 + 1], [doorX + doorWidth / 2 + 0.5, PLINTH + 2.55, d / 2 + 1],
+      [doorX + doorWidth / 2 + 0.5, PLINTH + 2.75, d / 2], [doorX - doorWidth / 2 - 0.5, PLINTH + 2.75, d / 2]], 'roof', false)
+    for (const sx of [-1, 1]) canopy.beam([doorX + sx * (doorWidth / 2 + 0.35), PLINTH + 2.1, d / 2 + 0.02], [doorX + sx * (doorWidth / 2 + 0.35), PLINTH + 2.6, d / 2 + 0.9], 0.06, 'paper', 'detail')
+    g.add(canopy.finish())
   }
 
   // The balcony: a slab out from the front wall, railed on three sides.
